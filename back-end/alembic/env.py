@@ -33,8 +33,8 @@ SQLModel.metadata = metadata
 def import_models() -> None:
     """Import SQLModel modules so table metadata is registered for autogenerate."""
     for module_name in (
-        "app.models.auth",
-        "app.models.user",
+        "app.auth.models",
+        "app.users.models",
     ):
         try:
             importlib.import_module(module_name)

@@ -9,10 +9,10 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session, select
 
-from app.auth.security import create_access_token, hash_password, verify_password
 from app.core.config import Settings
-from app.models.auth import PendingRegistration, RefreshToken
-from app.models.user import User
+from app.core.security import create_access_token, hash_password, verify_password
+from app.auth.models import PendingRegistration, RefreshToken
+from app.users.models import User
 
 
 def normalize_email(email: str) -> str:

@@ -2,38 +2,26 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr, Field
 from sqlmodel import Session
 
-from app.auth.service import create_session, logout_session, refresh_session, start_registration, verify_registration_otp
-from app.core.config import Settings, get_settings
-from app.db.session import get_session
+from app.core.config import Settings
+from app.dependencies import get_session, get_settings
+from app.auth.service import (
+    create_session,
+    logout_session,
+    refresh_session,
+    start_registration,
+    verify_registration_otp,
+)
+from app.auth.schemas import (
+    RegistrationCreate,
+    EmailVerificationCreate,
+    RefreshTokenCreate,
+    TokenPair,
+    VerificationResponse,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-
-class RegistrationCreate(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
-
-
-class EmailVerificationCreate(BaseModel):
-    email: EmailStr
-    otp: str = Field(pattern=r"^\d{6}$")
-
-
-class RefreshTokenCreate(BaseModel):
-    refresh_token: str
-
-
-class TokenPair(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str
-
-
-class VerificationResponse(BaseModel):
-    success: bool
 
 
 @router.post("/registrations", status_code=status.HTTP_202_ACCEPTED, response_class=Response)
