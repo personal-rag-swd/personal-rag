@@ -1,0 +1,21 @@
+# Cursor Rules
+
+This project uses modular instructions for AI assistants. Please read and enforce the following rules located in the `.ai-rules/` folder:
+
+1. **SDLC Planning, Brainstorming & Questioning**:
+   - You must NOT write code immediately.
+   - You must propose an Implementation Plan containing at least 2 approaches with trade-offs.
+   - You must ask at least 3 clarifying questions to the user before starting work.
+   - Run tests and analyze lint before presenting code.
+   - Details: [.ai-rules/sdlc_workflow.md](file:///.ai-rules/sdlc_workflow.md)
+
+2. **Coding Standards**:
+   - **Backend (Strict)**: Enforce dependency injection via FastAPI `Depends`, repository pattern, and keeping logic strictly in `service.py`. Report exceptions for review.
+   - **Frontend (Recommended)**: Guidelines for Next.js, React, and TypeScript.
+   - Details: [.ai-rules/coding_conventions.md](file:///.ai-rules/coding_conventions.md)
+
+3. **DevOps & Integration Rules**:
+   - Branch naming formats, Conventional Commits constraints, and PR checklists.
+   - Details: [.ai-rules/devops.md](file:///.ai-rules/devops.md)
+
+Please use these files as your system instructions when performing code modifications or answering questions.
