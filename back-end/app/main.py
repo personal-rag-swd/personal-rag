@@ -5,6 +5,7 @@ from app.auth.router import router as auth_router
 from app.users.router import router as users_router
 
 app = FastAPI(title="Personal RAG", docs_url=None, redoc_url=None)
+API_V1_PREFIX = "/api/v1"
 
 
 @app.get("/docs", include_in_schema=False)
@@ -20,6 +21,5 @@ async def ping():
     return {"ping": "pong"}
 
 
-app.include_router(auth_router)
-app.include_router(users_router)
-
+app.include_router(auth_router, prefix=API_V1_PREFIX)
+app.include_router(users_router, prefix=API_V1_PREFIX)
