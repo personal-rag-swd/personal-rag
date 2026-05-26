@@ -6,7 +6,7 @@
 - `back-end/app/auth`, `users`, and `posts`: feature modules with `router.py`, `service.py`, `schemas.py`, and `models.py`.
 - `back-end/app/core`: shared configuration, database, and security helpers.
 - `back-end/alembic/versions`: database migrations.
-- `back-end/app/tests`: backend tests.
+- `back-end/tests`: backend tests.
 - `front-end/`: Next.js app. Route files and global styles live under `front-end/src/app/`; static assets are in `front-end/public/`.
 
 ## Build, Test, and Development Commands
@@ -37,7 +37,7 @@ Frontend code uses TypeScript and React conventions. Use PascalCase for componen
 
 ## Testing Guidelines
 
-Backend tests use `pytest`; place them under `back-end/app/tests` and name files `test_*.py`. Prefer focused tests for service behavior, dependencies, and API routes.
+Backend tests use `pytest`; place them under `back-end/tests` and name files `test_*.py`. Prefer focused tests for service behavior, dependencies, and API routes.
 
 There is no frontend test runner configured yet. For frontend changes, at minimum run `npm run lint` and `npm run build`.
 
