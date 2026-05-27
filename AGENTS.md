@@ -3,11 +3,11 @@
 ## Project Structure & Module Organization
 
 - `back-end/`: FastAPI service using SQLModel and Alembic. Application code lives in `back-end/app/`.
-- `back-end/app/auth`, `users`, and `posts`: feature modules with `router.py`, `service.py`, `schemas.py`, and `models.py`.
+- `back-end/app/auth`, `users`, and `file`: feature modules with `router.py`, `service.py`, `schemas.py`, and `models.py`.
 - `back-end/app/core`: shared configuration, database, and security helpers.
 - `back-end/alembic/versions`: database migrations.
 - `back-end/tests`: backend tests.
-- `front-end/`: Next.js app. Route files and global styles live under `front-end/src/app/`; static assets are in `front-end/public/`.
+- `front-end/`: Next.js app. Route files and global styles live under `front-end/src/app/`; static assets are in `front-end/public/`; modular features are in `front-end/src/features/`.
 
 ## Build, Test, and Development Commands
 

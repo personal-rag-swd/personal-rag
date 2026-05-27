@@ -1,17 +1,18 @@
 # Personal RAG
 
-Personal RAG is a two-part application with a FastAPI backend and a Next.js frontend. The backend currently provides authentication and user routes, database migrations, JWT settings, and Scalar API documentation. The frontend is a Next.js app scaffolded under `front-end/`.
+Personal RAG is a two-part application with a FastAPI backend and a Next.js frontend. The backend provides authentication, user management, and file management services (presigned URLs and upload callbacks). The frontend is a Next.js app scaffolded under `front-end/` featuring user authentication, file uploads, and a modern dashboard.
 
 ## Repository Structure
 
 ```text
 .
 ├── back-end/          # FastAPI, SQLModel, Alembic, pytest
-│   ├── app/           # API application code
+│   ├── app/           # API application code (auth, users, file)
 │   ├── alembic/       # Database migration environment and versions
 │   └── pyproject.toml # Python dependencies and pytest config
 ├── front-end/         # Next.js, React, TypeScript, Tailwind CSS
 │   ├── src/app/       # App Router files and global styles
+│   ├── src/features/  # Feature modules (auth, files actions and state)
 │   └── package.json   # Frontend scripts and dependencies
 └── AGENTS.md          # Contributor guide
 ```
