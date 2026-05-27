@@ -13,6 +13,12 @@ class Settings(BaseSettings):
     otp_max_attempts: int = 5
     resend_api_key: str = ""
     resend_from_email: str = "noreply@example.com"
+    cors_origins: list[str] = ["http://localhost:3000"]
+    s3_bucket: str = "personal-rag-bucket"
+    s3_region: str = "us-east-1"
+    s3_endpoint_url: str | None = None
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",
