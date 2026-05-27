@@ -1,3 +1,10 @@
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s:     %(name)s - %(message)s",
+)
+
 from fastapi import FastAPI
 from scalar_fastapi import get_scalar_api_reference
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,6 +16,7 @@ from app.file.router import router as file_router
 
 app = FastAPI(title="Personal RAG", docs_url=None, redoc_url=None)
 API_V1_PREFIX = "/api/v1"
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,7 +39,7 @@ async def scalar_html():
 async def ping():
     return {"ping": "pong"}
 
-
 app.include_router(auth_router, prefix=API_V1_PREFIX)
 app.include_router(users_router, prefix=API_V1_PREFIX)
 app.include_router(file_router, prefix=API_V1_PREFIX)
+
