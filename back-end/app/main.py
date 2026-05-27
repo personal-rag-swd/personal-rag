@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.auth.router import router as auth_router
 from app.users.router import router as users_router
 from app.file.router import router as file_router
+from app.notebooks.router import router as notebooks_router
 
 app = FastAPI(title="Personal RAG", docs_url=None, redoc_url=None)
 API_V1_PREFIX = "/api/v1"
@@ -42,4 +43,4 @@ async def ping():
 app.include_router(auth_router, prefix=API_V1_PREFIX)
 app.include_router(users_router, prefix=API_V1_PREFIX)
 app.include_router(file_router, prefix=API_V1_PREFIX)
-
+app.include_router(notebooks_router, prefix=API_V1_PREFIX)

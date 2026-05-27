@@ -1,9 +1,7 @@
-"use client";
-
 import { useForm } from "@tanstack/react-form";
 import { GalleryVerticalEnd, Eye, EyeOff } from "lucide-react";
-import Link from "next/link";
-import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import * as React from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -25,18 +23,13 @@ import {
   InputOTPGroup,
   InputOTPSlot,
 } from "@/components/ui/input-otp";
-import {
-  startRegistrationAction,
-  verifyRegistrationAction,
-} from "@/features/auth/services/actions";
+import { useAuth } from "@/features/auth/store/auth-store";
 import {
   registrationSchema,
   verificationSchema,
   type AuthActionState,
-  type RegistrationValues,
-  type VerificationValues,
 } from "@/features/auth/types";
-import { cn } from "@/utils";
+import { cn } from "@/lib/utils";
 
 const initialAuthActionState: AuthActionState = {
   step: "details",
@@ -47,8 +40,8 @@ export function RegisterForm({
   ...props
 }: React.ComponentProps<"div">) {
   const [registrationState, setRegistrationState] =
-    useState<AuthActionState>(initialAuthActionState);
-  const [verificationState, setVerificationState] = useState<AuthActionState>({
+    React.useState<AuthActionState>(initialAuthActionState);
+  const [verificationState, setVerificationState] = React.useState<AuthActionState>({
     step: "otp",
     email: registrationState.email,
   });
@@ -59,7 +52,7 @@ export function RegisterForm({
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <div className="flex flex-col items-center gap-2 text-center">
-        <Link href="/" className="flex flex-col items-center gap-2 font-medium">
+        <Link to="/" className="flex flex-col items-center gap-2 font-medium">
           <div className="flex size-8 items-center justify-center rounded-md">
             <GalleryVerticalEnd className="size-6" />
           </div>
@@ -71,11 +64,18 @@ export function RegisterForm({
         <FieldDescription>
           {isOtpStep ? (
             <>
-              Enter the 6-digit code sent to <span className="font-medium text-foreground">{otpEmail}</span>.
+              Enter the 6-digit code sent to{" "}
+              <span className="font-medium text-foreground">{otpEmail}</span>.
             </>
           ) : (
             <>
-              Already have an account? <Link href="/login" className="underline underline-offset-4 hover:text-primary">Sign in</Link>
+              Already have an account?{" "}
+              <Link
+                to="/login"
+                className="underline underline-offset-4 hover:text-primary"
+              >
+                Sign in
+              </Link>
             </>
           )}
         </FieldDescription>
@@ -98,8 +98,15 @@ export function RegisterForm({
 
       {!isOtpStep && (
         <FieldDescription className="px-6 text-center">
-          By clicking continue, you agree to our <Link href="#" className="underline underline-offset-4 hover:text-primary">Terms of Service</Link>{" "}
-          and <Link href="#" className="underline underline-offset-4 hover:text-primary">Privacy Policy</Link>.
+          By clicking continue, you agree to our{" "}
+          <Link to="#" className="underline underline-offset-4 hover:text-primary">
+            Terms of Service
+          </Link>{" "}
+          and{" "}
+          <Link to="#" className="underline underline-offset-4 hover:text-primary">
+            Privacy Policy
+          </Link>
+          .
         </FieldDescription>
       )}
     </div>
@@ -115,30 +122,35 @@ function RegistrationDetailsForm({
   setState: (state: AuthActionState) => void;
   setVerificationState: (state: AuthActionState) => void;
 }) {
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const { startRegistration } = useAuth();
+  const [showPassword, setShowPassword] = React.useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = React.useState(false);
+  
   const form = useForm({
     defaultValues: {
       email: state.email ?? "",
       password: "",
       confirmPassword: "",
-    } satisfies RegistrationValues,
+    },
     validators: {
       onSubmit: registrationSchema,
     },
     onSubmit: async ({ value }) => {
       setState(initialAuthActionState);
-
-      const formData = new FormData();
-      formData.set("email", value.email);
-      formData.set("password", value.password);
-      formData.set("confirmPassword", value.confirmPassword);
-
-      const result = await startRegistrationAction(initialAuthActionState, formData);
-      setState(result);
-
-      if (result.step === "otp") {
-        setVerificationState({ step: "otp", email: result.email });
+      try {
+        const result = await startRegistration(value.email, value.password);
+        
+        setState({ step: result.step, email: value.email });
+        if (result.step === "otp") {
+          setVerificationState({ step: "otp", email: value.email });
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Failed to start registration.";
+        setState({
+          step: "details",
+          email: value.email,
+          formError: message,
+        });
       }
     },
   });
@@ -263,7 +275,9 @@ function RegistrationDetailsForm({
                   <InputGroupAddon align="inline-end">
                     <InputGroupButton
                       onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
+                      aria-label={
+                        showConfirmPassword ? "Hide confirm password" : "Show confirm password"
+                      }
                     >
                       {showConfirmPassword ? (
                         <EyeOff className="size-4" />
@@ -304,26 +318,30 @@ function VerificationForm({
   state: AuthActionState;
   setState: (state: AuthActionState) => void;
 }) {
+  const { verifyRegistration } = useAuth();
+  const navigate = useNavigate();
+  
   const form = useForm({
     defaultValues: {
       email,
       otp: "",
-    } satisfies VerificationValues,
+    },
     validators: {
       onSubmit: verificationSchema,
     },
     onSubmit: async ({ value }) => {
       setState({ step: "otp", email });
-
-      const formData = new FormData();
-      formData.set("email", email);
-      formData.set("otp", value.otp);
-
-      const result = await verifyRegistrationAction(
-        { step: "otp", email },
-        formData
-      );
-      setState(result);
+      try {
+        await verifyRegistration(email, value.otp);
+        navigate("/login");
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Failed to verify registration code.";
+        setState({
+          step: "otp",
+          email,
+          formError: message,
+        });
+      }
     },
   });
 
@@ -358,7 +376,7 @@ function VerificationForm({
                     pattern="^[0-9]{6}$"
                     value={field.state.value}
                     onBlur={field.handleBlur}
-                    onChange={(value) => field.handleChange(value)}
+                    onChange={(val) => field.handleChange(val)}
                     aria-invalid={isInvalid}
                     containerClassName="justify-center"
                     required

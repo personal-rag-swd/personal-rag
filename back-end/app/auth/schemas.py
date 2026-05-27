@@ -11,14 +11,10 @@ class EmailVerificationCreate(BaseModel):
     otp: str = Field(pattern=r"^\d{6}$")
 
 
-class RefreshTokenCreate(BaseModel):
-    refresh_token: str
-
-
-class TokenPair(BaseModel):
+class TokenResponse(BaseModel):
     access_token: str
-    refresh_token: str
     token_type: str
+
 
 
 class VerificationResponse(BaseModel):

@@ -1,9 +1,7 @@
-"use client";
-
 import { useForm } from "@tanstack/react-form";
 import { GalleryVerticalEnd, Eye, EyeOff } from "lucide-react";
-import Link from "next/link";
-import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import * as React from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -20,13 +18,12 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group";
-import { loginAction } from "@/features/auth/services/actions";
+import { useAuth } from "@/features/auth/store/auth-store";
 import {
   loginSchema,
   type AuthActionState,
-  type LoginValues,
 } from "@/features/auth/types";
-import { cn } from "@/utils";
+import { cn } from "@/lib/utils";
 
 const initialAuthActionState: AuthActionState = {
   step: "details",
@@ -36,25 +33,31 @@ export function LoginForm({
   className,
   ...props
 }: React.ComponentProps<"div">) {
-  const [state, setState] = useState<AuthActionState>(initialAuthActionState);
-  const [showPassword, setShowPassword] = useState(false);
+  const { login } = useAuth();
+  const navigate = useNavigate();
+  const [state, setState] = React.useState<AuthActionState>(initialAuthActionState);
+  const [showPassword, setShowPassword] = React.useState(false);
+
   const form = useForm({
     defaultValues: {
       email: state.email ?? "",
       password: "",
-    } satisfies LoginValues,
+    },
     validators: {
       onSubmit: loginSchema,
     },
     onSubmit: async ({ value }) => {
       setState(initialAuthActionState);
-
-      const formData = new FormData();
-      formData.set("email", value.email);
-      formData.set("password", value.password);
-
-      const result = await loginAction(initialAuthActionState, formData);
-      setState(result);
+      try {
+        await login(value.email, value.password);
+        navigate("/dashboard");
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Incorrect email or password.";
+        setState({
+          email: value.email,
+          formError: message,
+        });
+      }
     },
   });
 
@@ -74,7 +77,7 @@ export function LoginForm({
         <FieldGroup>
           <div className="flex flex-col items-center gap-2 text-center">
             <Link
-              href="/"
+              to="/"
               className="flex flex-col items-center gap-2 font-medium"
             >
               <div className="flex size-8 items-center justify-center rounded-md">
@@ -84,7 +87,13 @@ export function LoginForm({
             </Link>
             <h1 className="text-xl font-bold">Welcome to Personal RAG</h1>
             <FieldDescription>
-              Don&apos;t have an account? <Link href="/register" className="underline underline-offset-4 hover:text-primary">Sign up</Link>
+              Don&apos;t have an account?{" "}
+              <Link
+                to="/register"
+                className="underline underline-offset-4 hover:text-primary"
+              >
+                Sign up
+              </Link>
             </FieldDescription>
           </div>
 
@@ -173,10 +182,16 @@ export function LoginForm({
         </FieldGroup>
       </form>
       <FieldDescription className="px-6 text-center">
-        By clicking continue, you agree to our <Link href="#" className="underline underline-offset-4 hover:text-primary">Terms of Service</Link>{" "}
-        and <Link href="#" className="underline underline-offset-4 hover:text-primary">Privacy Policy</Link>.
+        By clicking continue, you agree to our{" "}
+        <Link to="#" className="underline underline-offset-4 hover:text-primary">
+          Terms of Service
+        </Link>{" "}
+        and{" "}
+        <Link to="#" className="underline underline-offset-4 hover:text-primary">
+          Privacy Policy
+        </Link>
+        .
       </FieldDescription>
     </div>
   );
 }
-

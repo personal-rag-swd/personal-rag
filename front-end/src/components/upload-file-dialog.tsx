@@ -1,5 +1,3 @@
-"use client";
-
 import * as React from "react";
 import { toast } from "sonner";
 import { 
@@ -21,7 +19,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { getPresignedUploadUrl } from "@/features/files/actions";
+import { getPresignedUploadUrl } from "@/features/files/api";
 
 // Max file size: 10MB
 const MAX_FILE_SIZE = 10 * 1024 * 1024; 

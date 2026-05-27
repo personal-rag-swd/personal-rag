@@ -2,51 +2,50 @@
 
 ## Project Structure & Module Organization
 
-- `back-end/`: FastAPI service using SQLModel and Alembic. Application code lives in `back-end/app/`.
-- `back-end/app/auth`, `users`, and `file`: feature modules with `router.py`, `service.py`, `schemas.py`, and `models.py`.
-- `back-end/app/core`: shared configuration, database, and security helpers.
-- `back-end/alembic/versions`: database migrations.
-- `back-end/tests`: backend tests.
-- `front-end/`: Next.js app. Route files and global styles live under `front-end/src/app/`; static assets are in `front-end/public/`; modular features are in `front-end/src/features/`.
+This repository contains a FastAPI backend and a Vite React frontend.
+
+- `back-end/app/`: API code grouped by feature (`auth`, `users`, `file`, `notebooks`) plus `core/`.
+- `back-end/tests/`: pytest coverage for auth, RBAC, files, callbacks, and notebooks.
+- `back-end/alembic/`: database migration environment and versions.
+- `front-end/src/`: React code. Shared UI is in `components/ui/`, feature API/types in `features/`, and app wiring in `App.tsx` and `routes.tsx`.
+- `front-end/public/` and `front-end/src/assets/`: static assets.
+- `front-end-old/`: legacy Next.js code; avoid changing it unless the task explicitly targets it.
 
 ## Build, Test, and Development Commands
 
-Run commands from the relevant app directory.
+Run backend commands from `back-end/`:
 
-Backend:
-
-- `uv sync`: install Python dependencies.
-- `uv run fastapi dev app/main.py`: run the API locally in development mode.
+- `uv sync`: install Python dependencies from `pyproject.toml` and `uv.lock`.
+- `uv run fastapi dev app/main.py`: start the local API server.
 - `uv run pytest`: run backend tests.
 - `uv run alembic upgrade head`: apply database migrations.
-- `uv run alembic revision --autogenerate -m "message"`: create a migration after model changes.
+- `uv run alembic revision --autogenerate -m "add feature"`: create a migration.
 
-Frontend:
+Run frontend commands from `front-end/`:
 
 - `npm install`: install Node dependencies.
-- `npm run dev`: start the Next.js development server.
-- `npm run build`: build the production app.
-- `npm run start`: serve a production build.
+- `npm run dev`: start the Vite dev server.
+- `npm run build`: type-check and build production assets.
 - `npm run lint`: run ESLint.
+- `npm run format`: format TS/TSX files with Prettier.
+- `npm run typecheck`: run TypeScript checks without building.
 
 ## Coding Style & Naming Conventions
 
-Backend code is grouped by feature. Keep endpoints in `router.py`, business logic in `service.py`, request/response models in `schemas.py`, and database models in `models.py`. Use snake_case for Python files, functions, and variables; use PascalCase for model and schema classes.
+Use feature-oriented backend modules: `models.py`, `schemas.py`, `service.py`, and `router.py`. Keep route handlers thin and business logic in services. Python uses 4-space indentation, type hints, and snake_case names.
 
-Frontend code uses TypeScript and React conventions. Use PascalCase for components, camelCase for variables and functions, and keep route files inside `src/app`. Follow the existing ESLint and Next.js configuration.
+Frontend code uses TypeScript, React 19, Tailwind CSS, and shadcn-style components. Use PascalCase components, camelCase functions and variables, and kebab-case reusable UI filenames.
 
 ## Testing Guidelines
 
-Backend tests use `pytest`; place them under `back-end/tests` and name files `test_*.py`. Prefer focused tests for service behavior, dependencies, and API routes.
-
-There is no frontend test runner configured yet. For frontend changes, at minimum run `npm run lint` and `npm run build`.
+Backend tests use pytest and are discovered under `back-end/tests/` as `test_*.py`. Add focused tests for changed behavior, especially auth, permissions, models, and callbacks. The frontend has linting and type checks but no dedicated test runner; run `npm run lint` and `npm run typecheck` for UI changes.
 
 ## Commit & Pull Request Guidelines
 
-The Git history uses short, imperative-style messages such as `Update the project structure`. Keep commits concise and scoped to one change.
+Recent commits use short imperative summaries, such as `Add API v1 prefix`. Keep the first line specific and under about 72 characters.
 
-Pull requests should include a summary of what changed, test or lint results, and any database migration notes. Include screenshots for visible frontend changes and link related issues when available.
+Pull requests should include a concise description, test results, linked issues when applicable, and screenshots for visible UI changes. Note migrations, new environment variables, and setup steps.
 
 ## Security & Configuration Tips
 
-Use `back-end/.env.example` as the local configuration template. Do not commit real `.env` values, credentials, tokens, or database URLs. For authentication, password, or migration changes, include verification notes in the pull request.
+Start backend configuration from `back-end/.env.example`. Never commit secrets, database URLs, JWT keys, email tokens, or object storage credentials. Keep caches and build outputs out of version control.
