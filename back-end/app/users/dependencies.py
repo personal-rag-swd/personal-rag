@@ -2,8 +2,7 @@ from collections.abc import Callable
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session, select
 
@@ -12,14 +11,34 @@ from app.core.database import get_session
 from app.core.security import decode_access_token
 from app.users.models import User
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/sessions")
+
+def get_access_token(request: Request) -> str | None:
+    authorization = request.headers.get("Authorization")
+    if authorization:
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() == "bearer" and token:
+            return token
+
+    cookie_token = request.cookies.get("access_token")
+    if cookie_token:
+        return cookie_token
+
+    return None
 
 
 def get_current_user(
-    token: Annotated[str, Depends(oauth2_scheme)],
+    request: Request,
     session: Annotated[Session, Depends(get_session)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> User:
+    token = get_access_token(request)
+    if token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     payload = decode_access_token(token, settings)
     subject = payload.get("sub")
     try:
@@ -47,9 +66,16 @@ def get_current_user(
 
 def require_role(required_role: str) -> Callable[..., None]:
     def dependency(
-        token: Annotated[str, Depends(oauth2_scheme)],
+        request: Request,
         settings: Annotated[Settings, Depends(get_settings)],
     ) -> None:
+        token = get_access_token(request)
+        if token is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         payload = decode_access_token(token, settings)
         if payload.get("role") != required_role:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")

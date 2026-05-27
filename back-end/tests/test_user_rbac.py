@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, Session, create_engine
 
 from app.core.config import Settings, get_settings
-from app.core.security import create_access_token
+from app.core.security import create_access_token, hash_password
 from app.dependencies import get_session
 from app.main import app
 from app.users.dependencies import get_current_user
@@ -59,6 +59,15 @@ def auth_headers(user: User, settings: Settings) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def login(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/auth/sessions",
+        data={"username": "auth@example.com", "password": "correct-password"},
+    )
+
+    assert response.status_code == 200
+
+
 def test_access_token_includes_user_role_claim(settings: Settings) -> None:
     user = make_user("admin@example.com", role="admin")
 
@@ -104,6 +113,35 @@ def test_admin_token_can_list_users(client: TestClient, settings: Settings, sess
     assert response.status_code == 200
     assert {item["email"] for item in response.json()} == {"admin@example.com", "user@example.com"}
     assert {item["role"] for item in response.json()} == {"admin", "user"}
+
+
+def test_current_user_can_be_loaded_from_access_token_cookie(
+    client: TestClient, session: Session
+) -> None:
+    user = User(email="auth@example.com", hashed_password=hash_password("correct-password"))
+    session.add(user)
+    session.commit()
+
+    login(client)
+
+    response = client.get("/api/v1/users/me")
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "auth@example.com"
+    assert response.json()["role"] == "user"
+
+
+def test_current_user_can_be_loaded_from_authorization_header(
+    client: TestClient, settings: Settings, session: Session
+) -> None:
+    user = make_user("header@example.com", role="admin")
+    session.add(user)
+    session.commit()
+    response = client.get("/api/v1/users/me", headers=auth_headers(user, settings))
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "header@example.com"
+    assert response.json()["role"] == "admin"
 
 
 def test_missing_token_cannot_list_users(client: TestClient) -> None:

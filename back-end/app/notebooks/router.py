@@ -1,16 +1,22 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
+from pydantic_ai.run import AgentRunResult
+from pydantic_ai.ui.ag_ui import AGUIAdapter
 from sqlmodel import Session
 
 from app.core.database import get_session
-from app.notebooks.schemas import NotebookCreate, NotebookRead, NotebookUpdate
+from app.notebooks.chat import get_notebook_chat_agent
+from app.notebooks.schemas import NotebookChatHistoryMessage, NotebookCreate, NotebookRead, NotebookUpdate
 from app.notebooks.service import (
     create_notebook,
     delete_notebook,
+    extract_notebook_chat_transcript,
     get_notebook,
     list_notebooks,
+    load_notebook_chat_history,
+    save_notebook_chat_history,
     touch_notebook,
     update_notebook,
 )
@@ -63,6 +69,39 @@ def touch_notebook_route(
     session: Annotated[Session, Depends(get_session)],
 ) -> object:
     return touch_notebook(session, notebook_id, current_user)
+
+
+@router.post("/{notebook_id}/chat")
+async def chat_notebook_route(
+    notebook_id: UUID,
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> Response:
+    notebook = get_notebook(session, notebook_id, current_user)
+    message_history = load_notebook_chat_history(session, notebook)
+
+    async def persist_chat_history(result: AgentRunResult[object]) -> None:
+        save_notebook_chat_history(session, notebook, result.all_messages())
+
+    return await AGUIAdapter.dispatch_request(
+        request,
+        agent=get_notebook_chat_agent(),
+        message_history=message_history,
+        conversation_id=str(notebook.id),
+        on_complete=persist_chat_history,
+    )
+
+
+@router.get("/{notebook_id}/chat/history", response_model=list[NotebookChatHistoryMessage])
+def read_notebook_chat_history(
+    notebook_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+    include_reasoning: bool = False,
+) -> list[dict[str, object]]:
+    notebook = get_notebook(session, notebook_id, current_user)
+    return extract_notebook_chat_transcript(session, notebook, include_reasoning=include_reasoning)
 
 
 @router.delete("/{notebook_id}", status_code=status.HTTP_204_NO_CONTENT)

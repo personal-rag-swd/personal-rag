@@ -1,5 +1,6 @@
 import * as React from "react";
 import { useForm } from "@tanstack/react-form";
+import { useNavigate } from "react-router-dom";
 
 import { useNotebooks } from "@/features/notebooks/store/notebook-store";
 import { useCreateNotebookMutation, useUpdateNotebookMutation } from "@/features/notebooks/api";
@@ -9,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
 import {
   Field,
   FieldDescription,
@@ -72,14 +72,13 @@ function formatActivityLabel(value: string) {
 export function DashboardClient() {
   const {
     notebooks,
-    activeNotebook,
     selectNotebook,
     addNotebook,
     deleteNotebook,
     updateNotebook,
   } = useNotebooks();
 
-  // Search & Filter States
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = React.useState("");
   const [sortBy, setSortBy] = React.useState<"lastActive" | "name" | "documentCount">("lastActive");
 
@@ -164,26 +163,24 @@ export function DashboardClient() {
         {filteredNotebooks.length > 0 ? (
           <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
             {filteredNotebooks.map((notebook) => {
-              const isActive = activeNotebook?.id === notebook.id;
-
               return (
                 <Card
                   key={notebook.id}
                   size="sm"
-                  onClick={() => selectNotebook(notebook.id)}
+                  onClick={() => {
+                    selectNotebook(notebook.id);
+                    void navigate(`/notebook/${notebook.id}`);
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
                       selectNotebook(notebook.id);
+                      void navigate(`/notebook/${notebook.id}`);
                     }
                   }}
                   role="button"
                   tabIndex={0}
-                  aria-pressed={isActive}
-                  className={cn(
-                    "cursor-pointer border border-border/70 transition-colors hover:border-foreground/20 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30",
-                    isActive && "border-ring bg-muted/40 ring-2 ring-ring/15"
-                  )}
+                  className="cursor-pointer border border-border/70 transition-colors hover:border-foreground/20 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
                 >
                   <CardHeader>
                     <div className="flex min-w-0 items-start gap-3">
@@ -191,14 +188,7 @@ export function DashboardClient() {
                         <BookOpenIcon className="size-4" />
                       </div>
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <CardTitle className="truncate text-sm font-medium">{notebook.name}</CardTitle>
-                          {isActive && (
-                            <Badge variant="secondary" className="shrink-0">
-                              Active
-                            </Badge>
-                          )}
-                        </div>
+                        <CardTitle className="truncate text-sm font-medium">{notebook.name}</CardTitle>
                         <CardDescription className="text-xs">
                           Created {formatDateLabel(notebook.createdAt)}
                         </CardDescription>

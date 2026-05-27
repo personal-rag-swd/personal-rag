@@ -1,5 +1,4 @@
 import axios, {
-  AxiosHeaders,
   type AxiosError,
   type AxiosRequestConfig,
   type InternalAxiosRequestConfig,
@@ -7,31 +6,21 @@ import axios, {
 
 import { useAuthStore } from "@/features/auth/store/auth-store";
 
-interface AuthTokenResponse {
-  access_token: string;
-}
-
 interface RetriableRequestConfig extends InternalAxiosRequestConfig {
   _retry?: boolean;
 }
 
-let refreshTokenPromise: Promise<string> | null = null;
+let refreshTokenPromise: Promise<void> | null = null;
 
 export const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_URL || "/",
+  withCredentials: true,
 });
 
 const refreshClient = axios.create({
   baseURL: import.meta.env.VITE_API_URL || "/",
+  withCredentials: true,
 });
-
-export function getAccessToken() {
-  return useAuthStore.getState().accessToken;
-}
-
-export function setAccessToken(token: string | null) {
-  useAuthStore.getState().setAccessToken(token);
-}
 
 export class ApiError extends Error {
   status: number;
@@ -43,19 +32,7 @@ export class ApiError extends Error {
 }
 
 apiClient.interceptors.request.use((config) => {
-  const token = getAccessToken();
-  if (!token) {
-    return config;
-  }
-
-  const headers =
-    config.headers instanceof AxiosHeaders
-      ? config.headers
-      : new AxiosHeaders(config.headers);
-
-  headers.set("Authorization", `Bearer ${token}`);
-  config.headers = headers;
-
+  config.withCredentials = true;
   return config;
 });
 
@@ -67,9 +44,13 @@ apiClient.interceptors.response.use(
     if (
       error.response?.status !== 401 ||
       !originalRequest ||
-      originalRequest._retry ||
       isAuthRotationRequest(originalRequest)
     ) {
+      return Promise.reject(toApiError(error));
+    }
+
+    if (originalRequest._retry) {
+      useAuthStore.getState().clearSession();
       return Promise.reject(toApiError(error));
     }
 
@@ -79,19 +60,16 @@ apiClient.interceptors.response.use(
       await refreshAccessToken();
       return apiClient.request(originalRequest);
     } catch {
-      setAccessToken(null);
+      useAuthStore.getState().clearSession();
       return Promise.reject(new ApiError("Session expired. Please log in again.", 401));
     }
   }
 );
 
-export async function refreshAccessToken(): Promise<string> {
+export async function refreshAccessToken(): Promise<void> {
   refreshTokenPromise ??= refreshClient
-    .post<AuthTokenResponse>("/api/v1/auth/token-refreshes")
-    .then((response) => {
-      useAuthStore.getState().setAccessToken(response.data.access_token);
-      return response.data.access_token;
-    })
+    .post("/api/v1/auth/token-refreshes")
+    .then(() => undefined)
     .finally(() => {
       refreshTokenPromise = null;
     });

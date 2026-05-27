@@ -21,12 +21,59 @@ from app.auth.schemas import (
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+ACCESS_TOKEN_COOKIE_NAME = "access_token"
+REFRESH_TOKEN_COOKIE_NAME = "refresh_token"
 
 
 def is_cookie_secure(request: Request) -> bool:
     if request.url.hostname in ("localhost", "127.0.0.1", "testserver"):
         return False
     return True
+
+
+def set_session_cookies(
+    response: Response,
+    request: Request,
+    tokens: dict[str, str],
+    settings: Settings,
+) -> None:
+    cookie_secure = is_cookie_secure(request)
+    response.set_cookie(
+        key=ACCESS_TOKEN_COOKIE_NAME,
+        value=tokens["access_token"],
+        httponly=True,
+        secure=cookie_secure,
+        samesite="lax",
+        max_age=settings.access_token_expire_minutes * 60,
+        path="/",
+    )
+    response.set_cookie(
+        key=REFRESH_TOKEN_COOKIE_NAME,
+        value=tokens["refresh_token"],
+        httponly=True,
+        secure=cookie_secure,
+        samesite="lax",
+        max_age=settings.refresh_token_expire_days * 24 * 60 * 60,
+        path="/",
+    )
+
+
+def clear_session_cookies(response: Response, request: Request) -> None:
+    cookie_secure = is_cookie_secure(request)
+    response.delete_cookie(
+        key=ACCESS_TOKEN_COOKIE_NAME,
+        path="/",
+        httponly=True,
+        secure=cookie_secure,
+        samesite="lax",
+    )
+    response.delete_cookie(
+        key=REFRESH_TOKEN_COOKIE_NAME,
+        path="/",
+        httponly=True,
+        secure=cookie_secure,
+        samesite="lax",
+    )
 
 
 @router.post("/registrations", status_code=status.HTTP_202_ACCEPTED, response_class=Response)
@@ -58,15 +105,7 @@ def create_auth_session(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, str]:
     tokens = create_session(session, form_data.username, form_data.password, settings)
-    response.set_cookie(
-        key="refresh_token",
-        value=tokens["refresh_token"],
-        httponly=True,
-        secure=is_cookie_secure(request),
-        samesite="lax",
-        max_age=settings.refresh_token_expire_days * 24 * 60 * 60,
-        path="/",
-    )
+    set_session_cookies(response, request, tokens, settings)
     return tokens
 
 
@@ -84,15 +123,7 @@ def create_token_refresh(
             detail="Refresh token cookie missing",
         )
     tokens = refresh_session(session, refresh_token, settings)
-    response.set_cookie(
-        key="refresh_token",
-        value=tokens["refresh_token"],
-        httponly=True,
-        secure=is_cookie_secure(request),
-        samesite="lax",
-        max_age=settings.refresh_token_expire_days * 24 * 60 * 60,
-        path="/",
-    )
+    set_session_cookies(response, request, tokens, settings)
     return tokens
 
 
@@ -105,13 +136,6 @@ def delete_current_session(
 ) -> Response:
     if refresh_token:
         logout_session(session, refresh_token)
-    response.delete_cookie(
-        key="refresh_token",
-        path="/",
-        httponly=True,
-        secure=is_cookie_secure(request),
-        samesite="lax",
-    )
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
+    clear_session_cookies(response, request)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response

@@ -80,8 +80,13 @@ def login(client: TestClient) -> dict[str, str]:
 
     assert response.status_code == 200
     tokens = response.json()
-    tokens["refresh_token"] = get_cookie_value(client, "refresh_token")
-    return tokens
+    refresh_token = get_cookie_value(client, "refresh_token")
+    assert get_cookie_value(client, "access_token") == tokens["access_token"]
+    assert refresh_token is not None
+    return {
+        "access_token": tokens["access_token"],
+        "refresh_token": refresh_token,
+    }
 
 
 def refresh(client: TestClient, refresh_token: str = None):
@@ -108,6 +113,7 @@ def test_refresh_rotates_token_and_rejects_reuse(
     rotate_response = refresh(client, first_rt)
 
     assert rotate_response.status_code == 200
+    assert get_cookie_value(client, "access_token") == rotate_response.json()["access_token"]
     second_rt = get_cookie_value(client, "refresh_token")
     assert second_rt != first_rt
 
@@ -159,6 +165,8 @@ def test_logout_revokes_refresh_token_family(
     )
 
     assert logout_response.status_code == 204
+    assert get_cookie_value(client, "access_token") is None
+    assert get_cookie_value(client, "refresh_token") is None
     assert refresh(client, second_rt).status_code == 401
 
     family_id = get_refresh_token(session, first_rt).family_id

@@ -1,30 +1,19 @@
 import { create } from "zustand";
 
-import {
-  apiClient,
-  apiFetch,
-  refreshAccessToken,
-} from "@/lib/api-client";
+import { apiClient, apiFetch } from "@/lib/api-client";
 
 interface User {
+  id: string;
   email: string;
-}
-
-interface LoginResponse {
-  access_token: string;
-}
-
-interface JwtPayload {
-  email?: string;
-  sub?: string;
+  role: string;
+  is_active: boolean;
 }
 
 interface AuthStore {
-  accessToken: string | null;
-  isAuthenticated: boolean;
   user: User | null;
+  isAuthenticated: boolean;
   isLoading: boolean;
-  setAccessToken: (token: string | null) => void;
+  clearSession: () => void;
   setIsLoading: (isLoading: boolean) => void;
   initializeSession: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
@@ -33,44 +22,19 @@ interface AuthStore {
   logout: () => Promise<void>;
 }
 
-function decodeJwt(token: string): JwtPayload | null {
-  try {
-    const base64Url = token.split(".")[1];
-    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-    const jsonPayload = decodeURIComponent(
-      window
-        .atob(base64)
-        .split("")
-        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-        .join("")
-    );
-    return JSON.parse(jsonPayload);
-  } catch {
-    return null;
-  }
-}
-
-function getUserFromToken(token: string | null): User | null {
-  if (!token) {
-    return null;
-  }
-
-  const decoded = decodeJwt(token);
-  const email = decoded?.sub || decoded?.email || "workspace@example.com";
-
-  return { email };
+async function fetchCurrentUser() {
+  return apiFetch<User>("/api/v1/users/me");
 }
 
 export const useAuthStore = create<AuthStore>((set, get) => ({
-  accessToken: null,
-  isAuthenticated: false,
   user: null,
+  isAuthenticated: false,
   isLoading: true,
-  setAccessToken: (token) => {
+  clearSession: () => {
     set({
-      accessToken: token,
-      isAuthenticated: Boolean(token),
-      user: getUserFromToken(token),
+      user: null,
+      isAuthenticated: false,
+      isLoading: false,
     });
   },
   setIsLoading: (isLoading) => set({ isLoading }),
@@ -78,9 +42,13 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     set({ isLoading: true });
 
     try {
-      await refreshAccessToken();
+      const user = await fetchCurrentUser();
+      set({
+        user,
+        isAuthenticated: true,
+      });
     } catch {
-      get().setAccessToken(null);
+      get().clearSession();
     } finally {
       set({ isLoading: false });
     }
@@ -91,13 +59,22 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       password,
     });
 
-    const response = await apiClient.post<LoginResponse>("/api/v1/auth/sessions", body, {
+    await apiClient.post("/api/v1/auth/sessions", body, {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
       },
     });
 
-    get().setAccessToken(response.data.access_token);
+    try {
+      const user = await fetchCurrentUser();
+      set({
+        user,
+        isAuthenticated: true,
+      });
+    } catch (error) {
+      get().clearSession();
+      throw error;
+    }
   },
   startRegistration: async (email, password) => {
     await apiClient.post("/api/v1/auth/registrations", {
@@ -119,10 +96,10 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         method: "DELETE",
       });
     } catch {
-      // Fallback: still perform client logout even if deletion fails on the server.
+      // The client still clears its session even if the server-side logout fails.
     }
 
-    get().setAccessToken(null);
+    get().clearSession();
   },
 }));
 

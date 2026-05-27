@@ -68,3 +68,13 @@ class NotebookRead(BaseModel):
     last_active_at: datetime
     document_count: int = 0
     query_count: int = 0
+
+
+class NotebookChatHistoryPart(BaseModel):
+    type: str
+    content: str
+
+
+class NotebookChatHistoryMessage(BaseModel):
+    role: str
+    parts: list[NotebookChatHistoryPart]

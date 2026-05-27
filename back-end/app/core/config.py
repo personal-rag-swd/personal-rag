@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     otp_max_attempts: int = 5
     resend_api_key: str = ""
     resend_from_email: str = "noreply@example.com"
+    openrouter_api_key: str = ""
+    openrouter_model: str = "openai/gpt-4o-mini"
     cors_origins: list[str] = ["http://localhost:3000"]
     s3_bucket: str = "personal-rag-users-files"
     s3_region: str = "us-east-1"

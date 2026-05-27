@@ -1,8 +1,12 @@
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import Column, DateTime, ForeignKey, JSON
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
+
+chat_history_type = JSON().with_variant(JSONB(), "postgresql")
 
 
 class Notebook(SQLModel, table=True):
@@ -18,6 +22,21 @@ class Notebook(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), nullable=False)
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC), nullable=False)
     last_active_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+class NotebookMessage(SQLModel, table=True):
+    __tablename__ = "notebook_message"  # type: ignore
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    notebook_id: UUID = Field(
+        sa_column=Column(ForeignKey("notebook.id", ondelete="CASCADE"), nullable=False, index=True),
+    )
+    seq: int = Field(nullable=False, index=True)
+    message: dict[str, Any] = Field(sa_column=Column(chat_history_type, nullable=False))
+    created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )

@@ -1,19 +1,19 @@
 import logging
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from scalar_fastapi import get_scalar_api_reference
+
+from app.auth.router import router as auth_router
+from app.core.config import get_settings
+from app.file.router import router as file_router
+from app.notebooks.router import router as notebooks_router
+from app.users.router import router as users_router
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(levelname)s:     %(name)s - %(message)s",
 )
-
-from fastapi import FastAPI
-from scalar_fastapi import get_scalar_api_reference
-from fastapi.middleware.cors import CORSMiddleware
-
-from app.core.config import get_settings
-from app.auth.router import router as auth_router
-from app.users.router import router as users_router
-from app.file.router import router as file_router
-from app.notebooks.router import router as notebooks_router
 
 app = FastAPI(title="Personal RAG", docs_url=None, redoc_url=None)
 API_V1_PREFIX = "/api/v1"

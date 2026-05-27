@@ -16,10 +16,12 @@ import {
 } from "@/components/ui/sidebar";
 import { useNotebooks } from "@/features/notebooks/store/notebook-store";
 import { MoreHorizontalIcon, Trash2Icon, FolderIcon } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 export function NavNotebooks() {
-  const { notebooks, activeNotebook, selectNotebook, deleteNotebook } = useNotebooks();
+  const { notebooks, selectNotebook, deleteNotebook } = useNotebooks();
   const { isMobile } = useSidebar();
+  const navigate = useNavigate();
 
   if (notebooks.length === 0) return null;
 
@@ -30,20 +32,16 @@ export function NavNotebooks() {
       </SidebarGroupLabel>
       <SidebarMenu>
         {notebooks.map((notebook) => {
-          const isActive = activeNotebook?.id === notebook.id;
-
           return (
             <SidebarMenuItem key={notebook.id} className="group/item">
               <SidebarMenuButton
-                onClick={() => selectNotebook(notebook.id)}
-                isActive={isActive}
+                onClick={() => {
+                  selectNotebook(notebook.id);
+                  void navigate(`/notebook/${notebook.id}`);
+                }}
                 className="transition-all duration-200"
               >
-                <span
-                  className={`truncate ${
-                    isActive ? "font-semibold" : "font-medium text-sidebar-foreground/80"
-                  }`}
-                >
+                <span className="truncate font-medium text-sidebar-foreground/80">
                   {notebook.name}
                 </span>
               </SidebarMenuButton>
@@ -64,7 +62,10 @@ export function NavNotebooks() {
                   side={isMobile ? "bottom" : "right"}
                   align={isMobile ? "end" : "start"}
                 >
-                  <DropdownMenuItem onClick={() => selectNotebook(notebook.id)}>
+                  <DropdownMenuItem onClick={() => {
+                    selectNotebook(notebook.id);
+                    void navigate(`/notebook/${notebook.id}`);
+                  }}>
                     <FolderIcon className="size-4 mr-2" />
                     <span>Select Notebook</span>
                   </DropdownMenuItem>

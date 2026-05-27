@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import type { ThreadMessage } from "@assistant-ui/core";
 import { apiFetch } from "@/lib/api-client";
 import { type Notebook, type NotebookApiPayload } from "./types";
 
@@ -71,6 +72,17 @@ export function useDeleteNotebookMutation() {
   });
 }
 
+export function useNotebookQuery(id: string | undefined) {
+  return useQuery<Notebook>({
+    queryKey: ["notebooks", id],
+    queryFn: async () => {
+      const data = await apiFetch<NotebookApiPayload>(`/api/v1/notebooks/${id}`);
+      return mapNotebook(data);
+    },
+    enabled: Boolean(id),
+  });
+}
+
 export function useTouchNotebookMutation() {
   const queryClient = useQueryClient();
   return useMutation<Notebook, Error, string>({
@@ -83,5 +95,52 @@ export function useTouchNotebookMutation() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["notebooks"] });
     },
+  });
+}
+
+type NotebookChatHistoryMessage = {
+  role: "user" | "assistant";
+  parts: { type: "text" | "reasoning"; content: string }[];
+};
+
+export async function fetchNotebookChatHistory(notebookId: string): Promise<ThreadMessage[]> {
+  const data = await apiFetch<NotebookChatHistoryMessage[]>(
+    `/api/v1/notebooks/${notebookId}/chat/history?include_reasoning=true`
+  );
+  const now = Date.now();
+
+  return data.map((message, index): ThreadMessage => {
+    const base = {
+      id: `${notebookId}-${index}`,
+      createdAt: new Date(now + index),
+      metadata: { custom: {} },
+    };
+
+    if (message.role === "assistant") {
+      return {
+        ...base,
+        role: "assistant",
+        content: message.parts.map((part) =>
+          part.type === "reasoning"
+            ? { type: "reasoning", text: part.content }
+            : { type: "text", text: part.content }
+        ),
+        status: { type: "complete", reason: "stop" },
+        metadata: {
+          ...base.metadata,
+          unstable_state: null,
+          unstable_annotations: [],
+          unstable_data: [],
+          steps: [],
+        },
+      };
+    }
+
+    return {
+      ...base,
+      role: "user",
+      content: message.parts.map((part) => ({ type: "text", text: part.content })),
+      attachments: [],
+    };
   });
 }

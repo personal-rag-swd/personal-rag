@@ -36,12 +36,6 @@ export type LoginValues = z.input<typeof loginSchema>;
 export type RegistrationValues = z.input<typeof registrationSchema>;
 export type VerificationValues = z.input<typeof verificationSchema>;
 
-export type TokenPair = {
-  access_token: string;
-  refresh_token: string;
-  token_type: string;
-};
-
 export type ApiErrorPayload = {
   detail?: string | Array<{ msg?: string; loc?: Array<string | number> }>;
 };

@@ -9,6 +9,7 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/features/dashboard/components/app-sidebar";
 import { SiteHeader } from "@/features/dashboard/components/site-header";
 import { DashboardClient } from "@/features/dashboard/components/DashboardClient";
+import { NotebookPage } from "@/features/notebooks/components/NotebookPage";
 
 // Premium, beautifully animated full-screen loader
 function FullPageSpinner() {
@@ -87,6 +88,15 @@ function DashboardLayout() {
   );
 }
 
+// Notebook full-page layout (no dashboard sidebar)
+function NotebookLayout() {
+  return (
+    <main className="h-dvh overflow-hidden bg-background">
+        <NotebookPage />
+    </main>
+  );
+}
+
 export function AppRoutes() {
   return (
     <Routes>
@@ -118,6 +128,14 @@ export function AppRoutes() {
         element={
           <ProtectedRoute>
             <DashboardLayout />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/notebook/:id"
+        element={
+          <ProtectedRoute>
+            <NotebookLayout />
           </ProtectedRoute>
         }
       />

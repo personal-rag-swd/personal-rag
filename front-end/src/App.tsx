@@ -7,6 +7,7 @@ import { useAuthStore } from "@/features/auth/store/auth-store";
 import { AppRoutes } from "@/routes";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeClassEffect } from "@/components/theme-provider";
+import { TooltipProvider } from "./components/ui/tooltip";
 
 function AuthSessionEffect() {
   const initializeSession = useAuthStore((state) => state.initializeSession);
@@ -21,12 +22,14 @@ function AuthSessionEffect() {
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <ThemeClassEffect />
-        <AuthSessionEffect />
-        <AppRoutes />
-        <Toaster position="top-right" richColors />
-      </BrowserRouter>
+      <TooltipProvider>
+        <BrowserRouter>
+          <ThemeClassEffect />
+          <AuthSessionEffect />
+          <AppRoutes />
+          <Toaster position="top-right" richColors />
+        </BrowserRouter>
+      </TooltipProvider>
     </QueryClientProvider>
   );
 }
