@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Annotated
 from uuid import UUID
 
@@ -42,3 +43,15 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
+
+
+def require_role(required_role: str) -> Callable[..., None]:
+    def dependency(
+        token: Annotated[str, Depends(oauth2_scheme)],
+        settings: Annotated[Settings, Depends(get_settings)],
+    ) -> None:
+        payload = decode_access_token(token, settings)
+        if payload.get("role") != required_role:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    return dependency

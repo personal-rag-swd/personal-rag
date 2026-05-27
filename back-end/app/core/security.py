@@ -27,6 +27,7 @@ def create_access_token(user: User, settings: Settings) -> str:
     payload = {
         "sub": str(user.id),
         "email": user.email,
+        "role": user.role,
         "jti": str(uuid4()),
         "exp": expires_at,
         "iat": datetime.now(UTC),
@@ -43,4 +44,3 @@ def decode_access_token(token: str, settings: Settings) -> dict[str, object]:
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
-

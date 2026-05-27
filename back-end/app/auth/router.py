@@ -21,7 +21,7 @@ from app.auth.schemas import (
     VerificationResponse,
 )
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
 @router.post("/registrations", status_code=status.HTTP_202_ACCEPTED, response_class=Response)
