@@ -1,7 +1,7 @@
 "use client";
 
 import { useForm } from "@tanstack/react-form";
-import { GalleryVerticalEnd } from "lucide-react";
+import { GalleryVerticalEnd, Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -14,6 +14,12 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group";
 import {
   InputOTP,
   InputOTPGroup,
@@ -109,6 +115,8 @@ function RegistrationDetailsForm({
   setState: (state: AuthActionState) => void;
   setVerificationState: (state: AuthActionState) => void;
 }) {
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const form = useForm({
     defaultValues: {
       email: state.email ?? "",
@@ -185,18 +193,32 @@ function RegistrationDetailsForm({
             return (
               <Field data-invalid={isInvalid}>
                 <FieldLabel htmlFor={field.name}>Password</FieldLabel>
-                <Input
-                  id={field.name}
-                  name={field.name}
-                  type="password"
-                  autoComplete="new-password"
-                  minLength={8}
-                  value={field.state.value}
-                  onBlur={field.handleBlur}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                  aria-invalid={isInvalid}
-                  required
-                />
+                <InputGroup>
+                  <InputGroupInput
+                    id={field.name}
+                    name={field.name}
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="new-password"
+                    minLength={8}
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    aria-invalid={isInvalid}
+                    required
+                  />
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupButton
+                      onClick={() => setShowPassword(!showPassword)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
+                    </InputGroupButton>
+                  </InputGroupAddon>
+                </InputGroup>
                 <FieldError errors={field.state.meta.errors} />
                 <FieldError>{state.fieldErrors?.password}</FieldError>
               </Field>
@@ -226,17 +248,31 @@ function RegistrationDetailsForm({
             return (
               <Field data-invalid={isInvalid}>
                 <FieldLabel htmlFor={field.name}>Confirm password</FieldLabel>
-                <Input
-                  id={field.name}
-                  name={field.name}
-                  type="password"
-                  autoComplete="new-password"
-                  value={field.state.value}
-                  onBlur={field.handleBlur}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                  aria-invalid={isInvalid}
-                  required
-                />
+                <InputGroup>
+                  <InputGroupInput
+                    id={field.name}
+                    name={field.name}
+                    type={showConfirmPassword ? "text" : "password"}
+                    autoComplete="new-password"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    aria-invalid={isInvalid}
+                    required
+                  />
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupButton
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
+                    >
+                      {showConfirmPassword ? (
+                        <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
+                    </InputGroupButton>
+                  </InputGroupAddon>
+                </InputGroup>
                 {errorMessage && <FieldError>{errorMessage}</FieldError>}
               </Field>
             );

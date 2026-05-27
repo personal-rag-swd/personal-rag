@@ -1,7 +1,7 @@
 "use client";
 
 import { useForm } from "@tanstack/react-form";
-import { GalleryVerticalEnd } from "lucide-react";
+import { GalleryVerticalEnd, Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -14,6 +14,12 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group";
 import { loginAction } from "@/features/auth/services/actions";
 import {
   loginSchema,
@@ -31,6 +37,7 @@ export function LoginForm({
   ...props
 }: React.ComponentProps<"div">) {
   const [state, setState] = useState<AuthActionState>(initialAuthActionState);
+  const [showPassword, setShowPassword] = useState(false);
   const form = useForm({
     defaultValues: {
       email: state.email ?? "",
@@ -120,17 +127,31 @@ export function LoginForm({
                   <div className="flex items-center justify-between">
                     <FieldLabel htmlFor={field.name}>Password</FieldLabel>
                   </div>
-                  <Input
-                    id={field.name}
-                    name={field.name}
-                    type="password"
-                    autoComplete="current-password"
-                    value={field.state.value}
-                    onBlur={field.handleBlur}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                    aria-invalid={isInvalid}
-                    required
-                  />
+                  <InputGroup>
+                    <InputGroupInput
+                      id={field.name}
+                      name={field.name}
+                      type={showPassword ? "text" : "password"}
+                      autoComplete="current-password"
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(event) => field.handleChange(event.target.value)}
+                      aria-invalid={isInvalid}
+                      required
+                    />
+                    <InputGroupAddon align="inline-end">
+                      <InputGroupButton
+                        onClick={() => setShowPassword(!showPassword)}
+                        aria-label={showPassword ? "Hide password" : "Show password"}
+                      >
+                        {showPassword ? (
+                          <EyeOff className="size-4" />
+                        ) : (
+                          <Eye className="size-4" />
+                        )}
+                      </InputGroupButton>
+                    </InputGroupAddon>
+                  </InputGroup>
                   <FieldError errors={field.state.meta.errors} />
                   <FieldError>{state.fieldErrors?.password}</FieldError>
                 </Field>
