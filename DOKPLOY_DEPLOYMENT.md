@@ -116,6 +116,13 @@ Because MinIO and Backend are now standalone, you need to run the `mc` command s
    mc event add local/personal-rag-bucket arn:minio:sqs::backend:webhook --event put
    ```
 
+   If MinIO and the backend are running in the same compose network, use the internal service URL instead:
+   ```bash
+   mc admin config set local notify_webhook:backend endpoint=http://backend:8000/api/v1/file/callback
+   mc admin service restart local
+   mc event add local/personal-rag-bucket arn:minio:sqs::backend:webhook --event put
+   ```
+
 ---
 
 ## Important Security Checkpoints
