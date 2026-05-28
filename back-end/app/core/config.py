@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,7 +19,29 @@ class Settings(BaseSettings):
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173", "http://localhost:8000"]
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def assemble_cors_origins(cls, v: str | list[str]) -> list[str]:
+        if isinstance(v, str):
+            v_clean = v.strip()
+            if v_clean.startswith("[") and v_clean.endswith("]"):
+                v_clean = v_clean[1:-1]
+            
+            # Split by comma
+            parts = v_clean.split(",")
+            origins = []
+            for part in parts:
+                part = part.strip()
+                # Strip leading/trailing single and double quotes
+                part = part.strip("'\"")
+                if part:
+                    origins.append(part)
+            return origins
+        elif isinstance(v, list):
+            return [str(item).strip() for item in v]
+        return v
     cookie_secure: bool | None = None
     cookie_samesite: str = "lax"
     s3_bucket: str = "personal-rag-users-files"
