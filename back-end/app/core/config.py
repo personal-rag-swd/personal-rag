@@ -15,10 +15,16 @@ class Settings(BaseSettings):
     resend_from_email: str = "noreply@example.com"
     openrouter_api_key: str = ""
     openrouter_model: str = "openai/gpt-4o-mini"
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = 1536
     cors_origins: list[str] = ["http://localhost:3000"]
+    cookie_secure: bool | None = None
+    cookie_samesite: str = "lax"
     s3_bucket: str = "personal-rag-users-files"
     s3_region: str = "us-east-1"
     s3_endpoint_url: str | None = None
+    s3_public_endpoint_url: str | None = None
     aws_access_key_id: str | None = None
     aws_secret_access_key: str | None = None
 

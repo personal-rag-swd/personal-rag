@@ -75,8 +75,8 @@ def test_callback_empty_body(client: TestClient) -> None:
     assert data["details"]["eventName"] is None
 
 
-def test_callback_rustfs_real_payload(client: TestClient) -> None:
-    """Real RustFS payload: URL-encoded key, bucket prefix stripped."""
+def test_callback_minio_real_payload(client: TestClient) -> None:
+    """Real MinIO/S3 payload: URL-encoded key, bucket prefix stripped."""
     payload = {
         "EventName": "s3:ObjectCreated:Put",
         "Key": "personal-rag-users-files/users/f0122594-fb20-41d7-b124-ab33d754fb24/475613f1-f592-4c46-a982-4cf14096131f/Skill_Bridge.docx",

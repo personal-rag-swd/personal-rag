@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 
 const ANIMATION_DURATION = 200;
 
-const reasoningVariants = cva("aui-reasoning-root mb-4 w-full", {
+const reasoningVariants = cva("aui-reasoning-root mb-6 w-full", {
   variants: {
     variant: {
       outline: "rounded-lg border px-3 py-2",

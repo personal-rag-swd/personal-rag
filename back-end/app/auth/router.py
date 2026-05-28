@@ -25,10 +25,19 @@ ACCESS_TOKEN_COOKIE_NAME = "access_token"
 REFRESH_TOKEN_COOKIE_NAME = "refresh_token"
 
 
-def is_cookie_secure(request: Request) -> bool:
+def is_cookie_secure(request: Request, settings: Settings) -> bool:
+    if settings.cookie_secure is not None:
+        return settings.cookie_secure
     if request.url.hostname in ("localhost", "127.0.0.1", "testserver"):
         return False
     return True
+
+
+def get_cookie_samesite(settings: Settings) -> str:
+    value = settings.cookie_samesite.lower()
+    if value in {"lax", "strict", "none"}:
+        return value
+    return "lax"
 
 
 def set_session_cookies(
@@ -37,13 +46,14 @@ def set_session_cookies(
     tokens: dict[str, str],
     settings: Settings,
 ) -> None:
-    cookie_secure = is_cookie_secure(request)
+    cookie_secure = is_cookie_secure(request, settings)
+    cookie_samesite = get_cookie_samesite(settings)
     response.set_cookie(
         key=ACCESS_TOKEN_COOKIE_NAME,
         value=tokens["access_token"],
         httponly=True,
         secure=cookie_secure,
-        samesite="lax",
+        samesite=cookie_samesite,
         max_age=settings.access_token_expire_minutes * 60,
         path="/",
     )
@@ -52,27 +62,28 @@ def set_session_cookies(
         value=tokens["refresh_token"],
         httponly=True,
         secure=cookie_secure,
-        samesite="lax",
+        samesite=cookie_samesite,
         max_age=settings.refresh_token_expire_days * 24 * 60 * 60,
         path="/",
     )
 
 
-def clear_session_cookies(response: Response, request: Request) -> None:
-    cookie_secure = is_cookie_secure(request)
+def clear_session_cookies(response: Response, request: Request, settings: Settings) -> None:
+    cookie_secure = is_cookie_secure(request, settings)
+    cookie_samesite = get_cookie_samesite(settings)
     response.delete_cookie(
         key=ACCESS_TOKEN_COOKIE_NAME,
         path="/",
         httponly=True,
         secure=cookie_secure,
-        samesite="lax",
+        samesite=cookie_samesite,
     )
     response.delete_cookie(
         key=REFRESH_TOKEN_COOKIE_NAME,
         path="/",
         httponly=True,
         secure=cookie_secure,
-        samesite="lax",
+        samesite=cookie_samesite,
     )
 
 
@@ -132,10 +143,11 @@ def delete_current_session(
     request: Request,
     response: Response,
     session: Annotated[Session, Depends(get_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
     refresh_token: Annotated[str | None, Cookie()] = None,
 ) -> Response:
     if refresh_token:
         logout_session(session, refresh_token)
-    clear_session_cookies(response, request)
+    clear_session_cookies(response, request, settings)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response

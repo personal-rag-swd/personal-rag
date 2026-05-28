@@ -26,6 +26,18 @@ export type Notebook = {
   tags: string[];
 };
 
+export type NotebookDocument = {
+  id: string;
+  notebookId: string;
+  filename: string;
+  contentType: string | null;
+  size: number | null;
+  status: "pending" | "uploaded" | "processing" | "indexed" | "failed" | string;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type NotebookActionState = {
   values?: Partial<NotebookValues>;
   notebook?: Notebook;
@@ -43,4 +55,16 @@ export type NotebookApiPayload = {
   updated_at: string;
   last_active_at: string;
   tags: string[];
+};
+
+export type NotebookDocumentApiPayload = {
+  id: string;
+  notebook_id: string;
+  filename: string;
+  content_type: string | null;
+  size: number | null;
+  status: string;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
 };

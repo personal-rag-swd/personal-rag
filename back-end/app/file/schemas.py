@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+from uuid import UUID
 
 
 class PresignedUrlRequest(BaseModel):
@@ -10,12 +11,19 @@ class PresignedUrlRequest(BaseModel):
     )
     operation: str = Field("upload", description="The S3 operation to perform: 'upload' or 'download'")
     content_type: str | None = Field(None, description="The content type of the file (e.g. application/pdf) for uploads")
+    notebook_id: UUID | None = Field(None, description="Notebook id for notebook-scoped upload ingestion")
     expires_in: int = Field(3600, ge=60, le=3600, description="URL expiration time in seconds (60 to 3600)")
 
 
 class PresignedUrlResponse(BaseModel):
     url: str
     key: str
+
+
+class UploadFailedRequest(BaseModel):
+    key: str = Field(..., min_length=1, max_length=2048)
+    notebook_id: UUID | None = None
+    error_message: str | None = Field(None, max_length=4000)
 
 
 class S3Bucket(BaseModel):
@@ -86,4 +94,3 @@ class FileCallbackPayload(BaseModel):
         s_val = s_val if s_val is not None else (self.size or self.Size or self.file_size)
 
         return ev_name, b_name, k_name, s_val
-

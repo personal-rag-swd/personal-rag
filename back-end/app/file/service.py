@@ -8,10 +8,13 @@ import boto3
 from botocore.exceptions import ClientError
 from botocore.config import Config
 from fastapi import HTTPException, status
+from sqlmodel import Session
 
 from app.core.config import Settings
 from app.users.models import User
 from app.file.schemas import PresignedUrlRequest, PresignedUrlResponse, FileCallbackPayload
+from app.notebooks.service import get_notebook
+from app.notebooks.tools import mark_document_uploaded_and_get_id, register_pending_notebook_document
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +26,7 @@ def sanitize_filename(filename: str) -> str:
     return base
 
 
-def get_s3_client(settings: Settings):
+def get_s3_client(settings: Settings, *, endpoint_url: str | None = None):
     s3_config = Config(
         signature_version="s3v4",
         retries={"max_attempts": 3},
@@ -37,8 +40,9 @@ def get_s3_client(settings: Settings):
         client_kwargs["aws_access_key_id"] = settings.aws_access_key_id
     if settings.aws_secret_access_key:
         client_kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
-    if settings.s3_endpoint_url:
-        client_kwargs["endpoint_url"] = settings.s3_endpoint_url
+    resolved_endpoint = endpoint_url or settings.s3_endpoint_url
+    if resolved_endpoint:
+        client_kwargs["endpoint_url"] = resolved_endpoint
 
     return boto3.client(**client_kwargs)
 
@@ -47,6 +51,7 @@ def generate_presigned_url_service(
     request: PresignedUrlRequest,
     current_user: User,
     settings: Settings,
+    session: Session,
 ) -> PresignedUrlResponse:
     operation = request.operation.lower()
     if operation not in ("upload", "download"):
@@ -80,7 +85,9 @@ def generate_presigned_url_service(
         s3_key = request.filename
 
     try:
-        s3_client = get_s3_client(settings)
+        # Sign against the same endpoint the browser will call.
+        presign_endpoint = settings.s3_public_endpoint_url or settings.s3_endpoint_url
+        s3_client = get_s3_client(settings, endpoint_url=presign_endpoint)
         if operation == "upload":
             params: dict = {"Bucket": settings.s3_bucket, "Key": s3_key}
             if request.content_type:
@@ -105,6 +112,18 @@ def generate_presigned_url_service(
             detail="Failed to generate presigned URL",
         )
 
+    if operation == "upload" and request.notebook_id is not None:
+        notebook = get_notebook(session, request.notebook_id, current_user)
+        register_pending_notebook_document(
+            session,
+            notebook=notebook,
+            current_user=current_user,
+            bucket=settings.s3_bucket,
+            key=s3_key,
+            filename=cleaned_name,
+            content_type=request.content_type,
+        )
+
     return PresignedUrlResponse(url=presigned_url, key=s3_key)
 
 
@@ -115,12 +134,13 @@ def handle_file_callback_service(
     payload: FileCallbackPayload,
     headers: dict[str, str],
     query_params: dict[str, str],
+    session: Session,
 ) -> dict[str, Any]:
-    """Processes an incoming RustFS/S3 webhook callback and returns parsed event details."""
+    """Processes an incoming S3-compatible webhook callback and returns parsed event details."""
     safe_headers = {k: v for k, v in headers.items() if k.lower() not in _SENSITIVE_HEADERS}
 
     logger.info(
-        "RustFS callback received | query=%s | headers=%s | payload=%s",
+        "S3 callback received | query=%s | headers=%s | payload=%s",
         query_params,
         safe_headers,
         payload.model_dump(),
@@ -135,13 +155,26 @@ def handle_file_callback_service(
 
     if key or bucket:
         logger.info(
-            "RustFS upload event | event=%s | bucket=%s | key=%s | size=%s",
+            "S3 upload event | event=%s | bucket=%s | key=%s | size=%s",
             event_name, bucket, key, size,
         )
+
+    document_id = mark_document_uploaded_and_get_id(
+        session,
+        bucket=bucket,
+        key=key,
+        size=size,
+        event_name=event_name,
+    )
 
     return {
         "status": "success",
         "message": "Callback processed successfully",
-        "details": {"key": key, "bucket": bucket, "size": size, "eventName": event_name},
+        "details": {
+            "key": key,
+            "bucket": bucket,
+            "size": size,
+            "eventName": event_name,
+            "document_id": str(document_id) if document_id else None,
+        },
     }
-

@@ -1,16 +1,18 @@
 import os
 from collections.abc import Generator
+from uuid import UUID
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import SQLModel, Session, create_engine, select
 
 from app.core.config import Settings, get_settings
 from app.core.security import create_access_token
 from app.dependencies import get_session
 from app.main import app
+from app.notebooks.models import NotebookDocument, NotebookDocumentChunk
 from app.users.models import User
 
 os.environ.setdefault("DATABASE_URL", "sqlite://")
@@ -153,6 +155,161 @@ def test_notebook_access_is_scoped_to_owner(
         headers=other_headers,
     ).status_code == 404
     assert client.delete(f"/api/v1/notebooks/{created['id']}", headers=other_headers).status_code == 404
+
+
+def test_list_notebook_documents_is_scoped_to_owner(
+    client: TestClient,
+    settings: Settings,
+    session: Session,
+) -> None:
+    owner = make_user("owner@example.com")
+    other_user = make_user("other@example.com")
+    session.add(owner)
+    session.add(other_user)
+    session.commit()
+
+    owner_notebook = client.post(
+        "/api/v1/notebooks/",
+        json={"name": "Private", "description": "", "tags": []},
+        headers=auth_headers(owner, settings),
+    ).json()
+
+    other_notebook = client.post(
+        "/api/v1/notebooks/",
+        json={"name": "Other", "description": "", "tags": []},
+        headers=auth_headers(other_user, settings),
+    ).json()
+
+    owner_doc = NotebookDocument(
+        notebook_id=UUID(owner_notebook["id"]),
+        user_id=owner.id,
+        s3_bucket="test-bucket",
+        s3_key=f"users/{owner.id}/doc.pdf",
+        filename="doc.pdf",
+        content_type="application/pdf",
+        size=123,
+        status="indexed",
+    )
+    other_doc = NotebookDocument(
+        notebook_id=UUID(other_notebook["id"]),
+        user_id=other_user.id,
+        s3_bucket="test-bucket",
+        s3_key=f"users/{other_user.id}/other.pdf",
+        filename="other.pdf",
+        content_type="application/pdf",
+        size=456,
+        status="indexed",
+    )
+    session.add(owner_doc)
+    session.add(other_doc)
+    session.commit()
+
+    owner_response = client.get(
+        f"/api/v1/notebooks/{owner_notebook['id']}/documents",
+        headers=auth_headers(owner, settings),
+    )
+    assert owner_response.status_code == 200
+    assert [document["filename"] for document in owner_response.json()] == ["doc.pdf"]
+    assert owner_response.json()[0]["status"] == "indexed"
+
+    other_response = client.get(
+        f"/api/v1/notebooks/{owner_notebook['id']}/documents",
+        headers=auth_headers(other_user, settings),
+    )
+    assert other_response.status_code == 404
+
+
+def test_delete_notebook_document_removes_source_and_chunks(
+    client: TestClient,
+    settings: Settings,
+    session: Session,
+) -> None:
+    user = make_user("user@example.com")
+    session.add(user)
+    session.commit()
+    headers = auth_headers(user, settings)
+
+    notebook = client.post(
+        "/api/v1/notebooks/",
+        json={"name": "Private", "description": "", "tags": []},
+        headers=headers,
+    ).json()
+
+    document = NotebookDocument(
+        notebook_id=UUID(notebook["id"]),
+        user_id=user.id,
+        s3_bucket="test-bucket",
+        s3_key=f"users/{user.id}/doc.pdf",
+        filename="doc.pdf",
+        content_type="application/pdf",
+        size=123,
+        status="indexed",
+    )
+    session.add(document)
+    session.commit()
+    session.refresh(document)
+
+    chunk = NotebookDocumentChunk(
+        document_id=document.id,
+        notebook_id=document.notebook_id,
+        user_id=user.id,
+        chunk_index=0,
+        content="Notebook source text",
+        chunk_metadata={"source": document.s3_key},
+        embedding=[0.0] * 1536,
+    )
+    session.add(chunk)
+    session.commit()
+
+    response = client.delete(
+        f"/api/v1/notebooks/{notebook['id']}/documents/{document.id}",
+        headers=headers,
+    )
+
+    assert response.status_code == 204
+    assert session.get(NotebookDocument, document.id) is None
+    chunks = session.exec(select(NotebookDocumentChunk).where(NotebookDocumentChunk.document_id == document.id)).all()
+    assert chunks == []
+
+
+def test_delete_notebook_document_is_scoped_to_owner(
+    client: TestClient,
+    settings: Settings,
+    session: Session,
+) -> None:
+    owner = make_user("owner@example.com")
+    other_user = make_user("other@example.com")
+    session.add(owner)
+    session.add(other_user)
+    session.commit()
+
+    notebook = client.post(
+        "/api/v1/notebooks/",
+        json={"name": "Private", "description": "", "tags": []},
+        headers=auth_headers(owner, settings),
+    ).json()
+
+    document = NotebookDocument(
+        notebook_id=UUID(notebook["id"]),
+        user_id=owner.id,
+        s3_bucket="test-bucket",
+        s3_key=f"users/{owner.id}/doc.pdf",
+        filename="doc.pdf",
+        content_type="application/pdf",
+        size=123,
+        status="indexed",
+    )
+    session.add(document)
+    session.commit()
+    session.refresh(document)
+
+    response = client.delete(
+        f"/api/v1/notebooks/{notebook['id']}/documents/{document.id}",
+        headers=auth_headers(other_user, settings),
+    )
+
+    assert response.status_code == 404
+    assert session.get(NotebookDocument, document.id) is not None
 
 
 def test_create_notebook_requires_name(

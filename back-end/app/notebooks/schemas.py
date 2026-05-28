@@ -70,11 +70,43 @@ class NotebookRead(BaseModel):
     query_count: int = 0
 
 
+class NotebookDocumentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    notebook_id: UUID
+    filename: str
+    content_type: str | None
+    size: int | None
+    status: str
+    error_message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
 class NotebookChatHistoryPart(BaseModel):
     type: str
+    content: str
+
+
+class NotebookChatSource(BaseModel):
+    filename: str
+    document_id: UUID
+    chunk_index: int
+    content: str
+
+
+class NotebookChatReference(BaseModel):
+    ref_id: str
+    citation_number: int
+    filename: str
+    document_id: UUID
+    chunk_index: int
     content: str
 
 
 class NotebookChatHistoryMessage(BaseModel):
     role: str
     parts: list[NotebookChatHistoryPart]
+    sources: list[NotebookChatSource] = Field(default_factory=list)
+    references: list[NotebookChatReference] = Field(default_factory=list)
