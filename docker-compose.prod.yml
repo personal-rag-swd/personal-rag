@@ -79,12 +79,13 @@ services:
       S3_BUCKET: ${S3_BUCKET:-personal-rag-bucket}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      VITE_API_URL: ${VITE_API_URL}
     entrypoint: >
       /bin/sh -c "
       until mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; do sleep 2; done;
       mc mb --ignore-existing local/$${S3_BUCKET};
       until wget -qO- http://backend:8000/ping >/dev/null 2>&1; do echo 'Waiting for backend...' && sleep 2; done;
-      mc admin config set local notify_webhook:backend endpoint=http://backend:8000/api/v1/file/callback;
+      mc admin config set local notify_webhook:backend endpoint=$${VITE_API_URL}/api/v1/file/callback;
       mc admin service restart --json --disable-pager local;
       sleep 3;
       mc event add local/$${S3_BUCKET} arn:minio:sqs::backend:webhook --event put || true;
