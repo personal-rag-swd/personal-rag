@@ -76,8 +76,12 @@ If you want to manage backups, scale services, and monitor resource metrics sepa
 3. Set the image to `minio/minio:latest`.
 4. Under **General/Command**, set the command to `server /data --console-address ":9001"`.
 5. Set up a persistent volume mount `/data` -> `minio-data-volume`.
-6. Add environment variables for `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD`.
-7. Bind two domains:
+7. Add environment variables for admin access and to pre-configure the event webhook on startup:
+   - `MINIO_ROOT_USER`: *Your Root User*
+   - `MINIO_ROOT_PASSWORD`: *Your Root Password*
+   - `MINIO_NOTIFY_WEBHOOK_ENABLE_backend`: `on`
+   - `MINIO_NOTIFY_WEBHOOK_ENDPOINT_backend`: `http://backend:8000/api/v1/file/callback` (Use `http://backend:8000` if on same network, otherwise use public `https://api.quanphungg.me/api/v1/file/callback`)
+8. Bind two domains:
    - API domain: `https://s3.quanphungg.me` -> Port `9000`.
    - Console domain: `https://s3-console.quanphungg.me` -> Port `9001`.
 
@@ -99,7 +103,13 @@ If you want to manage backups, scale services, and monitor resource metrics sepa
 5. Enable automatic deployments under the **Triggers** tab.
 
 ### 5. MinIO Event Webhook Setup (Required for Document Uploads)
-Because MinIO and Backend are now standalone, you need to run the `mc` command setup once to ensure MinIO triggers callbacks to the Backend whenever a file is uploaded:
+Because MinIO and Backend are standalone, you must ensure MinIO triggers callbacks to the Backend whenever a file is uploaded.
+
+> [!TIP]
+> **Preferred Method (Zero Restarts)**: 
+> Define the environment variables `MINIO_NOTIFY_WEBHOOK_ENABLE_backend="on"` and `MINIO_NOTIFY_WEBHOOK_ENDPOINT_backend="http://backend:8000/api/v1/file/callback"` directly on your MinIO container configuration. This avoids the need for interactive terminal access or manual service restarts.
+
+If you choose to configure the webhook manually via the `mc` CLI:
 1. Access your Dokploy server via SSH or run a temporary helper container in the network.
 2. Authenticate the CLI with MinIO:
    ```bash
@@ -109,17 +119,12 @@ Because MinIO and Backend are now standalone, you need to run the `mc` command s
    ```bash
    mc mb --ignore-existing local/personal-rag-bucket
    ```
-4. Register the webhook event:
+4. Register the webhook event (requires restarting the MinIO service):
    ```bash
    mc admin config set local notify_webhook:backend endpoint=https://api.quanphungg.me/api/v1/file/callback
+   # If running interactively, restart the service to apply changes:
    mc admin service restart local
-   mc event add local/personal-rag-bucket arn:minio:sqs::backend:webhook --event put
-   ```
-
-   If MinIO and the backend are running in the same compose network, use the internal service URL instead:
-   ```bash
-   mc admin config set local notify_webhook:backend endpoint=http://backend:8000/api/v1/file/callback
-   mc admin service restart local
+   # Once restarted, register the bucket event notification:
    mc event add local/personal-rag-bucket arn:minio:sqs::backend:webhook --event put
    ```
 

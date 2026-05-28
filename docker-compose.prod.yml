@@ -22,6 +22,8 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL}
       MINIO_SERVER_URL: ${MINIO_SERVER_URL}
+      MINIO_NOTIFY_WEBHOOK_ENABLE_backend: "on"
+      MINIO_NOTIFY_WEBHOOK_ENDPOINT_backend: http://backend:8000/api/v1/file/callback
     volumes:
       - minio_prod_data:/data
     healthcheck:
@@ -83,8 +85,6 @@ services:
       /bin/sh -c "
       until mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; do sleep 2; done;
       mc mb --ignore-existing local/$${S3_BUCKET};
-      mc admin config set local notify_webhook:backend endpoint=http://backend:8000/api/v1/file/callback;
-      mc admin service restart local;
       sleep 5;
       mc event add local/$${S3_BUCKET} arn:minio:sqs::backend:webhook --event put || true;
       "
