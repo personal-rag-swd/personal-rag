@@ -65,6 +65,11 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/ping')\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     restart: always
 
   minio-mc:
@@ -78,6 +83,7 @@ services:
       /bin/sh -c "
       until mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; do sleep 2; done;
       mc mb --ignore-existing local/$${S3_BUCKET};
+      until wget -qO- http://backend:8000/ping >/dev/null 2>&1; do echo 'Waiting for backend...' && sleep 2; done;
       mc admin config set local notify_webhook:backend endpoint=http://backend:8000/api/v1/file/callback;
       mc admin service restart --json --disable-pager local;
       sleep 3;
@@ -87,7 +93,7 @@ services:
       minio:
         condition: service_healthy
       backend:
-        condition: service_started
+        condition: service_healthy
 
   frontend:
     build:
