@@ -39,24 +39,66 @@ import { apiFetch } from "@/lib/api-client"
 const preprocessCitations = (text: string) => {
   const citationMap = new Map<string, number>()
   let currentNum = 1
-  const regex =
-    /\[(?:file=([^,\]]+)|([^,\]]+)),\s*(?:doc_id=([^,\]]+),\s*)?chunk(?:=|\s+)(\d+)(?:\s*,\s*doc_id=([^,\]]+))?\]/g
 
-  return text.replace(
-    regex,
-    (_match, filenameKv, filenameLegacy, docId1, chunkIndex, docId2) => {
-      const filename = (filenameKv ?? filenameLegacy ?? "").trim()
-      const docId = (docId1 ?? docId2 ?? "").trim()
-      const key = docId ? `${docId}:${chunkIndex}` : `${filename}:${chunkIndex}`
-      let num = citationMap.get(key)
-      if (num === undefined) {
-        num = currentNum++
-        citationMap.set(key, num)
-      }
-      const docIdPart = docId ? `/${encodeURIComponent(docId)}` : ""
-      return `[${num}](#cite/${num}/${encodeURIComponent(filename)}/${chunkIndex}${docIdPart})`
+  // Match any bracket enclosing 'chunk' followed by a number
+  const regex = /\[([^\]]*\bchunk\b(?:=|\s+)(\d+)[^\]]*)\]/gi
+
+  return text.replace(regex, (match, innerContent, chunkIndexStr) => {
+    const chunkIndex = Number.parseInt(chunkIndexStr, 10)
+    if (Number.isNaN(chunkIndex)) return match
+
+    let docId = ""
+    let filename = ""
+
+    // 1. Try to extract doc_id=...
+    const docIdMatch = innerContent.match(/doc_id\s*=\s*([^,\s\]]+)/i)
+    if (docIdMatch) {
+      docId = docIdMatch[1].trim()
     }
-  )
+
+    // 2. Try to extract file=... or filename=...
+    const fileMatch = innerContent.match(/(?:file|filename)\s*=\s*([^,\s\]]+)/i)
+    if (fileMatch) {
+      filename = fileMatch[1].trim()
+    } else {
+      // E.g. [filename, chunk 15] -> everything before the comma is filename
+      const commaParts = innerContent.split(",")
+      if (
+        commaParts.length > 1 &&
+        !commaParts[0].includes("chunk") &&
+        !commaParts[0].includes("doc_id")
+      ) {
+        filename = commaParts[0].trim()
+      }
+    }
+
+    // 3. Fallback: extract any potential filename token
+    if (!filename && !docId) {
+      const tokens = innerContent.split(/[\s,]+/)
+      for (const token of tokens) {
+        const cleaned = token.trim()
+        if (
+          cleaned &&
+          !cleaned.toLowerCase().includes("chunk") &&
+          !cleaned.toLowerCase().includes("doc_id") &&
+          !cleaned.includes("=")
+        ) {
+          filename = cleaned
+          break
+        }
+      }
+    }
+
+    const key = docId ? `${docId}:${chunkIndex}` : `${filename}:${chunkIndex}`
+    let num = citationMap.get(key)
+    if (num === undefined) {
+      num = currentNum++
+      citationMap.set(key, num)
+    }
+    const docIdPart = docId ? `/${encodeURIComponent(docId)}` : ""
+    const filenamePart = filename ? encodeURIComponent(filename) : ""
+    return `[${num}](#cite/${num}/${filenamePart}/${chunkIndex}${docIdPart})`
+  })
 }
 
 const MarkdownTextImpl = () => {
@@ -204,8 +246,8 @@ function CitationPopover({
     (s) =>
       (
         (s.message.metadata as Record<string, unknown> | undefined)?.custom as
-          | Record<string, unknown>
-          | undefined
+        | Record<string, unknown>
+        | undefined
       )?.sources as ChunkType[] | undefined
   )
   const sources = sourcesRaw ?? []
@@ -213,8 +255,8 @@ function CitationPopover({
     (s) =>
       (
         (s.message.metadata as Record<string, unknown> | undefined)?.custom as
-          | Record<string, unknown>
-          | undefined
+        | Record<string, unknown>
+        | undefined
       )?.references as ReferenceType[] | undefined
   )
   const references = referencesRaw ?? []
@@ -233,14 +275,18 @@ function CitationPopover({
         src.chunk_index === resolvedChunkIndex
       )
     }
-    if (!resolvedFilename || resolvedChunkIndex < 0) return false
-    return (
-      src.filename === resolvedFilename &&
-      src.chunk_index === resolvedChunkIndex
-    )
+    if (resolvedFilename) {
+      return (
+        src.filename === resolvedFilename &&
+        src.chunk_index === resolvedChunkIndex
+      )
+    }
+    // Fallback: match by chunk index if filename/document_id is not specified in the citation
+    return resolvedChunkIndex >= 0 && src.chunk_index === resolvedChunkIndex
   })
 
   const finalDocumentId = resolvedDocumentId || localSource?.document_id || ""
+  const finalFilename = resolvedFilename || localSource?.filename || ""
 
   const [fetchedSource, setFetchedSource] = useState<ChunkType | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -255,17 +301,17 @@ function CitationPopover({
 
     const fetchPromise = finalDocumentId
       ? apiFetch<ChunkType>(
-          `/api/v1/notebooks/${notebookId}/documents/${finalDocumentId}/chunks/${resolvedChunkIndex}`
-        )
-      : resolvedFilename
+        `/api/v1/notebooks/${notebookId}/documents/${finalDocumentId}/chunks/${resolvedChunkIndex}`
+      )
+      : finalFilename
         ? apiFetch<{ content: string; filename: string; chunk_index: number }>(
-            `/api/v1/notebooks/${notebookId}/chunks?filename=${encodeURIComponent(resolvedFilename)}&chunk_index=${resolvedChunkIndex}`
-          ).then((data) => ({
-            filename: data.filename,
-            document_id: "",
-            chunk_index: data.chunk_index,
-            content: data.content,
-          }))
+          `/api/v1/notebooks/${notebookId}/chunks?filename=${encodeURIComponent(finalFilename)}&chunk_index=${resolvedChunkIndex}`
+        ).then((data) => ({
+          filename: data.filename,
+          document_id: "",
+          chunk_index: data.chunk_index,
+          content: data.content,
+        }))
         : Promise.reject(new Error("Missing source lookup metadata"))
 
     fetchPromise
@@ -283,7 +329,7 @@ function CitationPopover({
     localSource,
     finalDocumentId,
     resolvedChunkIndex,
-    resolvedFilename,
+    finalFilename,
     notebookId,
     isOpen,
   ])
@@ -320,9 +366,9 @@ function CitationPopover({
           <div className="flex items-center justify-between border-b border-border/40 bg-muted/20 px-3.5 py-2.5">
             <span
               className="max-w-[80%] truncate text-xs font-semibold text-foreground/90"
-              title={resolvedFilename}
+              title={finalFilename}
             >
-              {resolvedFilename}
+              {finalFilename}
             </span>
           </div>
 
@@ -372,7 +418,7 @@ function CitationPopover({
           <div className="flex shrink-0 items-center justify-between border-b border-border/40 bg-muted/10 px-6 py-4">
             <DialogHeader className="gap-0.5">
               <DialogTitle className="max-w-xl truncate text-base font-semibold text-foreground">
-                {resolvedFilename}
+                {finalFilename}
               </DialogTitle>
             </DialogHeader>
           </div>
@@ -431,7 +477,7 @@ const useCopyToClipboard = ({
         setIsCopied(true)
         setTimeout(() => setIsCopied(false), copiedDuration)
       },
-      () => {}
+      () => { }
     )
   }
 
@@ -639,7 +685,7 @@ const defaultComponents = memoizeMarkdownComponents({
       <code
         className={cn(
           !isCodeBlock &&
-            "aui-md-inline-code rounded-md border border-border/50 bg-muted/50 px-1.5 py-0.5 font-mono text-[0.85em]",
+          "aui-md-inline-code rounded-md border border-border/50 bg-muted/50 px-1.5 py-0.5 font-mono text-[0.85em]",
           className
         )}
         {...props}
