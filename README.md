@@ -1,28 +1,76 @@
 # Personal RAG
 
-Personal RAG is a two-part application with a FastAPI backend and a Vite + React frontend. The backend provides authentication, user management, notebooks, and file services (presigned URLs and upload callbacks). The frontend provides the application UI.
+Personal RAG is a two-part application with a FastAPI backend and a Vite + React frontend. The backend provides authentication, user management, notebooks, and file services (presigned URLs and upload callbacks). The frontend delivers the application UI and client-side workflows.
+
+## What This App Includes
+
+- FastAPI API with feature-oriented modules (`auth`, `users`, `file`, `notebooks`)
+- File upload flow with presigned URLs and callback handling
+- React 19 frontend with Tailwind CSS and shadcn/ui components
+- Local dev stack with Postgres + pgvector and MinIO
+
+## How The App Is Organized
+
+- Backend API lives under `back-end/app/` and exposes routes under `/api/v1`
+- Scalar API docs are available at `GET /docs`
+- Frontend lives under `front-end/` and talks to the API via `VITE_API_URL`
+- Object storage uses MinIO locally; upload callbacks hit `/api/v1/file/callback`
 
 ## Repository Structure
 
 ```text
 .
-├── back-end/          # FastAPI, SQLModel, Alembic, pytest
-│   ├── app/           # API application code (auth, users, file)
-│   ├── alembic/       # Database migration environment and versions
-│   └── pyproject.toml # Python dependencies and pytest config
-├── front-end/         # Vite, React, TypeScript, Tailwind CSS
-│   ├── src/           # Application source code
-│   ├── src/features/  # Feature modules (auth, files actions and state)
-│   └── package.json   # Frontend scripts and dependencies
-├── docker-compose.yml # Full local dev stack (Postgres, MinIO, backend, frontend)
-└── AGENTS.md          # Contributor guide
+├── back-end/               # FastAPI, SQLModel, Alembic, pytest
+│   ├── app/                # API application code
+│   │   ├── auth/           # Authentication flows
+│   │   ├── users/          # User management
+│   │   ├── file/           # File upload + callbacks
+│   │   ├── notebooks/      # Notebook endpoints
+│   │   ├── core/           # Settings, DB, security
+│   │   ├── middleware/     # Request middleware
+│   │   └── utils/          # Shared helpers
+│   ├── tests/              # Pytest suites
+│   ├── alembic/            # Database migration environment and versions
+│   └── pyproject.toml      # Python dependencies and pytest config
+├── front-end/              # Vite, React, TypeScript, Tailwind CSS
+│   ├── src/                # Application source code
+│   │   ├── components/     # Shared UI
+│   │   │   └── ui/         # shadcn/ui components
+│   │   ├── features/       # Feature API/types/state
+│   │   ├── hooks/          # Shared hooks
+│   │   ├── lib/            # Client utilities
+│   │   ├── assets/         # Bundled assets
+│   │   ├── routes.tsx      # App routes
+│   │   └── App.tsx         # App shell
+│   ├── public/             # Static assets
+│   └── package.json        # Frontend scripts and dependencies
+├── docker-compose.yml      # Full local dev stack (Postgres, MinIO, backend, frontend)
+├── docker-compose.prod.yml # Production compose stack
+├── DOKPLOY_DEPLOYMENT.md   # Dokploy deployment notes
+└── AGENTS.md               # Contributor guide
 ```
 
 ## Prerequisites
 
-- Docker and Docker Compose
+- Docker and Docker Compose for full-stack local dev
+- Node.js and npm for frontend-only development
+- `uv` for backend development (Python dependency manager)
 
-## Quick Start (Full Stack via Docker Compose)
+## Local Development
+
+The easiest way to run locally is Docker Compose. It brings up Postgres, MinIO,
+the FastAPI backend, and the Vite dev server in one command.
+
+If you want to run the backend and frontend on your host machine instead, keep
+Postgres and MinIO in Compose and start the services manually.
+
+### Option A: Full Stack via Docker Compose (Recommended)
+
+First-time setup:
+
+```bash
+cp .env.example .env
+```
 
 ```bash
 docker compose up --build
@@ -34,6 +82,7 @@ Service URLs:
 - Backend API: `http://localhost:8000`
 - `GET /ping` for a health check
 - `GET /docs` for Scalar API documentation
+- API base path: `/api/v1`
 - MinIO API: `http://localhost:9000`
 - MinIO Console: `http://localhost:9001` (username/password: `minioadmin` / `minioadmin`)
 
@@ -44,9 +93,9 @@ The stack includes:
 - FastAPI backend in dev mode
 - Vite frontend dev server
 
-## Optional Host-Run Setup
+### Option B: Host-Run Backend + Frontend
 
-If you prefer running backend/frontend directly on your host, keep Postgres/MinIO in Compose:
+If you prefer running the backend and frontend directly on your host, keep Postgres/MinIO in Compose:
 
 ```bash
 cp .env.example .env
@@ -62,6 +111,9 @@ cd front-end
 npm install
 npm run dev
 ```
+
+Once running, the frontend is at `http://localhost:5173` and the API is at
+`http://localhost:8000`.
 
 ## Development Commands
 

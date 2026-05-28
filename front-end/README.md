@@ -1,6 +1,23 @@
-# React + TypeScript + Vite + shadcn/ui
+# Frontend (Vite + React + TypeScript)
 
-This is a template for a new Vite project with React, TypeScript, and shadcn/ui.
+The frontend is a Vite + React application styled with Tailwind CSS and shadcn/ui components.
+
+## Project Structure
+
+```text
+front-end/
+├── src/
+│   ├── components/     # Shared UI
+│   │   └── ui/         # shadcn/ui components
+│   ├── features/       # Feature API/types/state
+│   ├── hooks/          # Shared hooks
+│   ├── lib/            # Client utilities
+│   ├── assets/         # Bundled assets
+│   ├── routes.tsx      # App routes
+│   └── App.tsx         # App shell
+├── public/             # Static assets
+└── package.json        # Scripts and dependencies
+```
 
 ## Adding components
 
@@ -10,7 +27,7 @@ To add components to your app, run the following command:
 npx shadcn@latest add button
 ```
 
-This will place the ui components in the `src/components` directory.
+This will place the ui components in the `src/components/ui` directory.
 
 ## Using components
 

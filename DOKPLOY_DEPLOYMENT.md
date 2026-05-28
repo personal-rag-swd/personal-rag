@@ -1,0 +1,134 @@
+# Dokploy Deployment Guide for Personal RAG
+
+This guide outlines how to host your **Personal RAG** application in **Dokploy**, a modern self-hosted Platform-as-a-Service (PaaS) built on Docker Swarm and Traefik, customized for your domain **`*.quanphungg.me`**.
+
+We have pre-configured production files in the repository:
+- [front-end/Dockerfile](file:///home/quan/personal-rag/front-end/Dockerfile) — SPA-optimized Multi-stage production build using Nginx.
+- [front-end/nginx.conf](file:///home/quan/personal-rag/front-end/nginx.conf) — Custom configuration with gzip compression and SPA fallback routing.
+- [docker-compose.prod.yml](file:///home/quan/personal-rag/docker-compose.prod.yml) — Production-ready multi-container orchestration stripped of development bind mounts.
+
+---
+
+## Strategy 1: Deploy as a Dokploy Compose Stack (Recommended)
+
+This is the easiest and most cohesive approach, as it preserves the exact inter-container networking and dependency ordering defined in your docker-compose config.
+
+### Step 1: Create a Compose Project in Dokploy
+1. Log in to your Dokploy Dashboard.
+2. Click **Create Project** (or navigate to an existing Project).
+3. Under the **Services** section, click **Create Service** and select **Compose**.
+4. Give it a name (e.g., `personal-rag-stack`).
+
+### Step 2: Configure the Stack
+1. Inside your new Compose service, go to the **Source** tab.
+2. Select **Git** and connect your repository:
+   - **Repository URL**: Your git repository URL.
+   - **Branch**: `main` (or your production branch).
+   - **Compose File Path**: `docker-compose.prod.yml`.
+3. Save the configurations.
+
+### Step 3: Add Environment Variables
+Go to the **Environment** tab of the Compose service and add the following required production environment variables.
+
+| Variable | Recommended Production Value | Description |
+| :--- | :--- | :--- |
+| `POSTGRES_USER` | `rag_admin` (custom name) | Postgres database username |
+| `POSTGRES_PASSWORD` | *Strong Random String (e.g., 32+ chars)* | Postgres database password |
+| `POSTGRES_DB` | `personal_rag` | Postgres database name |
+| `MINIO_ROOT_USER` | `minio_admin` (custom name) | MinIO admin dashboard username |
+| `MINIO_ROOT_PASSWORD` | *Strong Random String (e.g., 32+ chars)* | MinIO admin dashboard password |
+| `JWT_SECRET_KEY` | *Generate secure token (`openssl rand -hex 32`)* | Backend authentication key |
+| `RESEND_API_KEY` | *Your Resend API Key* | (Optional) Email sender configuration |
+| `RESEND_FROM_EMAIL` | `noreply@quanphungg.me` | Verified sending domain email |
+| `OPENROUTER_API_KEY` | *Your OpenRouter API Key* | API key for LLM integrations |
+| `CORS_ORIGINS` | `["https://rag.quanphungg.me", "https://quanphungg.me"]` | JSON list of allowed origins |
+| `VITE_API_URL` | `https://api.quanphungg.me` | Public URL of backend API |
+| `S3_PUBLIC_ENDPOINT_URL` | `https://s3.quanphungg.me` | Public URL of MinIO storage endpoint |
+| `S3_BUCKET` | `personal-rag-bucket` | S3 bucket name |
+
+### Step 4: Expose Services via Domains
+Dokploy integrates seamlessly with Traefik to handle Let's Encrypt SSL certificates automatically. To expose the Frontend, Backend, and MinIO publicly, go to the **Domains** tab in each respective service configuration or configure it via the Dokploy UI:
+- **Frontend Service**: Route public domain `https://rag.quanphungg.me` (or `https://quanphungg.me`) to internal container port `80`.
+- **Backend Service**: Route public domain `https://api.quanphungg.me` to internal container port `8000`.
+- **MinIO Service**: 
+  - Route public domain `https://s3-console.quanphungg.me` to internal container port `9001` (console UI).
+  - Route public domain `https://s3.quanphungg.me` to internal container port `9000` (API endpoint).
+
+### Step 5: Deploy
+Click **Deploy** in the top-right corner. Dokploy will pull the code, build the backend and frontend Dockerfiles in production mode, set up the volumes, boot the services, and auto-provision your SSL certificates.
+
+---
+
+## Strategy 2: Deploy as Individual Services (For Advanced Control)
+
+If you want to manage backups, scale services, and monitor resource metrics separately, you can split them into individual native Dokploy services.
+
+### 1. Database (PostgreSQL with `pgvector`)
+1. In Dokploy, click **Create Service** and select **Database** -> **PostgreSQL**.
+2. **Crucial**: By default, standard PostgreSQL does not include the vector extension. Under advanced settings, configure the image to be `pgvector/pgvector:pg18` instead of standard `postgres:latest`.
+3. Dokploy will auto-generate your connection details. Save them.
+
+### 2. MinIO (Object Storage)
+1. Click **Create Service** -> **Application**.
+2. In the **Source** tab, select **Docker Image**.
+3. Set the image to `minio/minio:latest`.
+4. Under **General/Command**, set the command to `server /data --console-address ":9001"`.
+5. Set up a persistent volume mount `/data` -> `minio-data-volume`.
+6. Add environment variables for `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD`.
+7. Bind two domains:
+   - API domain: `https://s3.quanphungg.me` -> Port `9000`.
+   - Console domain: `https://s3-console.quanphungg.me` -> Port `9001`.
+
+### 3. Backend (FastAPI Application)
+1. Click **Create Service** -> **Application**.
+2. Select your git repository, branch `main`, and set the subfolder path to `back-end`.
+3. In the **Build** tab, select **Dockerfile** (Dokploy will automatically find the Dockerfile in `back-end/Dockerfile`).
+4. Set the **Environment Variables** in the UI (including the database URL generated in Step 1, MinIO credentials, keys, etc.).
+5. Bind a domain: `https://api.quanphungg.me` -> Port `8000`.
+6. Enable automatic deployments under the **Triggers** tab so that git commits to your branch auto-update the API!
+
+### 4. Frontend (Vite SPA Application)
+1. Click **Create Service** -> **Application**.
+2. Select your git repository, branch `main`, and set the subfolder path to `front-end`.
+3. In the **Build** tab, you have two options:
+   - **Nixpacks**: Dokploy native builder. It will auto-detect Vite and build it automatically.
+   - **Dockerfile**: Use the newly created `front-end/Dockerfile`. Set the build argument `VITE_API_URL` to `https://api.quanphungg.me`.
+4. Bind a domain: `https://rag.quanphungg.me` (or `https://quanphungg.me`) -> Port `80` (since Nginx serves it on port 80).
+5. Enable automatic deployments under the **Triggers** tab.
+
+### 5. MinIO Event Webhook Setup (Required for Document Uploads)
+Because MinIO and Backend are now standalone, you need to run the `mc` command setup once to ensure MinIO triggers callbacks to the Backend whenever a file is uploaded:
+1. Access your Dokploy server via SSH or run a temporary helper container in the network.
+2. Authenticate the CLI with MinIO:
+   ```bash
+   mc alias set local https://s3.quanphungg.me your_minio_root_user your_minio_root_password
+   ```
+3. Create the bucket:
+   ```bash
+   mc mb --ignore-existing local/personal-rag-bucket
+   ```
+4. Register the webhook event:
+   ```bash
+   mc admin config set local notify_webhook:backend endpoint=https://api.quanphungg.me/api/v1/file/callback
+   mc admin service restart local
+   mc event add local/personal-rag-bucket arn:minio:sqs::backend:webhook --event put
+   ```
+
+---
+
+## Important Security Checkpoints
+
+> [!WARNING]
+> **Production CORS Configuration**
+> Ensure your `CORS_ORIGINS` environment variable matches the exact domain on which your frontend is hosted. For example:
+> `CORS_ORIGINS=["https://rag.quanphungg.me", "https://quanphungg.me"]`
+
+> [!IMPORTANT]
+> **Cookie Security**
+> In production, change the following backend environment variables to protect user session cookies:
+> - `COOKIE_SECURE=true` (forces HTTPS cookies)
+> - `COOKIE_SAMESITE=lax` (prevents CSRF attacks while maintaining user sessions)
+
+> [!TIP]
+> **Data Persistence**
+> Verify that the Dokploy volumes (such as `postgres_prod_data` and `minio_prod_data` in Compose, or native volumes under individual applications) are persistent. Avoid using ephemeral server directories to ensure your users' notebooks, files, and logins survive server restarts or container builds.
