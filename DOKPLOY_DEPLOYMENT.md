@@ -44,6 +44,8 @@ Go to the **Environment** tab of the Compose service and add the following requi
 | `CORS_ORIGINS` | `["https://rag.quanphungg.me", "https://quanphungg.me"]` | JSON list of allowed origins |
 | `VITE_API_URL` | `https://api.quanphungg.me` | Public URL of backend API |
 | `S3_PUBLIC_ENDPOINT_URL` | `https://s3.quanphungg.me` | Public URL of MinIO storage endpoint |
+| `MINIO_BROWSER_REDIRECT_URL` | `https://s3-console.quanphungg.me` | MinIO browser console redirection URL |
+| `MINIO_SERVER_URL` | `https://s3.quanphungg.me` | Public API endpoint for MinIO storage |
 | `S3_BUCKET` | `personal-rag-bucket` | S3 bucket name |
 
 ### Step 4: Expose Services via Domains
