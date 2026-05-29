@@ -6,9 +6,9 @@ from pydantic_ai.messages import ModelRequest
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session, delete, select, func
 
+from app.notebooks.memory import load_notebook_chat_history
 from app.notebooks.models import Notebook, NotebookDocument, NotebookDocumentChunk
 from app.notebooks.schemas import NotebookCreate, NotebookUpdate
-from app.notebooks.memory import load_notebook_chat_history
 from app.users.models import User
 
 
@@ -18,10 +18,7 @@ def list_notebooks(session: Session, current_user: User) -> list[Notebook]:
         .where(Notebook.user_id == current_user.id)
         .order_by(Notebook.last_active_at.desc(), Notebook.created_at.desc())
     )
-    notebooks = list(session.exec(statement).all())
-    for notebook in notebooks:
-        populate_notebook_counts(session, notebook)
-    return notebooks
+    return list(session.exec(statement).all())
 
 
 def get_notebook(session: Session, notebook_id: UUID, current_user: User) -> Notebook:
@@ -33,7 +30,7 @@ def get_notebook(session: Session, notebook_id: UUID, current_user: User) -> Not
     ).first()
     if notebook is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notebook not found")
-    return populate_notebook_counts(session, notebook)
+    return notebook
 
 
 def list_notebook_documents(
@@ -91,8 +88,6 @@ def create_notebook(session: Session, payload: NotebookCreate, current_user: Use
     except SQLAlchemyError as exc:
         session.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from exc
-    notebook.__dict__["document_count"] = 0
-    notebook.__dict__["query_count"] = 0
     return notebook
 
 
@@ -114,7 +109,7 @@ def update_notebook(
     except SQLAlchemyError as exc:
         session.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from exc
-    return populate_notebook_counts(session, notebook)
+    return notebook
 
 
 def touch_notebook(session: Session, notebook_id: UUID, current_user: User) -> Notebook:
@@ -129,21 +124,18 @@ def touch_notebook(session: Session, notebook_id: UUID, current_user: User) -> N
     except SQLAlchemyError as exc:
         session.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from exc
-    return populate_notebook_counts(session, notebook)
+    return notebook
 
 
-def populate_notebook_counts(session: Session, notebook: Notebook) -> Notebook:
-    # Count documents in the notebook
+def populate_notebook_metrics(session: Session, notebook_id: UUID, current_user: User) -> Notebook:
+    notebook = get_notebook(session, notebook_id, current_user)
     doc_count = session.exec(
         select(func.count(NotebookDocument.id))
         .where(NotebookDocument.notebook_id == notebook.id)
+        .where(NotebookDocument.user_id == current_user.id)
     ).one() or 0
-
-    # Count user queries in the notebook chat history
     messages = load_notebook_chat_history(session, notebook)
-    query_count = sum(1 for m in messages if isinstance(m, ModelRequest))
-
-    # Attach as dynamic properties directly to __dict__ to bypass Pydantic's __setattr__ validation
+    query_count = sum(1 for message in messages if isinstance(message, ModelRequest))
     notebook.__dict__["document_count"] = doc_count
     notebook.__dict__["query_count"] = query_count
     return notebook
@@ -157,4 +149,3 @@ def delete_notebook(session: Session, notebook_id: UUID, current_user: User) -> 
     except SQLAlchemyError as exc:
         session.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from exc
-

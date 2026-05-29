@@ -83,6 +83,9 @@ class FakeRunResult:
     def all_messages(self) -> list[ModelMessage]:
         return self._messages
 
+    def new_messages(self) -> list[ModelMessage]:
+        return self._messages
+
 
 def test_notebook_chat_endpoint_streams_response(
     client: TestClient,
@@ -481,3 +484,56 @@ def test_chunks_endpoints_scope(
     assert resp_single_by_id.status_code == 200
     assert resp_single_by_id.json()["content"] == "Grounding content"
     assert resp_single_by_id.json()["document_id"] == str(doc.id)
+
+
+def test_append_notebook_chat_history_does_not_delete_old_messages(session: Session) -> None:
+    from app.notebooks.memory.history import append_notebook_chat_history
+    from app.notebooks.models import Notebook, NotebookMessage
+    import uuid
+
+    notebook = Notebook(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        name="Test Notebook",
+        description="",
+        tags=[],
+    )
+    session.add(notebook)
+    session.commit()
+
+    msg_pair_1 = [
+        ModelRequest(parts=[UserPromptPart(content="Hello")]),
+        ModelResponse(parts=[TextPart(content="Hi there")]),
+    ]
+    append_notebook_chat_history(session, notebook, msg_pair_1)
+
+    stored_1 = session.exec(
+        select(NotebookMessage)
+        .where(NotebookMessage.notebook_id == notebook.id)
+        .order_by(NotebookMessage.seq.asc())
+    ).all()
+    assert len(stored_1) == 2
+    assert stored_1[0].seq == 1
+    assert stored_1[0].message["parts"][0]["content"] == "Hello"
+    assert stored_1[1].seq == 2
+    assert stored_1[1].message["parts"][0]["content"] == "Hi there"
+
+    msg_pair_2 = [
+        ModelRequest(parts=[UserPromptPart(content="How are you?")]),
+        ModelResponse(parts=[TextPart(content="I am doing great")]),
+    ]
+    append_notebook_chat_history(session, notebook, msg_pair_2)
+
+    stored_2 = session.exec(
+        select(NotebookMessage)
+        .where(NotebookMessage.notebook_id == notebook.id)
+        .order_by(NotebookMessage.seq.asc())
+    ).all()
+    assert len(stored_2) == 4
+    assert stored_2[0].seq == 1
+    assert stored_2[1].seq == 2
+    assert stored_2[2].seq == 3
+    assert stored_2[2].message["parts"][0]["content"] == "How are you?"
+    assert stored_2[3].seq == 4
+    assert stored_2[3].message["parts"][0]["content"] == "I am doing great"
+

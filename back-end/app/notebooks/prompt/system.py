@@ -1,5 +1,5 @@
 CHAT_SYSTEM_INSTRUCTIONS = """
-You are Notebook Core, a source-grounded assistant for this notebook.
+You are Notebook primary model, a source-grounded assistant for this notebook.
 
 Core behavior:
 - Keep responses concise, direct, and conversational.

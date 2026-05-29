@@ -67,6 +67,38 @@ def save_notebook_chat_history(
     return notebook
 
 
+def append_notebook_chat_history(
+    session: Session,
+    notebook: Notebook,
+    new_messages: list[ModelMessage],
+) -> Notebook:
+    if not new_messages:
+        return notebook
+
+    now = datetime.now(UTC)
+    jsonable_new_messages = to_jsonable_python(new_messages)
+    max_seq = session.exec(
+        select(NotebookMessage.seq)
+        .where(NotebookMessage.notebook_id == notebook.id)
+        .order_by(NotebookMessage.seq.desc())
+    ).first() or 0
+
+    for idx, message in enumerate(jsonable_new_messages, start=max_seq + 1):
+        session.add(NotebookMessage(notebook_id=notebook.id, seq=idx, message=message))
+
+    notebook.last_active_at = now
+    notebook.updated_at = now
+    try:
+        session.add(notebook)
+        session.commit()
+        session.refresh(notebook)
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from exc
+    return notebook
+
+
+
 def parse_chunks_from_context_block(block: str) -> list[dict[str, object]]:
     pattern = r"SOURCE \[filename=(?P<filename>.*?) doc_id=(?P<doc_id>[a-f0-9\-]+) chunk=(?P<chunk>\d+)\]\n(?P<content>.*?)(?=\n+SOURCE \[filename=|\Z)"
     matches = re.finditer(pattern, block, re.DOTALL)
