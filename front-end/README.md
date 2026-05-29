@@ -36,3 +36,10 @@ To use the components in your app, import them as follows:
 ```tsx
 import { Button } from "@/components/ui/button"
 ```
+
+## Environment Variables
+
+The frontend uses Vite environment variables. Only `VITE_*` keys are exposed to the browser.
+
+- `VITE_API_URL`: Browser-facing API base URL (runtime).
+- `VITE_PROXY_TARGET`: Optional dev server proxy target override.

@@ -49,3 +49,13 @@ Pull requests should include a concise description, test results, linked issues 
 ## Security & Configuration Tips
 
 Start backend configuration from `back-end/.env.example`. Never commit secrets, database URLs, JWT keys, email tokens, or object storage credentials. Keep caches and build outputs out of version control.
+
+Production compose requires these variables (see `docker-compose.prod.yml`):
+
+- `POSTGRES_USER`, `POSTGRES_PASSWORD`
+- `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`
+- `MINIO_BROWSER_REDIRECT_URL`, `MINIO_SERVER_URL`
+- `JWT_SECRET_KEY`
+- `CORS_ORIGINS`
+- `S3_PUBLIC_ENDPOINT_URL`
+- `VITE_API_URL`

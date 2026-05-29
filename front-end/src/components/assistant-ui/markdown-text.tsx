@@ -1,13 +1,10 @@
 "use client"
 
-import "@assistant-ui/react-markdown/styles/dot.css"
-
 import {
   type CodeHeaderProps,
-  MarkdownTextPrimitive,
-  unstable_memoizeMarkdownComponents as memoizeMarkdownComponents,
-  useIsMarkdownCodeBlock,
-} from "@assistant-ui/react-markdown"
+  StreamdownTextPrimitive,
+  useIsStreamdownCodeBlock,
+} from "@assistant-ui/react-streamdown"
 import remarkGfm from "remark-gfm"
 import { type FC, memo, useState, useEffect, useRef } from "react"
 import {
@@ -103,9 +100,9 @@ const preprocessCitations = (text: string) => {
 
 const MarkdownTextImpl = () => {
   return (
-    <MarkdownTextPrimitive
+    <StreamdownTextPrimitive
       remarkPlugins={[remarkGfm]}
-      className="aui-md"
+      containerClassName="aui-md"
       components={defaultComponents}
       preprocess={preprocessCitations}
     />
@@ -484,7 +481,7 @@ const useCopyToClipboard = ({
   return { isCopied, copyToClipboard }
 }
 
-const defaultComponents = memoizeMarkdownComponents({
+const defaultComponents = {
   h1: ({ className, ...props }) => (
     <h1
       className={cn(
@@ -680,7 +677,7 @@ const defaultComponents = memoizeMarkdownComponents({
     />
   ),
   code: function Code({ className, ...props }) {
-    const isCodeBlock = useIsMarkdownCodeBlock()
+    const isCodeBlock = useIsStreamdownCodeBlock()
     return (
       <code
         className={cn(
@@ -693,4 +690,4 @@ const defaultComponents = memoizeMarkdownComponents({
     )
   },
   CodeHeader,
-})
+}

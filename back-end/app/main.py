@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from app.core.config import get_settings
 from app.core.patches import patch_agui_event_stream
-from app.core.telemetry import setup_telemetry, instrument_app
+from app.core.telemetry import setup_telemetry
 
 # Apply patches early
 patch_agui_event_stream()
@@ -55,7 +55,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Personal RAG", docs_url=None, redoc_url=None, lifespan=lifespan)
-instrument_app(app, settings)
 
 API_V1_PREFIX = "/api/v1"
 
