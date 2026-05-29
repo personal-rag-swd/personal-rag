@@ -1,7 +1,10 @@
+import os
 from collections.abc import Generator
 from typing import Any
 from uuid import UUID
 from uuid import uuid4
+
+os.environ["OPENROUTER_API_KEY"] = "test-key"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -33,6 +36,7 @@ def settings() -> Settings:
         database_url="sqlite://",
         jwt_secret_key="test-secret-with-at-least-32-bytes",
         jwt_algorithm="HS256",
+        openrouter_api_key="test-key",
     )
 
 

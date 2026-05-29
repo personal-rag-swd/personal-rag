@@ -4,13 +4,12 @@ import logging
 import urllib.parse
 from typing import Any
 
-import boto3
 from botocore.exceptions import ClientError
-from botocore.config import Config
 from fastapi import HTTPException, status
 from sqlmodel import Session
 
 from app.core.config import Settings
+from app.core.s3 import get_s3_client
 from app.users.models import User
 from app.file.schemas import PresignedUrlRequest, PresignedUrlResponse, FileCallbackPayload
 from app.notebooks.service import get_notebook
@@ -24,27 +23,6 @@ def sanitize_filename(filename: str) -> str:
     base = os.path.basename(filename)
     base = base.replace("/", "").replace("\\", "")
     return base
-
-
-def get_s3_client(settings: Settings, *, endpoint_url: str | None = None):
-    s3_config = Config(
-        signature_version="s3v4",
-        retries={"max_attempts": 3},
-    )
-    client_kwargs: dict = {
-        "service_name": "s3",
-        "region_name": settings.s3_region,
-        "config": s3_config,
-    }
-    if settings.aws_access_key_id:
-        client_kwargs["aws_access_key_id"] = settings.aws_access_key_id
-    if settings.aws_secret_access_key:
-        client_kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
-    resolved_endpoint = endpoint_url or settings.s3_endpoint_url
-    if resolved_endpoint:
-        client_kwargs["endpoint_url"] = resolved_endpoint
-
-    return boto3.client(**client_kwargs)
 
 
 def generate_presigned_url_service(

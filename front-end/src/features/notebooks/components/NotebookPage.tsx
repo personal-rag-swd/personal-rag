@@ -2,8 +2,14 @@ import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useNotebookQuery } from "@/features/notebooks/api";
-import { cn } from "@/lib/utils";
 
 import { ChatPanel } from "./notebook-page/ChatPanel";
 import { NotebookHeader } from "./notebook-page/NotebookHeader";
@@ -20,8 +26,6 @@ export function NotebookPage() {
   const navigate = useNavigate();
   const { data: notebook, isLoading, isError, error } = useNotebookQuery(id);
   const [activeTab, setActiveTab] = useState<TabType>("chat");
-  const [isLeftCollapsed, setIsLeftCollapsed] = useState(false);
-  const [isRightCollapsed, setIsRightCollapsed] = useState(false);
 
   // Modal dialog states
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -50,72 +54,54 @@ export function NotebookPage() {
   }
 
   return (
-    <div className="flex flex-col h-full animate-in fade-in duration-300">
+    <div className="flex h-full min-h-0 flex-col bg-muted/30 animate-in fade-in duration-300">
       <NotebookHeader
         name={notebook.name}
         tags={notebook.tags}
-        documentCount={notebook.documentCount}
-        queryCount={notebook.queryCount}
         onEditClick={() => setIsEditOpen(true)}
         onDeleteClick={() => setIsDeleteOpen(true)}
       />
 
-      {/* Mobile/Tablet Tabs Navigation */}
-      <div className="flex lg:hidden border-b border-border/40 bg-background/95 backdrop-blur-xs justify-center shrink-0">
-        <div className="flex w-full max-w-md justify-around px-2">
-          {(["sources", "chat", "studio"] as const).map((tab) => {
-            const label = tab.charAt(0).toUpperCase() + tab.slice(1);
-            const isActive = activeTab === tab;
-            return (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={cn(
-                  "relative py-3.5 px-4 text-xs sm:text-sm font-medium transition-all duration-200 focus-visible:outline-none select-none",
-                  isActive
-                    ? "text-foreground font-semibold"
-                    : "text-muted-foreground hover:text-foreground/80"
-                )}
-              >
-                {label}
-                {isActive && (
-                  <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-primary rounded-full animate-in slide-in-from-bottom-1 duration-200" />
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      <div className="min-h-0 flex-1 p-2">
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) => setActiveTab(value as TabType)}
+          className="h-full lg:hidden"
+        >
+          <div className="flex w-full">
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="sources">Sources</TabsTrigger>
+              <TabsTrigger value="chat">Chat</TabsTrigger>
+              <TabsTrigger value="studio">Studio</TabsTrigger>
+            </TabsList>
+          </div>
+          <TabsContent value="sources" className="min-h-0">
+            <PanelCard title="Sources">
+              <SourcesPanel notebookId={id} />
+            </PanelCard>
+          </TabsContent>
+          <TabsContent value="chat" className="min-h-0">
+            <PanelCard title="Chat">
+              <ChatPanel notebookId={id} />
+            </PanelCard>
+          </TabsContent>
+          <TabsContent value="studio" className="min-h-0">
+            <PanelCard title="Studio">
+              <StudioPanel />
+            </PanelCard>
+          </TabsContent>
+        </Tabs>
 
-      <div className="flex flex-1 overflow-hidden">
-        <div className={cn(
-          "w-full h-full lg:shrink-0 overflow-hidden transition-all duration-300 ease-in-out",
-          isLeftCollapsed ? "lg:w-14" : "lg:w-1/4",
-          activeTab === "sources" ? "block" : "hidden lg:block"
-        )}>
-          <SourcesPanel
-            notebookId={id}
-            isCollapsed={isLeftCollapsed}
-            onToggleCollapse={() => setIsLeftCollapsed(!isLeftCollapsed)}
-          />
-        </div>
-
-        <div className={cn(
-          "w-full h-full lg:flex-1 lg:min-w-0 overflow-hidden",
-          activeTab === "chat" ? "block" : "hidden lg:block"
-        )}>
-          <ChatPanel notebookId={id} />
-        </div>
-
-        <div className={cn(
-          "w-full h-full lg:shrink-0 overflow-hidden transition-all duration-300 ease-in-out",
-          isRightCollapsed ? "lg:w-14" : "lg:w-1/4",
-          activeTab === "studio" ? "block" : "hidden lg:block"
-        )}>
-          <StudioPanel
-            isCollapsed={isRightCollapsed}
-            onToggleCollapse={() => setIsRightCollapsed(!isRightCollapsed)}
-          />
+        <div className="hidden h-full grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] gap-2 lg:grid">
+          <PanelCard title="Sources">
+            <SourcesPanel notebookId={id} />
+          </PanelCard>
+          <PanelCard title="Chat">
+            <ChatPanel notebookId={id} />
+          </PanelCard>
+          <PanelCard title="Studio">
+            <StudioPanel />
+          </PanelCard>
         </div>
       </div>
 
@@ -151,3 +137,19 @@ export function NotebookPage() {
   );
 }
 
+function PanelCard({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Card className="h-full min-h-0 gap-0 py-0">
+      <CardHeader className="flex min-h-12 items-center border-b py-0 !pb-0">
+        <CardTitle className="text-sm leading-none">{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="min-h-0 flex-1 px-0">{children}</CardContent>
+    </Card>
+  );
+}

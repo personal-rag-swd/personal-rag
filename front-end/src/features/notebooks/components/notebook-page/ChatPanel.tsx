@@ -1,5 +1,4 @@
 import * as React from "react";
-import { MoreVerticalIcon } from "lucide-react";
 import { HttpAgent } from "@ag-ui/client";
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { useAgUiRuntime } from "@assistant-ui/react-ag-ui";
@@ -7,7 +6,6 @@ import type { ThreadHistoryAdapter } from "@assistant-ui/core";
 
 import { fetchNotebookChatHistory } from "@/features/notebooks/api";
 import { Thread } from "@/components/assistant-ui/thread";
-import { Button } from "@/components/ui/button";
 
 class CredentialedHttpAgent extends HttpAgent {
   protected requestInit(input: Parameters<HttpAgent["run"]>[0]): RequestInit {
@@ -21,6 +19,7 @@ class CredentialedHttpAgent extends HttpAgent {
 
 export function ChatPanel({ notebookId }: { notebookId: string }) {
   const apiBaseUrl = import.meta.env.VITE_API_URL;
+
   const notebookAgent = React.useMemo(
     () =>
       new CredentialedHttpAgent({
@@ -61,19 +60,8 @@ export function ChatPanel({ notebookId }: { notebookId: string }) {
   });
 
   return (
-    <div className="flex flex-col h-full bg-background/50">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border/40">
-        <span className="text-sm font-semibold text-foreground">Chat</span>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-7 text-muted-foreground hover:text-foreground"
-        >
-          <MoreVerticalIcon className="size-4" />
-        </Button>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col bg-card">
+      <div className="min-h-0 flex-1 overflow-hidden bg-card [&_.aui-thread-root]:bg-card [&_.aui-thread-viewport-footer]:bg-card [&_.aui-thread-welcome-suggestion]:bg-card">
         <AssistantRuntimeProvider runtime={runtime}>
           <Thread hideScrollbar />
         </AssistantRuntimeProvider>

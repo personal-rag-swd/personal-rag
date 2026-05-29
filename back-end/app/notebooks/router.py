@@ -40,6 +40,7 @@ from app.users.models import User
 router = APIRouter(prefix="/notebooks", tags=["Notebooks"])
 
 
+
 @router.get("/", response_model=list[NotebookRead])
 def read_notebooks(
     current_user: Annotated[User, Depends(get_current_user)],
@@ -116,7 +117,7 @@ async def chat_notebook_route(
     session: Annotated[Session, Depends(get_session)],
 ) -> Response:
     notebook = get_notebook(session, notebook_id, current_user)
-    message_history = load_notebook_chat_history(session, notebook)
+    message_history = load_notebook_chat_history(session, notebook)[-3:]
 
     settings = get_settings()
 

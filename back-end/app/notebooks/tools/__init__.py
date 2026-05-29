@@ -1,4 +1,5 @@
-from app.notebooks.tools.search import embed_texts, search_notebook_chunks
+from app.notebooks.tools.embeddings import embed_texts
+from app.notebooks.tools.search import search_notebook_chunks
 from app.notebooks.tools.ingestion import (
     ingest_document_by_id,
     mark_document_upload_failed,
