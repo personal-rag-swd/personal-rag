@@ -6,7 +6,21 @@ import {
   type NotebookApiPayload,
   type NotebookDocument,
   type NotebookDocumentApiPayload,
+  type NotebookReport,
+  type NotebookReportApiPayload,
+  type ReportType,
 } from "./types"
+
+function mapNotebookReport(payload: NotebookReportApiPayload): NotebookReport {
+  return {
+    id: payload.id,
+    notebookId: payload.notebook_id,
+    reportType: payload.report_type,
+    content: payload.content,
+    createdAt: payload.created_at,
+    updatedAt: payload.updated_at,
+  }
+}
 
 export function mapNotebook(payload: NotebookApiPayload): Notebook {
   return {
@@ -196,6 +210,47 @@ type NotebookChatHistoryMessage = {
     chunk_index: number
     content: string
   }[]
+}
+
+export function useNotebookReportsQuery(notebookId: string | undefined) {
+  return useQuery<NotebookReport[]>({
+    queryKey: ["notebooks", notebookId, "reports"],
+    queryFn: async () => {
+      const data = await apiFetch<NotebookReportApiPayload[]>(
+        `/api/v1/notebooks/${notebookId}/reports`
+      )
+      return data.map(mapNotebookReport)
+    },
+    enabled: Boolean(notebookId),
+  })
+}
+
+export function useGenerateNotebookReportMutation(notebookId: string) {
+  const queryClient = useQueryClient()
+  return useMutation<
+    NotebookReport,
+    Error,
+    { reportType: ReportType; additionalInstructions?: string }
+  >({
+    mutationFn: async ({ reportType, additionalInstructions }) => {
+      const data = await apiFetch<NotebookReportApiPayload>(
+        `/api/v1/notebooks/${notebookId}/reports`,
+        {
+          method: "POST",
+          data: {
+            report_type: reportType,
+            additional_instructions: additionalInstructions,
+          },
+        }
+      )
+      return mapNotebookReport(data)
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["notebooks", notebookId, "reports"],
+      })
+    },
+  })
 }
 
 export async function fetchNotebookChatHistory(

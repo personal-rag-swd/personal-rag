@@ -8,20 +8,29 @@ import { cn } from "@/lib/utils";
 import { ChatPanel } from "./notebook-page/ChatPanel";
 import { NotebookHeader } from "./notebook-page/NotebookHeader";
 import { NotebookError, NotebookSkeleton } from "./notebook-page/NotebookStates";
+import { ReportsPanel } from "./notebook-page/ReportsPanel";
 import { SourcesPanel } from "./notebook-page/SourcesPanel";
 import { StudioPanel } from "./notebook-page/StudioPanel";
 import { UpdateNotebookDialog } from "./UpdateNotebookDialog";
 import { DeleteNotebookDialog } from "./DeleteNotebookDialog";
 
 type TabType = "sources" | "chat" | "studio";
+type StudioFeature = "reports";
 
 export function NotebookPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { data: notebook, isLoading, isError, error } = useNotebookQuery(id);
   const [activeTab, setActiveTab] = useState<TabType>("chat");
+  const [activeStudioFeature, setActiveStudioFeature] = useState<StudioFeature | null>(null);
   const [isLeftCollapsed, setIsLeftCollapsed] = useState(false);
   const [isRightCollapsed, setIsRightCollapsed] = useState(false);
+
+  const handleStudioActionActivate = (actionId: string) => {
+    if (actionId === "reports") {
+      setActiveStudioFeature("reports");
+    }
+  };
 
   // Modal dialog states
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -115,6 +124,8 @@ export function NotebookPage() {
           <StudioPanel
             isCollapsed={isRightCollapsed}
             onToggleCollapse={() => setIsRightCollapsed(!isRightCollapsed)}
+            onActivate={handleStudioActionActivate}
+            activeFeature={activeStudioFeature}
           />
         </div>
       </div>
@@ -146,6 +157,12 @@ export function NotebookPage() {
           void navigate("/dashboard");
         }}
         onClose={() => setIsDeleteOpen(false)}
+      />
+
+      <ReportsPanel
+        notebookId={id}
+        open={activeStudioFeature === "reports"}
+        onOpenChange={(open) => setActiveStudioFeature(open ? "reports" : null)}
       />
     </div>
   );

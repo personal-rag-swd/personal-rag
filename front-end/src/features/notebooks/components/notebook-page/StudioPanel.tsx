@@ -10,9 +10,13 @@ import { STUDIO_ACTIONS } from "./studioActions";
 export function StudioPanel({
   isCollapsed,
   onToggleCollapse,
+  onActivate,
+  activeFeature,
 }: {
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
+  onActivate?: (actionId: string) => void;
+  activeFeature?: string | null;
 }) {
   return (
     <div className={cn(
@@ -40,6 +44,7 @@ export function StudioPanel({
                 {STUDIO_ACTIONS.map((action) => (
                   <Tooltip key={action.id}>
                     <TooltipTrigger
+                      onClick={() => onActivate?.(action.id)}
                       className={cn(
                         "flex size-8 shrink-0 items-center justify-center rounded-lg border transition-all duration-200 hover:scale-105 cursor-pointer",
                         action.colorClass
@@ -89,7 +94,13 @@ export function StudioPanel({
                 {STUDIO_ACTIONS.map((action) => (
                   <button
                     key={action.id}
-                    className="group flex w-full items-center gap-2.5 p-3 rounded-xl border border-border/50 bg-card hover:bg-muted/40 hover:border-primary/20 transition-all duration-200 text-left cursor-pointer"
+                    onClick={() => onActivate?.(action.id)}
+                    className={cn(
+                      "group flex w-full items-center gap-2.5 p-3 rounded-xl border bg-card hover:bg-muted/40 hover:border-primary/20 transition-all duration-200 text-left cursor-pointer",
+                      activeFeature === action.id
+                        ? "border-primary/40 bg-primary/5 ring-1 ring-primary/20"
+                        : "border-border/50"
+                    )}
                   >
                     <div
                       className={cn(

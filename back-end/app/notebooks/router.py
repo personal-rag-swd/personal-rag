@@ -1,41 +1,64 @@
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, Response, status, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic_ai.run import AgentRunResult
 from pydantic_ai.ui.ag_ui import AGUIAdapter
+from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session, select
-from app.notebooks.models import NotebookDocument, NotebookDocumentChunk
 
 from app.core.config import get_settings
 from app.core.database import get_session
-from app.notebooks.agent import get_notebook_chat_agent
-from app.notebooks.schemas import (
-    NotebookChatHistoryMessage,
-    NotebookCreate,
-    NotebookDocumentRead,
-    NotebookRead,
-    NotebookUpdate,
+from app.notebooks.agent import (
+    generate_blog_post,
+    generate_briefing_doc,
+    generate_custom_report,
+    generate_study_guide,
+    get_notebook_chat_agent,
 )
-from app.notebooks.prompt import build_context_block
-from app.notebooks.tools import search_notebook_chunks
 from app.notebooks.memory import (
     extract_notebook_chat_transcript,
     load_notebook_chat_history,
     save_notebook_chat_history,
 )
+from app.notebooks.models import (
+    Notebook,
+    NotebookDocument,
+    NotebookDocumentChunk,
+    NotebookReport,
+)
+from app.notebooks.prompt import build_context_block
+from app.notebooks.schemas import (
+    BlogPostReport,
+    BriefingDocReport,
+    CustomReport,
+    NotebookChatHistoryMessage,
+    NotebookCreate,
+    NotebookDocumentRead,
+    NotebookRead,
+    NotebookReportRead,
+    ReportGenerateRequest,
+    StudyGuideReport,
+    NotebookUpdate,
+)
 from app.notebooks.service import (
     create_notebook,
-    delete_notebook_document,
     delete_notebook,
+    delete_notebook_document,
     get_notebook,
     list_notebook_documents,
     list_notebooks,
     touch_notebook,
     update_notebook,
 )
+from app.notebooks.tools import search_notebook_chunks
 from app.users.dependencies import get_current_user
 from app.users.models import User
+
+# Maximum characters of source text fed to the LLM for report generation.
+# ~120 k chars ≈ 30 k tokens, safely within most context windows.
+_REPORT_CONTEXT_CHAR_LIMIT = 120_000
 
 router = APIRouter(prefix="/notebooks", tags=["Notebooks"])
 
@@ -302,3 +325,134 @@ def delete_notebook_route(
 ) -> Response:
     delete_notebook(session, notebook_id, current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# Report generation
+# ---------------------------------------------------------------------------
+
+def _build_report_context(session: Session, notebook: Notebook, current_user: User) -> str:
+    """Return all indexed chunk text for a notebook, up to the char limit."""
+    chunks = session.exec(
+        select(NotebookDocumentChunk, NotebookDocument.filename)
+        .join(NotebookDocument, NotebookDocument.id == NotebookDocumentChunk.document_id)
+        .where(NotebookDocumentChunk.notebook_id == notebook.id)
+        .where(NotebookDocumentChunk.user_id == current_user.id)
+        .where(NotebookDocument.status == "indexed")
+        .order_by(NotebookDocument.filename, NotebookDocumentChunk.chunk_index)
+    ).all()
+
+    if not chunks:
+        return ""
+
+    parts: list[str] = []
+    total = 0
+    for chunk, filename in chunks:
+        header = f"[file={filename} chunk={chunk.chunk_index}]"
+        block = f"{header}\n{chunk.content}"
+        if total + len(block) > _REPORT_CONTEXT_CHAR_LIMIT:
+            break
+        parts.append(block)
+        total += len(block)
+
+    return "\n\n".join(parts)
+
+
+@router.post(
+    "/{notebook_id}/reports",
+    response_model=NotebookReportRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def generate_notebook_report(
+    notebook_id: UUID,
+    payload: ReportGenerateRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> object:
+    notebook = get_notebook(session, notebook_id, current_user)
+
+    if not get_settings().openrouter_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LLM service is not configured. Set OPENROUTER_API_KEY.",
+        )
+
+    context = _build_report_context(session, notebook, current_user)
+    if not context:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="No indexed documents found in this notebook. Upload and wait for indexing to complete.",
+        )
+
+    instructions = (payload.additional_instructions or "").strip() or None
+    report_content: BriefingDocReport | StudyGuideReport | BlogPostReport | CustomReport
+    match payload.report_type:
+        case "briefing":
+            report_content = await generate_briefing_doc(context, instructions)
+        case "study_guide":
+            report_content = await generate_study_guide(context, instructions)
+        case "blog":
+            report_content = await generate_blog_post(context, instructions)
+        case "custom":
+            if not instructions:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="additional_instructions is required for report_type 'custom'.",
+                )
+            report_content = await generate_custom_report(context, instructions)
+
+    now = datetime.now(UTC)
+    report = NotebookReport(
+        notebook_id=notebook.id,
+        user_id=current_user.id,
+        report_type=payload.report_type,
+        content=report_content.model_dump(),
+        created_at=now,
+        updated_at=now,
+    )
+    try:
+        session.add(report)
+        session.commit()
+        session.refresh(report)
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from exc
+
+    return report
+
+
+@router.get("/{notebook_id}/reports", response_model=list[NotebookReportRead])
+def list_notebook_reports(
+    notebook_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> list:
+    notebook = get_notebook(session, notebook_id, current_user)
+    return list(
+        session.exec(
+            select(NotebookReport)
+            .where(NotebookReport.notebook_id == notebook.id)
+            .where(NotebookReport.user_id == current_user.id)
+            .order_by(NotebookReport.created_at.desc())
+        ).all()
+    )
+
+
+@router.get("/{notebook_id}/reports/{report_id}", response_model=NotebookReportRead)
+def get_notebook_report(
+    notebook_id: UUID,
+    report_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> object:
+    notebook = get_notebook(session, notebook_id, current_user)
+    report = session.exec(
+        select(NotebookReport).where(
+            NotebookReport.id == report_id,
+            NotebookReport.notebook_id == notebook.id,
+            NotebookReport.user_id == current_user.id,
+        )
+    ).first()
+    if report is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
+    return report

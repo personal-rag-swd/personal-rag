@@ -68,3 +68,57 @@ export type NotebookDocumentApiPayload = {
   created_at: string;
   updated_at: string;
 };
+
+// ─── Reports ────────────────────────────────────────────────────────────────
+
+export type ReportType = "briefing" | "study_guide" | "blog" | "custom";
+
+export type BriefingDocContent = {
+  executive_summary: string;
+  key_takeaways: string[];
+  strategic_implications: string[];
+};
+
+export type StudyGuideContent = {
+  glossary: { term: string; definition: string }[];
+  quiz: {
+    question: string;
+    options: string[];
+    answer: string;
+    explanation: string;
+  }[];
+};
+
+export type BlogPostContent = {
+  title: string;
+  hook: string;
+  markdown_body: string;
+};
+
+export type CustomReportContent = {
+  markdown_content: string;
+};
+
+export type ReportContent =
+  | BriefingDocContent
+  | StudyGuideContent
+  | BlogPostContent
+  | CustomReportContent;
+
+export type NotebookReportApiPayload = {
+  id: string;
+  notebook_id: string;
+  report_type: ReportType;
+  content: ReportContent;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NotebookReport = {
+  id: string;
+  notebookId: string;
+  reportType: ReportType;
+  content: ReportContent;
+  createdAt: string;
+  updatedAt: string;
+};

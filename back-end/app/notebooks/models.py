@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Column, DateTime, ForeignKey, JSON, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Index, JSON, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
@@ -67,6 +67,36 @@ class NotebookDocument(SQLModel, table=True):
     size: int | None = Field(default=None)
     status: str = Field(default="pending", sa_column=Column(document_status_type, nullable=False, index=True))
     error_message: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+report_content_type = JSON().with_variant(JSONB(), "postgresql")
+
+
+class NotebookReport(SQLModel, table=True):
+    __tablename__ = "notebook_report"  # type: ignore
+    __table_args__ = (
+        Index("ix_notebook_report_notebook_id", "notebook_id"),
+        Index("ix_notebook_report_user_id", "user_id"),
+        Index("ix_notebook_report_report_type", "report_type"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    notebook_id: UUID = Field(
+        sa_column=Column(ForeignKey("notebook.id", ondelete="CASCADE"), nullable=False),
+    )
+    user_id: UUID = Field(
+        sa_column=Column(ForeignKey("user.id", ondelete="CASCADE"), nullable=False),
+    )
+    report_type: str = Field(sa_column=Column(String(32), nullable=False))
+    content: dict[str, Any] = Field(sa_column=Column(report_content_type, nullable=False))
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
