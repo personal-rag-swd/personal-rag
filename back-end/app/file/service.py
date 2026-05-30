@@ -127,7 +127,11 @@ def handle_file_callback_service(
     event_name, bucket, key, size = payload.get_parsed_details()
 
     if key and isinstance(key, str):
-        key = urllib.parse.unquote(key)
+        # S3/MinIO event notifications encode the object key as
+        # application/x-www-form-urlencoded, so spaces arrive as "+" and "/" as
+        # "%2F". unquote_plus decodes both, restoring the exact key we stored
+        # (e.g. "users/.../My File.pdf") so the document lookup matches.
+        key = urllib.parse.unquote_plus(key)
         if bucket and key.startswith(f"{bucket}/"):
             key = key[len(bucket) + 1:]
 

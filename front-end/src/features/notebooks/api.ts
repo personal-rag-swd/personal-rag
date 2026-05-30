@@ -152,6 +152,8 @@ export function useNotebookQuery(id: string | undefined) {
   })
 }
 
+const ACTIVE_DOCUMENT_STATUSES = new Set(["pending", "uploaded", "processing"])
+
 export function useNotebookDocumentsQuery(notebookId: string | undefined) {
   return useQuery<NotebookDocument[]>({
     queryKey: ["notebooks", notebookId, "documents"],
@@ -162,7 +164,15 @@ export function useNotebookDocumentsQuery(notebookId: string | undefined) {
       return data.map(mapNotebookDocument)
     },
     enabled: Boolean(notebookId),
-    refetchInterval: 5000,
+    // Poll quickly while documents are still being ingested so the lifecycle
+    // progress stays live, then back off once everything settles.
+    refetchInterval: (query) => {
+      const docs = query.state.data
+      const hasActive = docs?.some((doc) =>
+        ACTIVE_DOCUMENT_STATUSES.has(doc.status)
+      )
+      return hasActive ? 2000 : 8000
+    },
   })
 }
 
