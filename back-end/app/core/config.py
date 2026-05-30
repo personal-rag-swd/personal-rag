@@ -14,18 +14,19 @@ class Settings(BaseSettings):
     otp_max_attempts: int = 5
     resend_api_key: str = ""
     resend_from_email: str = "noreply@example.com"
-    openrouter_api_key: str = ""
-    openrouter_model: str = "openai/gpt-4o-mini"
-    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    
+    # Centralized Chat / LLM settings
     chat_provider: str = "openrouter"
+    chat_api_key: str = ""
+    chat_provider_url: str = ""
+    chat_model: str = "openai/gpt-4o-mini"
+    
+    # Centralized Embedding settings
     embedding_provider: str = "auto"
     embedding_api_key: str = ""
-    embedding_base_url: str = ""
+    embedding_provider_url: str = ""
     embedding_model: str = "text-embedding-3-small"
-    embedding_dimensions: int = 1536
-    gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
-    gemini_embedding_model: str = "gemini-embedding-2"
+    embedding_dimension: int = 1536
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173", "http://localhost:8000"]
 
     @field_validator("cors_origins", mode="before")
