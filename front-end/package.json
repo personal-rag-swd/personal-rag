@@ -1,5 +1,5 @@
 {
-  "name": "front-end",
+  "name": "personal-rag",
   "private": true,
   "version": "0.0.1",
   "type": "module",
@@ -15,7 +15,7 @@
     "@ag-ui/client": "^0.0.53",
     "@assistant-ui/react": "^0.14.11",
     "@assistant-ui/react-ag-ui": "^0.0.33",
-    "@assistant-ui/react-markdown": "^0.14.1",
+    "@assistant-ui/react-streamdown": "^0.3.1",
     "@base-ui/react": "^1.5.0",
     "@fontsource-variable/inter": "^5.2.8",
     "@tailwindcss/vite": "^4.2.1",

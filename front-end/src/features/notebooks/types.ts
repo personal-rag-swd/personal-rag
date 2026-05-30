@@ -19,8 +19,6 @@ export type Notebook = {
   id: string;
   name: string;
   description: string;
-  documentCount: number;
-  queryCount: number;
   createdAt: string;
   lastActiveAt: string;
   tags: string[];
@@ -49,12 +47,15 @@ export type NotebookApiPayload = {
   id: string;
   name: string;
   description: string;
-  document_count: number;
-  query_count: number;
   created_at: string;
   updated_at: string;
   last_active_at: string;
   tags: string[];
+};
+
+export type NotebookPopulateApiPayload = NotebookApiPayload & {
+  document_count: number;
+  query_count: number;
 };
 
 export type NotebookDocumentApiPayload = {

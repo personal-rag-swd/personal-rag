@@ -4,6 +4,7 @@ import { apiFetch } from "@/lib/api-client"
 import {
   type Notebook,
   type NotebookApiPayload,
+  type NotebookPopulateApiPayload,
   type NotebookDocument,
   type NotebookDocumentApiPayload,
   type NotebookReport,
@@ -27,11 +28,21 @@ export function mapNotebook(payload: NotebookApiPayload): Notebook {
     id: payload.id,
     name: payload.name,
     description: payload.description,
-    documentCount: payload.document_count,
-    queryCount: payload.query_count,
     createdAt: payload.created_at,
     lastActiveAt: payload.last_active_at,
     tags: payload.tags,
+  }
+}
+
+export async function populateNotebook(
+  notebookId: string
+): Promise<{ documentCount: number; queryCount: number }> {
+  const data = await apiFetch<NotebookPopulateApiPayload>(
+    `/api/v1/notebooks/${notebookId}/populate`
+  )
+  return {
+    documentCount: data.document_count,
+    queryCount: data.query_count,
   }
 }
 

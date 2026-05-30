@@ -67,6 +67,9 @@ class NotebookRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_active_at: datetime
+
+
+class NotebookPopulateRead(NotebookRead):
     document_count: int = 0
     query_count: int = 0
 

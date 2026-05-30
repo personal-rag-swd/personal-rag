@@ -141,6 +141,22 @@ Key local storage settings for MinIO/S3-compatible integration:
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
 
+Production compose requirements (must be set when using `docker-compose.prod.yml`):
+
+- `POSTGRES_USER`, `POSTGRES_PASSWORD`
+- `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`
+- `MINIO_BROWSER_REDIRECT_URL`, `MINIO_SERVER_URL`
+- `JWT_SECRET_KEY`
+- `CORS_ORIGINS`
+- `S3_PUBLIC_ENDPOINT_URL`
+- `VITE_API_URL`
+
+Optional provider settings:
+
+- `CHAT_PROVIDER` (defaults to `openrouter`)
+- `OPENROUTER_API_KEY` or `GEMINI_API_KEY`
+- `GEMINI_MODEL` (defaults to `gemini-2.5-flash`)
+
 ## Contributing
 
 See [AGENTS.md](./AGENTS.md) for repository conventions, testing expectations, commit guidance, and security notes.

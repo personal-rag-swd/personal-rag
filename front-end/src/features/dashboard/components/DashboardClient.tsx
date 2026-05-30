@@ -8,7 +8,7 @@ import { notebookSchema, type Notebook } from "@/features/notebooks/types";
 import { UpdateNotebookDialog } from "@/features/notebooks/components/UpdateNotebookDialog";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
@@ -39,8 +39,6 @@ import {
   BookOpenIcon,
   Trash2Icon,
   MoreVerticalIcon,
-  FileTextIcon,
-  MessageSquareIcon,
   TagIcon,
   SparklesIcon,
   AlertCircleIcon,
@@ -59,17 +57,6 @@ function formatDateLabel(value: string) {
   }).format(date);
 }
 
-function formatActivityLabel(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-
-  const diffMs = Date.now() - date.getTime();
-  if (diffMs < 60_000) return "Just now";
-  if (diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)}m ago`;
-  if (diffMs < 86_400_000) return `${Math.floor(diffMs / 3_600_000)}h ago`;
-  return formatDateLabel(value);
-}
-
 export function DashboardClient() {
   const {
     notebooks,
@@ -81,7 +68,7 @@ export function DashboardClient() {
 
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = React.useState("");
-  const [sortBy, setSortBy] = React.useState<"lastActive" | "name" | "documentCount">("lastActive");
+  const [sortBy, setSortBy] = React.useState<"lastActive" | "name">("lastActive");
 
   // Modal States
   const [isCreateOpen, setIsCreateOpen] = React.useState(false);
@@ -104,9 +91,6 @@ export function DashboardClient() {
     result.sort((a, b) => {
       if (sortBy === "name") {
         return a.name.localeCompare(b.name);
-      }
-      if (sortBy === "documentCount") {
-        return b.documentCount - a.documentCount;
       }
       return new Date(b.lastActiveAt).getTime() - new Date(a.lastActiveAt).getTime();
     });
@@ -142,11 +126,10 @@ export function DashboardClient() {
               <select
                 className="bg-transparent text-xs font-semibold text-foreground focus:outline-hidden cursor-pointer"
                 value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as "lastActive" | "name" | "documentCount")}
+                onChange={(e) => setSortBy(e.target.value as "lastActive" | "name")}
               >
                 <option value="lastActive">Recently Active</option>
                 <option value="name">Alphabetical</option>
-                <option value="documentCount">Doc Count</option>
               </select>
             </div>
 
@@ -255,21 +238,7 @@ export function DashboardClient() {
                     )}
                   </CardContent>
 
-                  <CardFooter className="border-t text-xs text-muted-foreground">
-                    <div className="grid w-full grid-cols-3 items-center gap-3">
-                      <span className="flex items-center gap-1.5">
-                        <FileTextIcon className="size-3.5" />
-                        <strong className="font-medium text-foreground">{notebook.documentCount}</strong> docs
-                      </span>
-                      <span className="flex items-center gap-1.5">
-                        <MessageSquareIcon className="size-3.5" />
-                        <strong className="font-medium text-foreground">{notebook.queryCount}</strong> queries
-                      </span>
-                      <span className="truncate text-right">
-                        {formatActivityLabel(notebook.lastActiveAt)}
-                      </span>
-                    </div>
-                  </CardFooter>
+
                 </Card>
               );
             })}

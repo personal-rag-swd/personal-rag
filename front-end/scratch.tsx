@@ -1,13 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
+import { StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
 
 const Test = () => (
-  <MarkdownTextPrimitive
+  <StreamdownTextPrimitive
+    preprocess={() => "[1](cite:test:0)"}
     components={{
       a: (props) => <div>A: {JSON.stringify(props)}</div>
     }}
-  >
-    {"[1](cite:test:0)"}
-  </MarkdownTextPrimitive>
+  />
 );
 console.log(renderToStaticMarkup(<Test />));

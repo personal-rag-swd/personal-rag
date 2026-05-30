@@ -87,12 +87,22 @@ def test_create_and_list_notebooks(
     assert body["name"] == "Research Notes"
     assert body["description"] == "Papers and snippets"
     assert body["tags"] == ["AI", "RAG"]
-    assert body["document_count"] == 0
-    assert body["query_count"] == 0
+    assert "document_count" not in body
+    assert "query_count" not in body
 
     list_response = client.get("/api/v1/notebooks/", headers=auth_headers(user, settings))
     assert list_response.status_code == 200
     assert [notebook["id"] for notebook in list_response.json()] == [body["id"]]
+    assert "document_count" not in list_response.json()[0]
+    assert "query_count" not in list_response.json()[0]
+
+    populate_response = client.get(
+        f"/api/v1/notebooks/{body['id']}/populate",
+        headers=auth_headers(user, settings),
+    )
+    assert populate_response.status_code == 200
+    assert populate_response.json()["document_count"] == 0
+    assert populate_response.json()["query_count"] == 0
 
 
 def test_update_and_delete_notebook(

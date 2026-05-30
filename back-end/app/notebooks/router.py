@@ -1,4 +1,6 @@
 from datetime import UTC, datetime
+from pydantic_ai.capabilities.process_history import ProcessHistory
+from pydantic_ai.messages import ModelMessage
 from typing import Annotated
 from uuid import UUID
 
@@ -21,6 +23,7 @@ from app.notebooks.memory import (
     extract_notebook_chat_transcript,
     load_notebook_chat_history,
     save_notebook_chat_history,
+    append_notebook_chat_history,
 )
 from app.notebooks.models import (
     Notebook,
@@ -36,6 +39,7 @@ from app.notebooks.schemas import (
     NotebookChatHistoryMessage,
     NotebookCreate,
     NotebookDocumentRead,
+    NotebookPopulateRead,
     NotebookRead,
     NotebookReportRead,
     ReportGenerateRequest,
@@ -49,6 +53,7 @@ from app.notebooks.service import (
     get_notebook,
     list_notebook_documents,
     list_notebooks,
+    populate_notebook_metrics,
     touch_notebook,
     update_notebook,
 )
@@ -61,7 +66,6 @@ from app.users.models import User
 _REPORT_CONTEXT_CHAR_LIMIT = 120_000
 
 router = APIRouter(prefix="/notebooks", tags=["Notebooks"])
-
 
 @router.get("/", response_model=list[NotebookRead])
 def read_notebooks(
@@ -106,6 +110,15 @@ def touch_notebook_route(
     session: Annotated[Session, Depends(get_session)],
 ) -> object:
     return touch_notebook(session, notebook_id, current_user)
+
+
+@router.get("/{notebook_id}/populate", response_model=NotebookPopulateRead)
+def populate_notebook_route(
+    notebook_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> object:
+    return populate_notebook_metrics(session, notebook_id, current_user)
 
 
 @router.get("/{notebook_id}/documents", response_model=list[NotebookDocumentRead])
@@ -155,7 +168,11 @@ async def chat_notebook_route(
         return build_context_block(chunks)
 
     async def persist_chat_history(result: AgentRunResult[object]) -> None:
-        save_notebook_chat_history(session, notebook, result.all_messages())
+        append_notebook_chat_history(session, notebook, result.new_messages())
+
+    async def keep_recent(messages: list[ModelMessage]) -> list[ModelMessage]:
+        return messages[-5:] if len(messages) > 5 else messages
+
 
     return await AGUIAdapter.dispatch_request(
         request,
@@ -163,6 +180,7 @@ async def chat_notebook_route(
         message_history=message_history,
         conversation_id=str(notebook.id),
         on_complete=persist_chat_history,
+        capabilities=[ProcessHistory(keep_recent)]
     )
 
 

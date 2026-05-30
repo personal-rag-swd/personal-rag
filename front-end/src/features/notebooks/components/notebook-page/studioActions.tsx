@@ -1,76 +1,76 @@
-import * as React from "react";
+import type { LucideIcon } from "lucide-react";
 import {
   AudioLinesIcon,
   BarChart3Icon,
   BrainCircuitIcon,
-  FileTextIcon,
-  HelpCircleIcon,
-  SlidersIcon,
-  TableIcon,
+  FileQuestionIcon,
+  ImagesIcon,
+  LayoutPanelTopIcon,
+  Rows3Icon,
+  SquareStackIcon,
   VideoIcon,
-  ZapIcon,
 } from "lucide-react";
 
 export type StudioAction = {
   id: string;
   label: string;
-  icon: React.ReactNode;
-  colorClass: string;
+  description: string;
+  icon: LucideIcon;
 };
 
 export const STUDIO_ACTIONS: StudioAction[] = [
   {
     id: "audio-overview",
     label: "Audio Overview",
-    icon: <AudioLinesIcon className="size-4" />,
-    colorClass: "text-amber-500 bg-amber-500/10 border-amber-500/20",
+    description: "Create a narrated summary.",
+    icon: AudioLinesIcon,
   },
   {
     id: "slide-deck",
     label: "Slide Deck",
-    icon: <SlidersIcon className="size-4" />,
-    colorClass: "text-lime-500 bg-lime-500/10 border-lime-500/20",
+    description: "Turn notes into slides.",
+    icon: LayoutPanelTopIcon,
   },
   {
     id: "video-overview",
     label: "Video Overview",
-    icon: <VideoIcon className="size-4" />,
-    colorClass: "text-sky-500 bg-sky-500/10 border-sky-500/20",
+    description: "Draft a video outline.",
+    icon: VideoIcon,
   },
   {
     id: "mind-map",
     label: "Mind Map",
-    icon: <BrainCircuitIcon className="size-4" />,
-    colorClass: "text-pink-500 bg-pink-500/10 border-pink-500/20",
+    description: "Map source concepts.",
+    icon: BrainCircuitIcon,
   },
   {
     id: "reports",
     label: "Reports",
-    icon: <BarChart3Icon className="size-4" />,
-    colorClass: "text-blue-500 bg-blue-500/10 border-blue-500/20",
+    description: "Generate a report.",
+    icon: BarChart3Icon,
   },
   {
     id: "flashcards",
     label: "Flashcards",
-    icon: <ZapIcon className="size-4" />,
-    colorClass: "text-orange-400 bg-orange-400/10 border-orange-400/20",
+    description: "Build review cards.",
+    icon: SquareStackIcon,
   },
   {
     id: "quiz",
     label: "Quiz",
-    icon: <HelpCircleIcon className="size-4" />,
-    colorClass: "text-violet-500 bg-violet-500/10 border-violet-500/20",
+    description: "Create practice questions.",
+    icon: FileQuestionIcon,
   },
   {
     id: "infographic",
     label: "Infographic",
-    icon: <FileTextIcon className="size-4" />,
-    colorClass: "text-teal-500 bg-teal-500/10 border-teal-500/20",
+    description: "Extract visual points.",
+    icon: ImagesIcon,
   },
   {
     id: "data-table",
     label: "Data Table",
-    icon: <TableIcon className="size-4" />,
-    colorClass: "text-indigo-500 bg-indigo-500/10 border-indigo-500/20",
+    description: "Structure key facts.",
+    icon: Rows3Icon,
   },
 ];

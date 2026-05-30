@@ -41,6 +41,9 @@ Go to the **Environment** tab of the Compose service and add the following requi
 | `RESEND_API_KEY` | *Your Resend API Key* | (Optional) Email sender configuration |
 | `RESEND_FROM_EMAIL` | `noreply@quanphungg.me` | Verified sending domain email |
 | `OPENROUTER_API_KEY` | *Your OpenRouter API Key* | API key for LLM integrations |
+| `CHAT_PROVIDER` | `openrouter` | LLM provider selector (`openrouter` or `gemini`) |
+| `GEMINI_API_KEY` | *Your Gemini API Key* | Required when `CHAT_PROVIDER=gemini` |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini chat model override |
 | `CORS_ORIGINS` | `["https://rag.quanphungg.me", "https://quanphungg.me"]` | JSON list of allowed origins |
 | `VITE_API_URL` | `https://api.quanphungg.me` | Public URL of backend API |
 | `S3_PUBLIC_ENDPOINT_URL` | `https://s3.quanphungg.me` | Public URL of MinIO storage endpoint |

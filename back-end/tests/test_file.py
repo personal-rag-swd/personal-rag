@@ -65,7 +65,7 @@ def auth_headers(user: User, settings: Settings) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-@patch("app.file.service.boto3.client")
+@patch("app.core.s3.boto3.client")
 def test_get_presigned_url_upload_success(
     mock_boto_client: MagicMock,
     client: TestClient,
@@ -105,7 +105,7 @@ def test_get_presigned_url_upload_success(
     assert call_args["Params"]["Key"] == res_data["key"]
 
 
-@patch("app.file.service.boto3.client")
+@patch("app.core.s3.boto3.client")
 def test_get_presigned_url_download_success(
     mock_boto_client: MagicMock,
     client: TestClient,
@@ -215,7 +215,7 @@ def test_get_presigned_url_invalid_operation(
     assert response.status_code == 400
 
 
-@patch("app.file.service.boto3.client")
+@patch("app.core.s3.boto3.client")
 def test_get_presigned_url_upload_with_notebook_creates_pending_document(
     mock_boto_client: MagicMock,
     client: TestClient,
@@ -255,7 +255,9 @@ def test_get_presigned_url_upload_with_notebook_creates_pending_document(
     assert doc.status == "pending"
 
 
+@patch("app.core.s3.boto3.client")
 def test_get_presigned_url_upload_with_foreign_notebook_rejected(
+    mock_boto_client: MagicMock,
     client: TestClient,
     settings: Settings,
     session: Session,
@@ -284,7 +286,7 @@ def test_get_presigned_url_upload_with_foreign_notebook_rejected(
     assert response.status_code == 404
 
 
-@patch("app.file.service.boto3.client")
+@patch("app.core.s3.boto3.client")
 def test_get_presigned_url_uses_public_endpoint_for_signing(
     mock_boto_client: MagicMock,
     client: TestClient,

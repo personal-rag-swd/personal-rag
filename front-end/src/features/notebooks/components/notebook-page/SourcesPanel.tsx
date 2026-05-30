@@ -2,8 +2,6 @@ import * as React from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import {
   AlertCircleIcon,
-  BookOpenIcon,
-  CheckCircle2Icon,
   FileTextIcon,
   Loader2Icon,
   MoreVerticalIcon,
@@ -26,6 +24,16 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Card, CardContent } from "@/components/ui/card"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,6 +42,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
+import { Progress } from "@/components/ui/progress"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Tooltip,
@@ -150,20 +159,20 @@ export function SourcesPanel({
 
   return (
     <div className={cn(
-      "flex h-full flex-col bg-background transition-all duration-300",
+      "flex h-full min-h-0 flex-col bg-card transition-all duration-300",
       isCollapsed
-        ? "w-14 items-center border-r border-border/50 py-3 gap-4 shrink-0"
-        : "lg:border-r border-border/50"
+        ? "w-14 shrink-0 items-center gap-3 py-2"
+        : ""
     )}>
       {isCollapsed ? (
         <>
           <Tooltip>
             <TooltipTrigger
               onClick={onToggleCollapse}
-              className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground cursor-pointer shrink-0"
+              className="flex size-8 shrink-0 items-center justify-center rounded-2xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               aria-label="Expand panel"
             >
-              <PanelLeftOpenIcon className="size-4.5" />
+              <PanelLeftOpenIcon className="size-4" />
             </TooltipTrigger>
             <TooltipContent side="right">Expand panel</TooltipContent>
           </Tooltip>
@@ -180,13 +189,13 @@ export function SourcesPanel({
             <TooltipTrigger
               onClick={openFilePicker}
               disabled={isUploading}
-              className="flex size-8 items-center justify-center rounded-lg border border-dashed border-border/80 text-primary transition-colors hover:border-primary/40 hover:bg-primary/5 disabled:opacity-50 cursor-pointer shrink-0"
+              className="my-2 flex size-8 shrink-0 items-center justify-center rounded-2xl border border-dashed text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
               aria-label="Add source"
             >
               {isUploading ? (
-                <Loader2Icon className="size-4 animate-spin text-primary" />
+                <Loader2Icon className="size-4 animate-spin" />
               ) : (
-                <PlusIcon className="size-4.5" />
+                <PlusIcon className="size-4" />
               )}
             </TooltipTrigger>
             <TooltipContent side="right">
@@ -202,7 +211,7 @@ export function SourcesPanel({
                   return (
                     <Tooltip key={document.id}>
                       <TooltipTrigger
-                        className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-blue-500/20 bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 hover:scale-105 transition-all duration-200 cursor-pointer"
+                        className="flex size-8 shrink-0 items-center justify-center rounded-2xl border bg-muted text-muted-foreground transition-all duration-200 hover:scale-105 hover:text-foreground"
                         aria-label={document.filename}
                       >
                         <FileTextIcon className="size-4" />
@@ -210,8 +219,8 @@ export function SourcesPanel({
                       <TooltipContent side="right" className="max-w-xs break-all">
                         <div className="space-y-0.5">
                           <p className="font-medium text-xs leading-tight">{document.filename}</p>
-                          <p className="text-[10px] text-muted-foreground leading-normal">
-                            {formatBytes(document.size)} • {status.label}
+                          <p className="text-[10px] leading-normal text-muted-foreground">
+                            {formatBytes(document.size)} / {status.label}
                           </p>
                         </div>
                       </TooltipContent>
@@ -224,21 +233,7 @@ export function SourcesPanel({
         </>
       ) : (
         <>
-          <div className="flex items-center justify-between border-b border-border/40 px-4 py-3 w-full">
-            <span className="text-sm font-semibold text-foreground">Sources</span>
-            <Tooltip>
-              <TooltipTrigger
-                onClick={onToggleCollapse}
-                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground cursor-pointer"
-                aria-label="Collapse panel"
-              >
-                <PanelLeftCloseIcon className="size-4" />
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Collapse panel</TooltipContent>
-            </Tooltip>
-          </div>
-
-          <div className="flex flex-col gap-3 p-4 w-full">
+          <div className="flex w-full flex-col gap-2 border-b px-3 py-3">
             <input
               ref={fileInputRef}
               type="file"
@@ -251,27 +246,40 @@ export function SourcesPanel({
               variant="outline"
               disabled={isUploading}
               onClick={openFilePicker}
-              className="h-9 w-full justify-start gap-2 rounded-xl border-dashed border-border/80 text-sm font-medium transition-all hover:border-primary/40 hover:bg-primary/5"
+              className="my-2 w-full justify-start border-dashed"
             >
               {isUploading ? (
-                <Loader2Icon className="size-4 animate-spin text-primary" />
+                <Loader2Icon data-icon="inline-start" className="animate-spin" />
               ) : (
-                <PlusIcon className="size-4 text-primary" />
+                <PlusIcon data-icon="inline-start" />
               )}
               {isUploading ? `Uploading ${uploadProgress}%` : "Add source"}
             </Button>
+            {isUploading ? <Progress value={uploadProgress} /> : null}
 
-            <div className="relative">
+            {onToggleCollapse ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={onToggleCollapse}
+                className="justify-start text-muted-foreground"
+              >
+                <PanelLeftCloseIcon data-icon="inline-start" />
+                Collapse panel
+              </Button>
+            ) : null}
+          </div>
+
+          <ScrollArea className="flex-1 w-full">
+            <div className="px-3 pt-3">
               <Input
                 placeholder="Search uploaded sources"
-                className="h-9 rounded-xl border-border/60 bg-muted/30 pr-8 text-xs"
+                className="bg-muted/40 text-xs"
                 value={searchValue}
                 onChange={(e) => setSearchValue(e.target.value)}
               />
             </div>
-          </div>
-
-          <ScrollArea className="flex-1 w-full">
             {isLoading ? (
               <SourcesPlaceholder label="Loading sources..." />
             ) : isError ? (
@@ -281,42 +289,40 @@ export function SourcesPanel({
                 description="Refresh the page or try again after the API is available."
               />
             ) : hasDocuments ? (
-              <div className="flex flex-col gap-2 px-4 pb-4">
+              <div className="mt-3 flex flex-col items-start gap-2 px-3 pb-3">
                 {filteredDocuments.map((document) => (
                   <SourceItem key={document.id} document={document} />
                 ))}
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center gap-3 px-6 pt-12 pb-8 text-center">
-                <div className="flex size-12 items-center justify-center rounded-2xl bg-muted/50 text-muted-foreground">
-                  <BookOpenIcon className="size-5" />
-                </div>
-                <div className="space-y-1.5">
-                  <p className="text-sm font-medium text-foreground">
+              <Empty className="border-0 px-6 py-12">
+                <EmptyHeader>
+                  <EmptyTitle className="text-sm">
                     {documents.length > 0
                       ? "No matching sources"
                       : "Saved sources will appear here"}
-                  </p>
-                  <p className="text-xs leading-relaxed text-muted-foreground">
+                  </EmptyTitle>
+                  <EmptyDescription className="text-xs">
                     {documents.length > 0
                       ? "Try a different filename search."
                       : "Click Add source above to upload PDF, DOCX, TXT, or Markdown files."}
-                  </p>
-                </div>
+                  </EmptyDescription>
+                </EmptyHeader>
                 {documents.length === 0 && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={isUploading}
-                    onClick={openFilePicker}
-                    className="mt-2 gap-1.5 rounded-xl border-border/60 text-xs hover:bg-primary/5"
-                  >
-                    <UploadIcon className="size-3.5" />
-                    Import file
-                  </Button>
+                  <EmptyContent>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={isUploading}
+                      onClick={openFilePicker}
+                    >
+                      <UploadIcon data-icon="inline-start" />
+                      Import file
+                    </Button>
+                  </EmptyContent>
                 )}
-              </div>
+              </Empty>
             )}
           </ScrollArea>
         </>
@@ -352,66 +358,57 @@ function SourceItem({ document }: { document: NotebookDocument }) {
 
   return (
     <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-      <div className="rounded-xl border border-border/60 bg-card/60 p-3 shadow-sm">
-        <div className="flex gap-3">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <FileTextIcon className="size-4" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p
-              className="truncate text-sm font-medium text-foreground"
-              title={document.filename}
-            >
-              {document.filename}
-            </p>
-            <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-              <span>{formatBytes(document.size)}</span>
-              <span aria-hidden="true">/</span>
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1 font-medium",
-                  status.className
-                )}
+      <Card size="sm" className="h-auto w-full self-start py-0">
+        <CardContent className="px-2 py-1.5">
+          <div className="flex items-center gap-2.5">
+            <div className="min-w-0 flex-1">
+              <p
+                className="truncate text-xs font-medium text-foreground"
+                title={document.filename}
               >
-                {status.icon}
-                {status.label}
-              </span>
-            </div>
-            {document.status === "failed" && document.errorMessage ? (
-              <p className="mt-2 line-clamp-2 text-[11px] leading-relaxed text-destructive">
-                {document.errorMessage}
+                {document.filename}
               </p>
-            ) : null}
+              <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+                <span>{formatBytes(document.size)}</span>
+                <span aria-hidden="true">/</span>
+                <Badge variant={status.variant}>{status.label}</Badge>
+              </div>
+              {document.status === "failed" && document.errorMessage ? (
+                <p className="mt-2 line-clamp-2 text-[11px] leading-relaxed text-destructive">
+                  {document.errorMessage}
+                </p>
+              ) : null}
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="self-center text-muted-foreground"
+                    aria-label={`Open actions for ${document.filename}`}
+                  />
+                }
+              >
+                <MoreVerticalIcon />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-36" align="end">
+                <DropdownMenuGroup>
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={() => setIsDeleteDialogOpen(true)}
+                    disabled={deleteDocumentMutation.isPending}
+                  >
+                    <Trash2Icon data-icon="inline-start" />
+                    <span>Delete</span>
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  className="shrink-0 text-muted-foreground"
-                  aria-label={`Open actions for ${document.filename}`}
-                />
-              }
-            >
-              <MoreVerticalIcon />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-36" align="end">
-              <DropdownMenuGroup>
-                <DropdownMenuItem
-                  variant="destructive"
-                  onClick={() => setIsDeleteDialogOpen(true)}
-                  disabled={deleteDocumentMutation.isPending}
-                >
-                  <Trash2Icon data-icon="inline-start" />
-                  <span>Delete</span>
-                </DropdownMenuItem>
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Delete source?</AlertDialogTitle>
@@ -452,19 +449,19 @@ function SourcesPlaceholder({
   description?: string
 }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 px-6 pt-12 pb-8 text-center">
-      <div className="flex size-12 items-center justify-center rounded-2xl bg-muted/50 text-muted-foreground">
-        {icon ?? <Loader2Icon className="size-5 animate-spin" />}
-      </div>
-      <div className="space-y-1.5">
-        <p className="text-sm font-medium text-foreground">{label}</p>
+    <Empty className="border-0 px-6 py-12">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          {icon ?? <Loader2Icon className="size-5 animate-spin" />}
+        </EmptyMedia>
+        <EmptyTitle className="text-sm">{label}</EmptyTitle>
         {description ? (
-          <p className="text-xs leading-relaxed text-muted-foreground">
+          <EmptyDescription className="text-xs">
             {description}
-          </p>
+          </EmptyDescription>
         ) : null}
-      </div>
-    </div>
+      </EmptyHeader>
+    </Empty>
   )
 }
 
@@ -491,32 +488,27 @@ function getDocumentStatus(status: string) {
     case "indexed":
       return {
         label: "Indexed",
-        className: "text-emerald-600",
-        icon: <CheckCircle2Icon className="size-3" />,
+        variant: "secondary" as const,
       }
     case "failed":
       return {
         label: "Failed",
-        className: "text-destructive",
-        icon: <AlertCircleIcon className="size-3" />,
+        variant: "destructive" as const,
       }
     case "processing":
       return {
         label: "Processing",
-        className: "text-primary",
-        icon: <Loader2Icon className="size-3 animate-spin" />,
+        variant: "outline" as const,
       }
     case "uploaded":
       return {
         label: "Queued",
-        className: "text-amber-600",
-        icon: <Loader2Icon className="size-3 animate-spin" />,
+        variant: "outline" as const,
       }
     default:
       return {
         label: "Waiting for upload",
-        className: "text-muted-foreground",
-        icon: <Loader2Icon className="size-3 animate-spin" />,
+        variant: "outline" as const,
       }
   }
 }

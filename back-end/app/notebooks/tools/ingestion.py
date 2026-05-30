@@ -1,26 +1,20 @@
 from __future__ import annotations
 
-import io
 import logging
 from datetime import UTC, datetime
-from pathlib import Path
 from uuid import UUID
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from pypdf import PdfReader
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session, delete, select
 
 from app.core.config import Settings
+from app.core.s3 import get_s3_client
 from app.notebooks.models import Notebook, NotebookDocument, NotebookDocumentChunk
-from app.notebooks.tools.search import embed_texts
+from app.notebooks.tools.chunking import ChunkingRequest, chunk_document
+from app.notebooks.tools.embeddings import embed_texts
 from app.users.models import User
 
 logger = logging.getLogger(__name__)
-
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
-CHUNK_SIZE = 1000
-CHUNK_OVERLAP = 200
 
 
 def _is_created_event(event_name: str | None) -> bool:
@@ -109,27 +103,6 @@ def mark_document_upload_failed(
     return True
 
 
-def _extract_text_from_bytes(content: bytes, filename: str, content_type: str | None) -> str:
-    suffix = Path(filename).suffix.lower()
-    if suffix not in SUPPORTED_EXTENSIONS:
-        raise ValueError(f"Unsupported file type: {suffix or 'unknown'}")
-
-    if suffix in {".txt", ".md"}:
-        return content.decode("utf-8", errors="ignore")
-
-    if suffix == ".pdf":
-        reader = PdfReader(io.BytesIO(content))
-        return "\n".join((page.extract_text() or "") for page in reader.pages)
-
-    if suffix == ".docx":
-        from docx import Document as DocxDocument
-
-        doc = DocxDocument(io.BytesIO(content))
-        return "\n".join(paragraph.text for paragraph in doc.paragraphs)
-
-    raise ValueError(f"Unsupported file type: {suffix}, content_type={content_type}")
-
-
 def ingest_document_by_id(session: Session, document_id: UUID, settings: Settings) -> None:
     document = session.get(NotebookDocument, document_id)
     if document is None:
@@ -142,27 +115,20 @@ def ingest_document_by_id(session: Session, document_id: UUID, settings: Setting
     session.commit()
 
     try:
-        from app.file.service import get_s3_client
-
         s3_client = get_s3_client(settings)
         obj = s3_client.get_object(Bucket=document.s3_bucket, Key=document.s3_key)
         body = obj["Body"].read()
-        extracted_text = _extract_text_from_bytes(body, document.filename, document.content_type)
-        if not extracted_text.strip():
-            raise ValueError("No extractable text content in document")
-
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=CHUNK_SIZE,
-            chunk_overlap=CHUNK_OVERLAP,
-            add_start_index=True,
-        )
-        split_docs = splitter.create_documents(
-            [extracted_text],
-            metadatas=[{"source": document.s3_key, "document_id": str(document.id)}],
+        split_docs = chunk_document(
+            ChunkingRequest(
+                content=body,
+                filename=document.filename,
+                source=document.s3_key,
+                document_id=str(document.id),
+            )
         )
         chunk_texts = [doc.page_content for doc in split_docs]
         if not chunk_texts:
-            raise ValueError("No chunks produced from extracted text")
+            raise ValueError("No extractable text content in document")
 
         embeddings = embed_texts(chunk_texts, settings)
 
