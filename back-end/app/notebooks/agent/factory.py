@@ -6,10 +6,11 @@ from pydantic_ai import Agent
 from app.core.config import get_settings
 from app.notebooks.prompt import CHAT_SYSTEM_INSTRUCTIONS
 from app.notebooks.agent.base import ChatModelProvider
-from app.notebooks.agent.providers import GeminiChatProvider, OpenRouterChatProvider
+from app.notebooks.agent.providers import GeminiChatProvider, OpenAICompatibleChatProvider, OpenRouterChatProvider
 
 _CHAT_PROVIDER_REGISTRY: dict[str, ChatModelProvider] = {
     "openrouter": OpenRouterChatProvider(),
+    "openai_compatible": OpenAICompatibleChatProvider(),
     "gemini": GeminiChatProvider(),
 }
 
@@ -19,7 +20,10 @@ def resolve_chat_provider() -> ChatModelProvider:
     selected_provider = settings.chat_provider.strip().lower()
     resolved = _CHAT_PROVIDER_REGISTRY.get(selected_provider)
     if resolved is None:
-        raise ValueError(f"Unsupported chat provider '{selected_provider}'. Use openrouter or gemini.")
+        raise ValueError(
+            f"Unsupported chat provider '{selected_provider}'. "
+            "Use openrouter, openai_compatible, or gemini."
+        )
     return resolved
 
 

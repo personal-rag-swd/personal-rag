@@ -4,7 +4,7 @@ from typing import Any
 from uuid import UUID
 from uuid import uuid4
 
-os.environ["OPENROUTER_API_KEY"] = "test-key"
+os.environ["CHAT_API_KEY"] = "test-key"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -31,13 +31,22 @@ from app.users.models import User
 
 
 @pytest.fixture
-def settings() -> Settings:
-    return Settings(
+def settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
+    s = Settings(
         database_url="sqlite://",
         jwt_secret_key="test-secret-with-at-least-32-bytes",
         jwt_algorithm="HS256",
-        openrouter_api_key="test-key",
+        chat_api_key="test-key",
     )
+    from app.core import config
+    from app.notebooks.agent.providers import OpenRouterChatProvider, OpenAICompatibleChatProvider, GeminiChatProvider
+    OpenRouterChatProvider.build_model.cache_clear()
+    OpenAICompatibleChatProvider.build_model.cache_clear()
+    GeminiChatProvider.build_model.cache_clear()
+    config.get_settings.cache_clear()
+    
+    monkeypatch.setattr(config, "get_settings", lambda: s)
+    return s
 
 
 @pytest.fixture

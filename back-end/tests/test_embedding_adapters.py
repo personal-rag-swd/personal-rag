@@ -10,35 +10,60 @@ from app.notebooks.tools.embeddings import (
 )
 
 
-def test_auto_provider_prefers_gemini_when_key_present() -> None:
+def test_auto_provider_uses_gemini_when_key_present() -> None:
     settings = Settings(
         embedding_provider="auto",
-        gemini_api_key="gemini-key",
-        gemini_embedding_model="gemini-embedding-2",
+        embedding_api_key="gemini-key",
+        embedding_model="gemini-embedding-2",
     )
     adapter = get_embedding_adapter(settings)
     assert isinstance(adapter, GeminiEmbeddingAdapter)
 
 
-def test_auto_provider_uses_openai_compatible_without_gemini_key() -> None:
+def test_auto_provider_uses_openai_compatible_without_key() -> None:
     settings = Settings(
         embedding_provider="auto",
+        embedding_api_key="",
+        embedding_model="text-embedding-3-small",
+    )
+    # Raising missing key since openai_compatible is default but api key is empty
+    with pytest.raises(RuntimeError, match="Missing EMBEDDING_API_KEY"):
+        get_embedding_adapter(settings)
+
+
+def test_openai_compatible_embedding_uses_provider_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, str | None] = {}
+
+    class DummyAdapter:
+        def __init__(self, *, api_key: str, model: str, base_url: str | None = None, output_dimensionality: int | None = None) -> None:
+            captured["api_key"] = api_key
+            captured["model"] = model
+            captured["base_url"] = base_url
+            captured["output_dimensionality"] = output_dimensionality
+
+    monkeypatch.setattr(factory, "OpenAICompatibleEmbeddingAdapter", DummyAdapter)
+    settings = Settings(
+        embedding_provider="openai_compatible",
         embedding_api_key="embed-key",
         embedding_model="text-embedding-3-small",
-        gemini_api_key="",
+        embedding_provider_url="https://api.openai-compatible.example/v1",
     )
-    adapter = get_embedding_adapter(settings)
-    assert isinstance(adapter, OpenAICompatibleEmbeddingAdapter)
+    get_embedding_adapter(settings)
+    assert captured["base_url"] == "https://api.openai-compatible.example/v1"
 
 
 def test_missing_api_key_raises_for_openai_compatible() -> None:
-    settings = Settings(embedding_provider="openai_compatible", embedding_api_key="", openrouter_api_key="")
-    with pytest.raises(RuntimeError, match="Missing embedding API key"):
+    settings = Settings(embedding_provider="openai_compatible", embedding_api_key="")
+    with pytest.raises(RuntimeError, match="Missing EMBEDDING_API_KEY"):
         get_embedding_adapter(settings)
 
 
 def test_embed_texts_dimension_mismatch_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings = Settings(embedding_provider="openai_compatible", embedding_api_key="key", embedding_dimensions=8)
+    settings = Settings(
+        embedding_provider="openai_compatible",
+        embedding_api_key="key",
+        embedding_dimension=8,
+    )
 
     class WrongShapeAdapter:
         def embed_texts(self, texts: list[str]) -> list[list[float]]:
@@ -50,7 +75,11 @@ def test_embed_texts_dimension_mismatch_raises(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_embed_texts_count_mismatch_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings = Settings(embedding_provider="openai_compatible", embedding_api_key="key")
+    settings = Settings(
+        embedding_provider="openai_compatible",
+        embedding_api_key="key",
+        embedding_dimension=2,
+    )
 
     class MissingOneAdapter:
         def embed_texts(self, texts: list[str]) -> list[list[float]]:
@@ -71,5 +100,3 @@ def test_pydantic_ai_embedding_adapter_embeds_texts_correctly() -> None:
 
     result = adapter.embed_texts(["one", "two"])
     assert result == [[1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0]]
-
-

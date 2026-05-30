@@ -13,5 +13,5 @@ class OpenRouterChatProvider(ChatModelProvider):
     @lru_cache
     def build_model(self) -> Model:
         settings = get_settings()
-        provider = OpenRouterProvider(api_key=settings.openrouter_api_key)
-        return OpenRouterModel(settings.openrouter_model, provider=provider)
+        provider = OpenRouterProvider(api_key=settings.chat_api_key)
+        return OpenRouterModel(settings.chat_model, provider=provider)
