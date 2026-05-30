@@ -1,0 +1,25 @@
+# Dependabot configuration for personal-rag repo
+
+version: 2
+updates:
+  # Keep GitHub Actions dependencies up to date
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Keep front-end npm dependencies up to date
+  - package-ecosystem: "npm"
+    directory: "/front-end"
+    schedule:
+      interval: "weekly"
+
+  # Keep back-end dependencies up to date.
+  # NOTE: Dependabot uses the closest supported ecosystem ("pip") to parse `pyproject.toml`.
+  # Since Dependabot does not currently natively support automatic updates to `uv.lock`,
+  # manual lockfile updates (e.g. `uv lock --update` or `uv sync`) may be needed
+  # after Dependabot PRs are merged.
+  - package-ecosystem: "pip"
+    directory: "/back-end"
+    schedule:
+      interval: "weekly"

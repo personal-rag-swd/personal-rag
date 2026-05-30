@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend CI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: back-end
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Lint with Ruff
+        run: uv run ruff check .
+
+      - name: Run tests with Pytest
+        run: uv run pytest
+
+  frontend:
+    name: Frontend CI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: front-end
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+          cache-dependency-path: front-end/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+  docker-smoke:
+    name: Docker Smoke Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend (smoke test)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./back-end
+          file: ./back-end/Dockerfile
+          push: false
+          tags: personal-rag-backend:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build frontend (smoke test)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./front-end
+          file: ./front-end/Dockerfile
+          build-args: |
+            VITE_API_URL=http://localhost:8000
+          push: false
+          tags: personal-rag-frontend:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
