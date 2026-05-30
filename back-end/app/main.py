@@ -3,11 +3,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from app.core.config import get_settings
-from app.core.patches import patch_agui_event_stream
 from app.core.telemetry import setup_telemetry
-
-# Apply patches early
-patch_agui_event_stream()
 
 # Configure logging and telemetry early
 settings = get_settings()
