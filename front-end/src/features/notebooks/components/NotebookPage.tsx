@@ -16,6 +16,7 @@ import { NotebookHeader } from "./notebook-page/NotebookHeader";
 import { NotebookError, NotebookSkeleton } from "./notebook-page/NotebookStates";
 import { SourcesPanel } from "./notebook-page/SourcesPanel";
 import { StudioPanel } from "./notebook-page/StudioPanel";
+import { ReportsPanel } from "./notebook-page/ReportsPanel";
 import { UpdateNotebookDialog } from "./UpdateNotebookDialog";
 import { DeleteNotebookDialog } from "./DeleteNotebookDialog";
 
@@ -30,6 +31,7 @@ export function NotebookPage() {
   // Modal dialog states
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [isReportsOpen, setIsReportsOpen] = useState(false);
 
   if (!id) {
     return (
@@ -87,7 +89,11 @@ export function NotebookPage() {
           </TabsContent>
           <TabsContent value="studio" className="min-h-0">
             <PanelCard title="Studio">
-              <StudioPanel />
+              <StudioPanel onActivate={(actionId) => {
+                if (actionId === "reports") {
+                  setIsReportsOpen(true);
+                }
+              }} />
             </PanelCard>
           </TabsContent>
         </Tabs>
@@ -100,10 +106,20 @@ export function NotebookPage() {
             <ChatPanel notebookId={id} />
           </PanelCard>
           <PanelCard title="Studio">
-            <StudioPanel />
+            <StudioPanel onActivate={(actionId) => {
+              if (actionId === "reports") {
+                setIsReportsOpen(true);
+              }
+            }} />
           </PanelCard>
         </div>
       </div>
+
+      <ReportsPanel
+        notebookId={id}
+        open={isReportsOpen}
+        onOpenChange={setIsReportsOpen}
+      />
 
       {/* Edit & Delete Dialog Modals */}
       <UpdateNotebookDialog

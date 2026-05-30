@@ -27,6 +27,19 @@ def resolve_chat_provider() -> ChatModelProvider:
     return resolved
 
 
+def chat_provider_is_configured() -> bool:
+    """True if the currently selected chat provider has an API key available.
+
+    Used to surface a friendly 503 before attempting LLM-backed features
+    (chat, reports) instead of failing deep inside the provider SDK.
+    """
+    settings = get_settings()
+    selected_provider = settings.chat_provider.strip().lower()
+    if selected_provider in ("gemini", "openrouter", "openai_compatible"):
+        return bool(settings.chat_api_key)
+    return False
+
+
 def get_notebook_chat_agent(
     context_retriever: Callable[[str], str] | None = None,
 ) -> Agent:

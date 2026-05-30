@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -113,3 +114,63 @@ class NotebookChatHistoryMessage(BaseModel):
     parts: list[NotebookChatHistoryPart]
     sources: list[NotebookChatSource] = Field(default_factory=list)
     references: list[NotebookChatReference] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Report structured-output schemas (returned by the LLM via pydantic-ai)
+# ---------------------------------------------------------------------------
+
+class GlossaryEntry(BaseModel):
+    term: str
+    definition: str
+
+
+class QuizItem(BaseModel):
+    question: str
+    options: list[str]
+    answer: str
+    explanation: str
+
+
+class BriefingDocReport(BaseModel):
+    executive_summary: str
+    key_takeaways: list[str]
+    strategic_implications: list[str]
+
+
+class StudyGuideReport(BaseModel):
+    glossary: list[GlossaryEntry]
+    quiz: list[QuizItem]
+
+
+class BlogPostReport(BaseModel):
+    title: str
+    hook: str
+    markdown_body: str
+
+
+class CustomReport(BaseModel):
+    markdown_content: str
+
+
+# ---------------------------------------------------------------------------
+# Report API schemas
+# ---------------------------------------------------------------------------
+
+ReportType = Literal["briefing", "study_guide", "blog", "custom"]
+
+
+class ReportGenerateRequest(BaseModel):
+    report_type: ReportType
+    additional_instructions: str | None = Field(default=None, max_length=2000)
+
+
+class NotebookReportRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    notebook_id: UUID
+    report_type: str
+    content: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
