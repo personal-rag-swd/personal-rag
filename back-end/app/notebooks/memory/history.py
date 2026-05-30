@@ -17,41 +17,6 @@ CITATION_PATTERN = re.compile(
     r"(?:,\s*doc_id=(?P<doc_id_end>[^,\]]+))?\]"
 )
 
-
-def _is_user_turn(message: ModelMessage) -> bool:
-    """True if the message is a request that carries an actual user prompt
-    (i.e. a clean conversation-turn boundary, not a tool-return request)."""
-    return isinstance(message, ModelRequest) and any(
-        getattr(part, "part_kind", "") == "user-prompt" for part in message.parts
-    )
-
-
-async def trim_history_to_recent(
-    messages: list[ModelMessage],
-    max_messages: int = 12,
-) -> list[ModelMessage]:
-    """Keep only the most recent messages for the next model request.
-
-    The window is snapped forward to the next user-turn boundary so it never
-    starts in the middle of a tool call/return pair. Providers such as Gemini
-    reject a history whose first turn is an orphaned tool-return with
-    ``400 INVALID_ARGUMENT: function response turn must come immediately after a
-    function call turn``; snapping to a user turn guarantees a valid sequence.
-    """
-    if len(messages) <= max_messages:
-        return messages
-
-    start = len(messages) - max_messages
-    while start < len(messages) and not _is_user_turn(messages[start]):
-        start += 1
-
-    # If no clean boundary exists in the tail, sending the full history is safer
-    # than emitting an orphaned tool-return.
-    if start >= len(messages):
-        return messages
-    return messages[start:]
-
-
 def load_notebook_chat_history(session: Session, notebook: Notebook) -> list[ModelMessage]:
     statement = (
         select(NotebookMessage.message)

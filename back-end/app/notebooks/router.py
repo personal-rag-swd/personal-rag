@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from functools import cached_property
 from pydantic_ai.capabilities.process_history import ProcessHistory
-from pydantic_ai.messages import ModelMessage, ModelRequest
+from pydantic_ai.messages import ModelMessage, ModelRequest, SystemPromptPart
 from typing import Annotated
 from uuid import UUID
 
@@ -23,10 +23,10 @@ from app.notebooks.agent import (
     get_notebook_chat_agent,
 )
 from app.notebooks.memory import (
+    append_notebook_chat_history,
     extract_notebook_chat_transcript,
     load_notebook_chat_history,
     save_notebook_chat_history,
-    trim_history_to_recent,
 )
 from app.notebooks.models import (
     Notebook,
@@ -69,34 +69,7 @@ from app.users.models import User
 _REPORT_CONTEXT_CHAR_LIMIT = 120_000
 
 
-class NotebookChatAGUIAdapter(AGUIAdapter):
-    """AG-UI adapter where the server DB is the single source of truth for chat
-    history.
 
-    The assistant-ui client resends its whole thread on every turn. The default
-    adapter concatenates that with the server-provided ``message_history``,
-    duplicating the conversation and producing malformed sequences (e.g. an
-    orphaned tool-return), which makes Gemini reject the request with
-    ``400 INVALID_ARGUMENT: function response turn must come immediately after a
-    function call turn``. We therefore consume only the newest user turn from the
-    client and let the structured, server-loaded history carry the past.
-    """
-
-    @cached_property
-    def messages(self) -> list[ModelMessage]:
-        msgs = self.load_messages(
-            self.run_input.messages, preserve_file_data=self.preserve_file_data
-        )
-        for idx in range(len(msgs) - 1, -1, -1):
-            message = msgs[idx]
-            if isinstance(message, ModelRequest) and any(
-                getattr(part, "part_kind", "") == "user-prompt" for part in message.parts
-            ):
-                return msgs[idx:]
-        # No user turn in the client payload: contribute nothing and let the
-        # server-loaded history stand, rather than forwarding a malformed
-        # (e.g. orphaned tool-return) client sequence that could trip the model.
-        return []
 
 
 router = APIRouter(prefix="/notebooks", tags=["Notebooks"])
@@ -186,14 +159,6 @@ async def chat_notebook_route(
     session: Annotated[Session, Depends(get_session)],
 ) -> Response:
     notebook = get_notebook(session, notebook_id, current_user)
-
-    if not chat_provider_is_configured():
-        provider = get_settings().chat_provider.strip().lower()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"LLM service is not configured. Set the API key for the '{provider}' chat provider.",
-        )
-
     message_history = load_notebook_chat_history(session, notebook)
 
     settings = get_settings()
@@ -210,19 +175,42 @@ async def chat_notebook_route(
         return build_context_block(chunks)
 
     async def persist_chat_history(result: AgentRunResult[object]) -> None:
-        # Persist the full, structured conversation (user prompts + tool calls/
-        # returns + responses) so history stays well-formed and citations remain
-        # recoverable. all_messages() = server history + the new turn; the save
-        # helper diffs against existing rows and appends only what changed.
-        save_notebook_chat_history(session, notebook, list(result.all_messages()))
+        append_notebook_chat_history(session, notebook, result.new_messages())
 
-    return await NotebookChatAGUIAdapter.dispatch_request(
+    async def keep_recent(messages: list[ModelMessage]) -> list[ModelMessage]:
+        system_prompts = []
+        other_messages = []
+        for msg in messages:
+            is_system = False
+            if isinstance(msg, ModelRequest):
+                part_names = {type(part).__name__ for part in msg.parts}
+                if "SystemPromptPart" in part_names:
+                    is_system = True
+                elif msg.instructions and not (part_names & {"UserPromptPart", "ToolReturnPart", "RetryPromptPart"}):
+                    is_system = True
+
+            if is_system:
+                system_prompts.append(msg)
+            else:
+                other_messages.append(msg)
+
+        # Keep the last 15 other messages
+        recent_limit = 15
+        recent_others = (
+            other_messages[-recent_limit:] if len(other_messages) > recent_limit else other_messages
+        )
+
+        # Combine system prompts and recent others while maintaining their original relative chronological order
+        keep_set = {id(msg) for msg in system_prompts} | {id(msg) for msg in recent_others}
+        return [msg for msg in messages if id(msg) in keep_set]
+
+    return await AGUIAdapter.dispatch_request(
         request,
         agent=get_notebook_chat_agent(_context_retriever),
         message_history=message_history,
         conversation_id=str(notebook.id),
         on_complete=persist_chat_history,
-        capabilities=[ProcessHistory(trim_history_to_recent)],
+        capabilities=[ProcessHistory(keep_recent)]
     )
 
 

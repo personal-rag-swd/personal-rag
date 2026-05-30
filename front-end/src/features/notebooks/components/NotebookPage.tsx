@@ -9,41 +9,29 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useIsDesktop } from "@/hooks/use-media-query";
 import { useNotebookQuery } from "@/features/notebooks/api";
 
 import { ChatPanel } from "./notebook-page/ChatPanel";
 import { NotebookHeader } from "./notebook-page/NotebookHeader";
 import { NotebookError, NotebookSkeleton } from "./notebook-page/NotebookStates";
-import { ReportsPanel } from "./notebook-page/ReportsPanel";
 import { SourcesPanel } from "./notebook-page/SourcesPanel";
 import { StudioPanel } from "./notebook-page/StudioPanel";
+import { ReportsPanel } from "./notebook-page/ReportsPanel";
 import { UpdateNotebookDialog } from "./UpdateNotebookDialog";
 import { DeleteNotebookDialog } from "./DeleteNotebookDialog";
-import { cn } from "@/lib/utils";
 
 type TabType = "sources" | "chat" | "studio";
-type StudioFeature = "reports";
 
 export function NotebookPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const isDesktop = useIsDesktop();
   const { data: notebook, isLoading, isError, error } = useNotebookQuery(id);
   const [activeTab, setActiveTab] = useState<TabType>("chat");
-  const [activeStudioFeature, setActiveStudioFeature] = useState<StudioFeature | null>(null);
-  const [isLeftCollapsed, setIsLeftCollapsed] = useState(false);
-  const [isRightCollapsed, setIsRightCollapsed] = useState(false);
-
-  const handleStudioActionActivate = (actionId: string) => {
-    if (actionId === "reports") {
-      setActiveStudioFeature("reports");
-    }
-  };
 
   // Modal dialog states
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [isReportsOpen, setIsReportsOpen] = useState(false);
 
   if (!id) {
     return (
@@ -76,73 +64,64 @@ export function NotebookPage() {
         onDeleteClick={() => setIsDeleteOpen(true)}
       />
 
-      <div className="flex min-h-0 flex-1 flex-col p-2">
-        {isDesktop ? (
-          /* Desktop: three side-by-side, collapsible columns */
-          <div className="flex min-h-0 flex-1 gap-2 overflow-hidden">
-            <div
-              className={cn(
-                "h-full shrink-0 overflow-hidden rounded-xl border transition-all duration-300 ease-in-out",
-                isLeftCollapsed ? "w-14" : "w-1/4"
-              )}
-            >
-              <SourcesPanel
-                notebookId={id}
-                isCollapsed={isLeftCollapsed}
-                onToggleCollapse={() => setIsLeftCollapsed(!isLeftCollapsed)}
-              />
-            </div>
-
-            <div className="h-full min-w-0 flex-1 overflow-hidden rounded-xl border">
-              <ChatPanel notebookId={id} />
-            </div>
-
-            <div
-              className={cn(
-                "h-full shrink-0 overflow-hidden rounded-xl border transition-all duration-300 ease-in-out",
-                isRightCollapsed ? "w-14" : "w-1/4"
-              )}
-            >
-              <StudioPanel
-                isCollapsed={isRightCollapsed}
-                onToggleCollapse={() => setIsRightCollapsed(!isRightCollapsed)}
-                onActivate={handleStudioActionActivate}
-                activeFeature={activeStudioFeature}
-              />
-            </div>
-          </div>
-        ) : (
-          /* Mobile / tablet: one panel at a time via tabs */
-          <Tabs
-            value={activeTab}
-            onValueChange={(value) => setActiveTab(value as TabType)}
-            className="flex min-h-0 flex-1 flex-col gap-2"
-          >
-            <TabsList className="grid w-full shrink-0 grid-cols-3">
+      <div className="min-h-0 flex-1 p-2">
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) => setActiveTab(value as TabType)}
+          className="h-full lg:hidden"
+        >
+          <div className="flex w-full">
+            <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="sources">Sources</TabsTrigger>
               <TabsTrigger value="chat">Chat</TabsTrigger>
               <TabsTrigger value="studio">Studio</TabsTrigger>
             </TabsList>
-            <TabsContent value="sources" className="mt-0 min-h-0 flex-1">
-              <PanelCard title="Sources">
-                <SourcesPanel notebookId={id} />
-              </PanelCard>
-            </TabsContent>
-            <TabsContent value="chat" className="mt-0 min-h-0 flex-1">
-              <PanelCard title="Chat">
-                <ChatPanel notebookId={id} />
-              </PanelCard>
-            </TabsContent>
-            <TabsContent value="studio" className="mt-0 min-h-0 flex-1">
-              <PanelCard title="Studio">
-                <StudioPanel />
-              </PanelCard>
-            </TabsContent>
-          </Tabs>
-        )}
+          </div>
+          <TabsContent value="sources" className="min-h-0">
+            <PanelCard title="Sources">
+              <SourcesPanel notebookId={id} />
+            </PanelCard>
+          </TabsContent>
+          <TabsContent value="chat" className="min-h-0">
+            <PanelCard title="Chat">
+              <ChatPanel notebookId={id} />
+            </PanelCard>
+          </TabsContent>
+          <TabsContent value="studio" className="min-h-0">
+            <PanelCard title="Studio">
+              <StudioPanel onActivate={(actionId) => {
+                if (actionId === "reports") {
+                  setIsReportsOpen(true);
+                }
+              }} />
+            </PanelCard>
+          </TabsContent>
+        </Tabs>
+
+        <div className="hidden h-full grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] gap-2 lg:grid">
+          <PanelCard title="Sources">
+            <SourcesPanel notebookId={id} />
+          </PanelCard>
+          <PanelCard title="Chat">
+            <ChatPanel notebookId={id} />
+          </PanelCard>
+          <PanelCard title="Studio">
+            <StudioPanel onActivate={(actionId) => {
+              if (actionId === "reports") {
+                setIsReportsOpen(true);
+              }
+            }} />
+          </PanelCard>
+        </div>
       </div>
 
-    {/* Edit & Delete Dialog Modals */}
+      <ReportsPanel
+        notebookId={id}
+        open={isReportsOpen}
+        onOpenChange={setIsReportsOpen}
+      />
+
+      {/* Edit & Delete Dialog Modals */}
       <UpdateNotebookDialog
         key={notebook.id}
         open={isEditOpen}
@@ -169,12 +148,6 @@ export function NotebookPage() {
           void navigate("/dashboard");
         }}
         onClose={() => setIsDeleteOpen(false)}
-      />
-
-      <ReportsPanel
-        notebookId={id}
-        open={activeStudioFeature === "reports"}
-        onOpenChange={(open) => setActiveStudioFeature(open ? "reports" : null)}
       />
     </div>
   );

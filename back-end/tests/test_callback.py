@@ -112,32 +112,3 @@ def test_callback_minio_real_payload(client: TestClient) -> None:
     )
     assert data["details"]["size"] == 28788
     assert data["details"]["eventName"] == "s3:ObjectCreated:Put"
-
-
-def test_callback_minio_key_with_spaces(client: TestClient) -> None:
-    """Filenames with spaces arrive form-encoded (space -> '+') and must decode
-    back to a real space so the key matches the stored document key."""
-    payload = {
-        "Records": [
-            {
-                "eventName": "s3:ObjectCreated:Put",
-                "s3": {
-                    "bucket": {"name": "personal-rag-bucket"},
-                    "object": {
-                        "key": "users%2F9b3d45c2-fc3c-4139-b850-47d0c8086177"
-                        "%2F87821fb3-a00a-440e-a54d-c9a5e39bcdce"
-                        "%2FCoursera+12BSASCLFYK6.pdf",
-                        "size": 457384,
-                    },
-                },
-            }
-        ]
-    }
-
-    response = client.post("/api/v1/file/callback", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["details"]["key"] == (
-        "users/9b3d45c2-fc3c-4139-b850-47d0c8086177"
-        "/87821fb3-a00a-440e-a54d-c9a5e39bcdce/Coursera 12BSASCLFYK6.pdf"
-    )

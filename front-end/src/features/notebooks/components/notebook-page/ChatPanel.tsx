@@ -63,7 +63,7 @@ export function ChatPanel({ notebookId }: { notebookId: string }) {
     <div className="flex h-full min-h-0 flex-col bg-card">
       <div className="min-h-0 flex-1 overflow-hidden bg-card [&_.aui-thread-root]:bg-card [&_.aui-thread-viewport-footer]:bg-card [&_.aui-thread-welcome-suggestion]:bg-card">
         <AssistantRuntimeProvider runtime={runtime}>
-          <Thread />
+          <Thread hideScrollbar />
         </AssistantRuntimeProvider>
       </div>
     </div>

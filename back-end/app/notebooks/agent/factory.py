@@ -35,10 +35,8 @@ def chat_provider_is_configured() -> bool:
     """
     settings = get_settings()
     selected_provider = settings.chat_provider.strip().lower()
-    if selected_provider == "gemini":
-        return bool(settings.gemini_api_key)
-    if selected_provider == "openrouter":
-        return bool(settings.openrouter_api_key)
+    if selected_provider in ("gemini", "openrouter", "openai_compatible"):
+        return bool(settings.chat_api_key)
     return False
 
 
