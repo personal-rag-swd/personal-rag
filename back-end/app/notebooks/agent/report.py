@@ -1,8 +1,6 @@
 from pydantic_ai import Agent
-from pydantic_ai.models.openrouter import OpenRouterModel
-from pydantic_ai.providers.openrouter import OpenRouterProvider
 
-from app.core.config import get_settings
+from app.notebooks.agent.factory import resolve_chat_provider
 from app.notebooks.schemas import (
     BlogPostReport,
     BriefingDocReport,
@@ -41,12 +39,6 @@ Do not fabricate information not present in the sources.
 """.strip()
 
 
-def _make_model() -> OpenRouterModel:
-    settings = get_settings()
-    provider = OpenRouterProvider(api_key=settings.openrouter_api_key)
-    return OpenRouterModel(settings.openrouter_model, provider=provider)
-
-
 def _build_user_message(context: str, additional_instructions: str | None) -> str:
     parts = [f"SOURCE MATERIAL:\n\n{context}"]
     if additional_instructions and additional_instructions.strip():
@@ -58,39 +50,39 @@ async def generate_briefing_doc(
     context: str,
     additional_instructions: str | None = None,
 ) -> BriefingDocReport:
-    agent: Agent[None, BriefingDocReport] = Agent(
-        _make_model(),
-        result_type=BriefingDocReport,
-        system_prompt=_BRIEFING_SYSTEM,
+    agent = Agent(
+        resolve_chat_provider().build_model(),
+        output_type=BriefingDocReport,
+        instructions=_BRIEFING_SYSTEM,
     )
     result = await agent.run(_build_user_message(context, additional_instructions))
-    return result.data
+    return result.output
 
 
 async def generate_study_guide(
     context: str,
     additional_instructions: str | None = None,
 ) -> StudyGuideReport:
-    agent: Agent[None, StudyGuideReport] = Agent(
-        _make_model(),
-        result_type=StudyGuideReport,
-        system_prompt=_STUDY_GUIDE_SYSTEM,
+    agent = Agent(
+        resolve_chat_provider().build_model(),
+        output_type=StudyGuideReport,
+        instructions=_STUDY_GUIDE_SYSTEM,
     )
     result = await agent.run(_build_user_message(context, additional_instructions))
-    return result.data
+    return result.output
 
 
 async def generate_blog_post(
     context: str,
     additional_instructions: str | None = None,
 ) -> BlogPostReport:
-    agent: Agent[None, BlogPostReport] = Agent(
-        _make_model(),
-        result_type=BlogPostReport,
-        system_prompt=_BLOG_SYSTEM,
+    agent = Agent(
+        resolve_chat_provider().build_model(),
+        output_type=BlogPostReport,
+        instructions=_BLOG_SYSTEM,
     )
     result = await agent.run(_build_user_message(context, additional_instructions))
-    return result.data
+    return result.output
 
 
 async def generate_custom_report(
@@ -98,14 +90,14 @@ async def generate_custom_report(
     additional_instructions: str,
 ) -> CustomReport:
     """Custom reports treat additional_instructions as the entire core directive."""
-    agent: Agent[None, CustomReport] = Agent(
-        _make_model(),
-        result_type=CustomReport,
-        system_prompt=_CUSTOM_SYSTEM_BASE,
+    agent = Agent(
+        resolve_chat_provider().build_model(),
+        output_type=CustomReport,
+        instructions=_CUSTOM_SYSTEM_BASE,
     )
     user_message = (
         f"USER REQUEST: {additional_instructions.strip()}\n\n"
         f"SOURCE MATERIAL:\n\n{context}"
     )
     result = await agent.run(user_message)
-    return result.data
+    return result.output

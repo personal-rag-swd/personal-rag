@@ -14,6 +14,7 @@ from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
     TextPart,
+    ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
 )
@@ -83,6 +84,13 @@ def make_user(email: str) -> User:
 def auth_headers(user: User, settings: Settings) -> dict[str, str]:
     token = create_access_token(user, settings)
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture(autouse=True)
+def _chat_provider_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Chat routes gate on a configured provider; treat it as configured by
+    default so endpoint tests don't depend on ambient env keys."""
+    monkeypatch.setattr("app.notebooks.router.chat_provider_is_configured", lambda: True)
 
 
 class FakeRunResult:
@@ -226,6 +234,42 @@ def test_notebook_chat_endpoint_loads_existing_message_history(
 
     assert response.status_code == 200
     assert captured["message_history"] == messages
+
+
+def test_notebook_chat_requires_configured_provider(
+    client: TestClient,
+    settings: Settings,
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = make_user("noprovider@example.com")
+    session.add(user)
+    session.commit()
+    headers = auth_headers(user, settings)
+    created = client.post(
+        "/api/v1/notebooks/",
+        json={"name": "Chat", "description": "", "tags": []},
+        headers=headers,
+    ).json()
+
+    monkeypatch.setattr("app.notebooks.router.chat_provider_is_configured", lambda: False)
+
+    called = {"value": False}
+
+    async def fake_dispatch_request(request: object, agent: object, **kwargs: Any) -> Response:
+        called["value"] = True
+        return Response(content="ok", media_type="text/plain")
+
+    monkeypatch.setattr(AGUIAdapter, "dispatch_request", fake_dispatch_request)
+
+    response = client.post(
+        f"/api/v1/notebooks/{created['id']}/chat",
+        json={"messages": []},
+        headers=headers,
+    )
+
+    assert response.status_code == 503
+    assert called["value"] is False
 
 
 def test_notebook_chat_endpoint_is_scoped_to_owner(
@@ -493,6 +537,61 @@ def test_chunks_endpoints_scope(
     assert resp_single_by_id.status_code == 200
     assert resp_single_by_id.json()["content"] == "Grounding content"
     assert resp_single_by_id.json()["document_id"] == str(doc.id)
+
+
+import asyncio
+
+from app.notebooks.memory import trim_history_to_recent
+
+
+def _is_user_turn(message: ModelMessage) -> bool:
+    return isinstance(message, ModelRequest) and any(
+        getattr(part, "part_kind", "") == "user-prompt" for part in message.parts
+    )
+
+
+def _starts_with_orphan_tool_return(messages: list[ModelMessage]) -> bool:
+    return bool(messages) and isinstance(messages[0], ModelRequest) and any(
+        getattr(part, "part_kind", "") == "tool-return" for part in messages[0].parts
+    )
+
+
+def test_trim_history_short_is_unchanged() -> None:
+    messages = [
+        ModelRequest(parts=[UserPromptPart(content="q1")]),
+        ModelResponse(parts=[TextPart(content="a1")]),
+    ]
+    result = asyncio.run(trim_history_to_recent(messages, max_messages=12))
+    assert result == messages
+
+
+def test_trim_history_never_starts_with_orphaned_tool_return() -> None:
+    """Reproduces the Gemini 400 shape: a leading tool call/return pair pushed
+    out of a naive `messages[-max:]` window, leaving an orphaned tool-return."""
+    messages = [
+        ModelResponse(parts=[ToolCallPart(tool_name="search_notebook_context", args={"query": "x"}, tool_call_id="c1")]),
+        ModelRequest(parts=[ToolReturnPart(tool_name="search_notebook_context", content="ctx", tool_call_id="c1")]),
+        ModelResponse(parts=[TextPart(content="a")]),
+        ModelResponse(parts=[TextPart(content="b")]),
+        ModelResponse(parts=[TextPart(content="c")]),
+        ModelResponse(parts=[TextPart(content="d")]),
+    ]
+    result = asyncio.run(trim_history_to_recent(messages, max_messages=5))
+    assert not _starts_with_orphan_tool_return(result)
+
+
+def test_trim_history_snaps_to_user_turn() -> None:
+    messages: list[ModelMessage] = []
+    for i in range(4):
+        messages += [
+            ModelRequest(parts=[UserPromptPart(content=f"q{i}")]),
+            ModelResponse(parts=[ToolCallPart(tool_name="t", args={}, tool_call_id=f"c{i}")]),
+            ModelRequest(parts=[ToolReturnPart(tool_name="t", content="r", tool_call_id=f"c{i}")]),
+            ModelResponse(parts=[TextPart(content=f"a{i}")]),
+        ]
+    result = asyncio.run(trim_history_to_recent(messages, max_messages=12))
+    assert len(result) <= 12
+    assert _is_user_turn(result[0])
 
 
 def test_append_notebook_chat_history_does_not_delete_old_messages(session: Session) -> None:

@@ -1,10 +1,12 @@
 from datetime import UTC, datetime
+from functools import cached_property
 from pydantic_ai.capabilities.process_history import ProcessHistory
-from pydantic_ai.messages import ModelMessage
+from pydantic_ai.messages import ModelMessage, ModelRequest
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.run import AgentRunResult
 from pydantic_ai.ui.ag_ui import AGUIAdapter
 from sqlalchemy.exc import SQLAlchemyError
@@ -13,6 +15,7 @@ from sqlmodel import Session, select
 from app.core.config import get_settings
 from app.core.database import get_session
 from app.notebooks.agent import (
+    chat_provider_is_configured,
     generate_blog_post,
     generate_briefing_doc,
     generate_custom_report,
@@ -23,7 +26,7 @@ from app.notebooks.memory import (
     extract_notebook_chat_transcript,
     load_notebook_chat_history,
     save_notebook_chat_history,
-    append_notebook_chat_history,
+    trim_history_to_recent,
 )
 from app.notebooks.models import (
     Notebook,
@@ -64,6 +67,37 @@ from app.users.models import User
 # Maximum characters of source text fed to the LLM for report generation.
 # ~120 k chars ≈ 30 k tokens, safely within most context windows.
 _REPORT_CONTEXT_CHAR_LIMIT = 120_000
+
+
+class NotebookChatAGUIAdapter(AGUIAdapter):
+    """AG-UI adapter where the server DB is the single source of truth for chat
+    history.
+
+    The assistant-ui client resends its whole thread on every turn. The default
+    adapter concatenates that with the server-provided ``message_history``,
+    duplicating the conversation and producing malformed sequences (e.g. an
+    orphaned tool-return), which makes Gemini reject the request with
+    ``400 INVALID_ARGUMENT: function response turn must come immediately after a
+    function call turn``. We therefore consume only the newest user turn from the
+    client and let the structured, server-loaded history carry the past.
+    """
+
+    @cached_property
+    def messages(self) -> list[ModelMessage]:
+        msgs = self.load_messages(
+            self.run_input.messages, preserve_file_data=self.preserve_file_data
+        )
+        for idx in range(len(msgs) - 1, -1, -1):
+            message = msgs[idx]
+            if isinstance(message, ModelRequest) and any(
+                getattr(part, "part_kind", "") == "user-prompt" for part in message.parts
+            ):
+                return msgs[idx:]
+        # No user turn in the client payload: contribute nothing and let the
+        # server-loaded history stand, rather than forwarding a malformed
+        # (e.g. orphaned tool-return) client sequence that could trip the model.
+        return []
+
 
 router = APIRouter(prefix="/notebooks", tags=["Notebooks"])
 
@@ -152,6 +186,14 @@ async def chat_notebook_route(
     session: Annotated[Session, Depends(get_session)],
 ) -> Response:
     notebook = get_notebook(session, notebook_id, current_user)
+
+    if not chat_provider_is_configured():
+        provider = get_settings().chat_provider.strip().lower()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"LLM service is not configured. Set the API key for the '{provider}' chat provider.",
+        )
+
     message_history = load_notebook_chat_history(session, notebook)
 
     settings = get_settings()
@@ -168,19 +210,19 @@ async def chat_notebook_route(
         return build_context_block(chunks)
 
     async def persist_chat_history(result: AgentRunResult[object]) -> None:
-        append_notebook_chat_history(session, notebook, result.new_messages())
+        # Persist the full, structured conversation (user prompts + tool calls/
+        # returns + responses) so history stays well-formed and citations remain
+        # recoverable. all_messages() = server history + the new turn; the save
+        # helper diffs against existing rows and appends only what changed.
+        save_notebook_chat_history(session, notebook, list(result.all_messages()))
 
-    async def keep_recent(messages: list[ModelMessage]) -> list[ModelMessage]:
-        return messages[-5:] if len(messages) > 5 else messages
-
-
-    return await AGUIAdapter.dispatch_request(
+    return await NotebookChatAGUIAdapter.dispatch_request(
         request,
         agent=get_notebook_chat_agent(_context_retriever),
         message_history=message_history,
         conversation_id=str(notebook.id),
         on_complete=persist_chat_history,
-        capabilities=[ProcessHistory(keep_recent)]
+        capabilities=[ProcessHistory(trim_history_to_recent)],
     )
 
 
@@ -389,10 +431,11 @@ async def generate_notebook_report(
 ) -> object:
     notebook = get_notebook(session, notebook_id, current_user)
 
-    if not get_settings().openrouter_api_key:
+    if not chat_provider_is_configured():
+        provider = get_settings().chat_provider.strip().lower()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM service is not configured. Set OPENROUTER_API_KEY.",
+            detail=f"LLM service is not configured. Set the API key for the '{provider}' chat provider.",
         )
 
     context = _build_report_context(session, notebook, current_user)
@@ -403,21 +446,36 @@ async def generate_notebook_report(
         )
 
     instructions = (payload.additional_instructions or "").strip() or None
+    if payload.report_type == "custom" and not instructions:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="additional_instructions is required for report_type 'custom'.",
+        )
+
     report_content: BriefingDocReport | StudyGuideReport | BlogPostReport | CustomReport
-    match payload.report_type:
-        case "briefing":
-            report_content = await generate_briefing_doc(context, instructions)
-        case "study_guide":
-            report_content = await generate_study_guide(context, instructions)
-        case "blog":
-            report_content = await generate_blog_post(context, instructions)
-        case "custom":
-            if not instructions:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="additional_instructions is required for report_type 'custom'.",
-                )
-            report_content = await generate_custom_report(context, instructions)
+    try:
+        match payload.report_type:
+            case "briefing":
+                report_content = await generate_briefing_doc(context, instructions)
+            case "study_guide":
+                report_content = await generate_study_guide(context, instructions)
+            case "blog":
+                report_content = await generate_blog_post(context, instructions)
+            case "custom":
+                report_content = await generate_custom_report(context, instructions)
+    except ModelHTTPError as exc:
+        # Surface provider failures (rate limits, upstream errors) cleanly instead
+        # of an opaque 500. Free-tier Gemini in particular returns 429 when the
+        # daily request quota is exhausted.
+        if exc.status_code == 429:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="The AI provider rate limit was exceeded. Please wait a moment and try again.",
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The AI provider failed to generate the report. Please try again.",
+        ) from exc
 
     now = datetime.now(UTC)
     report = NotebookReport(

@@ -338,3 +338,191 @@ def test_create_notebook_requires_name(
     )
 
     assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Report generation flow
+# ---------------------------------------------------------------------------
+
+from pydantic_ai.exceptions import ModelHTTPError
+
+from app.notebooks.schemas import BriefingDocReport
+
+
+def _create_notebook(client: TestClient, headers: dict[str, str]) -> str:
+    return client.post(
+        "/api/v1/notebooks/",
+        json={"name": "Reports", "description": "", "tags": []},
+        headers=headers,
+    ).json()["id"]
+
+
+def _add_indexed_chunk(session: Session, notebook_id: UUID, user_id: UUID) -> None:
+    doc = NotebookDocument(
+        id=uuid4(),
+        notebook_id=notebook_id,
+        user_id=user_id,
+        s3_bucket="bucket",
+        s3_key=f"key-{uuid4()}",
+        filename="source.txt",
+        status="indexed",
+    )
+    session.add(doc)
+    session.commit()
+    session.add(
+        NotebookDocumentChunk(
+            id=uuid4(),
+            document_id=doc.id,
+            notebook_id=notebook_id,
+            user_id=user_id,
+            chunk_index=0,
+            content="Indexed source content about the project.",
+            embedding=[0.0] * 1536,
+        )
+    )
+    session.commit()
+
+
+def test_generate_report_requires_configured_provider(
+    client: TestClient,
+    settings: Settings,
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = make_user("rep1@example.com")
+    session.add(user)
+    session.commit()
+    headers = auth_headers(user, settings)
+    notebook_id = _create_notebook(client, headers)
+
+    monkeypatch.setattr("app.notebooks.router.chat_provider_is_configured", lambda: False)
+
+    response = client.post(
+        f"/api/v1/notebooks/{notebook_id}/reports",
+        json={"report_type": "briefing"},
+        headers=headers,
+    )
+    assert response.status_code == 503
+
+
+def test_generate_report_requires_indexed_documents(
+    client: TestClient,
+    settings: Settings,
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = make_user("rep2@example.com")
+    session.add(user)
+    session.commit()
+    headers = auth_headers(user, settings)
+    notebook_id = _create_notebook(client, headers)
+
+    monkeypatch.setattr("app.notebooks.router.chat_provider_is_configured", lambda: True)
+
+    response = client.post(
+        f"/api/v1/notebooks/{notebook_id}/reports",
+        json={"report_type": "briefing"},
+        headers=headers,
+    )
+    assert response.status_code == 422
+    assert "indexed" in response.json()["detail"].lower()
+
+
+def test_generate_report_persists_and_lists(
+    client: TestClient,
+    settings: Settings,
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = make_user("rep3@example.com")
+    session.add(user)
+    session.commit()
+    headers = auth_headers(user, settings)
+    notebook_id = _create_notebook(client, headers)
+    _add_indexed_chunk(session, UUID(notebook_id), user.id)
+
+    monkeypatch.setattr("app.notebooks.router.chat_provider_is_configured", lambda: True)
+
+    captured: dict[str, object] = {}
+
+    async def fake_briefing(context: str, instructions: str | None = None) -> BriefingDocReport:
+        captured["context"] = context
+        return BriefingDocReport(
+            executive_summary="Summary.",
+            key_takeaways=["one", "two"],
+            strategic_implications=["do x"],
+        )
+
+    monkeypatch.setattr("app.notebooks.router.generate_briefing_doc", fake_briefing)
+
+    response = client.post(
+        f"/api/v1/notebooks/{notebook_id}/reports",
+        json={"report_type": "briefing"},
+        headers=headers,
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["report_type"] == "briefing"
+    assert body["content"]["key_takeaways"] == ["one", "two"]
+    # The notebook's indexed source text was fed to the generator.
+    assert "Indexed source content" in str(captured["context"])
+
+    listed = client.get(
+        f"/api/v1/notebooks/{notebook_id}/reports",
+        headers=headers,
+    )
+    assert listed.status_code == 200
+    assert len(listed.json()) == 1
+    assert listed.json()[0]["id"] == body["id"]
+
+
+def test_generate_report_custom_requires_instructions(
+    client: TestClient,
+    settings: Settings,
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = make_user("rep4@example.com")
+    session.add(user)
+    session.commit()
+    headers = auth_headers(user, settings)
+    notebook_id = _create_notebook(client, headers)
+    _add_indexed_chunk(session, UUID(notebook_id), user.id)
+
+    monkeypatch.setattr("app.notebooks.router.chat_provider_is_configured", lambda: True)
+
+    response = client.post(
+        f"/api/v1/notebooks/{notebook_id}/reports",
+        json={"report_type": "custom"},
+        headers=headers,
+    )
+    assert response.status_code == 422
+    assert "additional_instructions" in response.json()["detail"]
+
+
+def test_generate_report_maps_provider_rate_limit(
+    client: TestClient,
+    settings: Settings,
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = make_user("rep5@example.com")
+    session.add(user)
+    session.commit()
+    headers = auth_headers(user, settings)
+    notebook_id = _create_notebook(client, headers)
+    _add_indexed_chunk(session, UUID(notebook_id), user.id)
+
+    monkeypatch.setattr("app.notebooks.router.chat_provider_is_configured", lambda: True)
+
+    async def rate_limited(context: str, instructions: str | None = None) -> BriefingDocReport:
+        raise ModelHTTPError(status_code=429, model_name="gemini-2.5-flash", body={})
+
+    monkeypatch.setattr("app.notebooks.router.generate_briefing_doc", rate_limited)
+
+    response = client.post(
+        f"/api/v1/notebooks/{notebook_id}/reports",
+        json={"report_type": "briefing"},
+        headers=headers,
+    )
+    assert response.status_code == 429

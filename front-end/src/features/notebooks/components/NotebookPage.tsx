@@ -9,6 +9,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useIsDesktop } from "@/hooks/use-media-query";
 import { useNotebookQuery } from "@/features/notebooks/api";
 
 import { ChatPanel } from "./notebook-page/ChatPanel";
@@ -27,6 +28,7 @@ type StudioFeature = "reports";
 export function NotebookPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const isDesktop = useIsDesktop();
   const { data: notebook, isLoading, isError, error } = useNotebookQuery(id);
   const [activeTab, setActiveTab] = useState<TabType>("chat");
   const [activeStudioFeature, setActiveStudioFeature] = useState<StudioFeature | null>(null);
@@ -74,71 +76,73 @@ export function NotebookPage() {
         onDeleteClick={() => setIsDeleteOpen(true)}
       />
 
-      <div className="min-h-0 flex-1 p-2">
-        <Tabs
-          value={activeTab}
-          onValueChange={(value) => setActiveTab(value as TabType)}
-          className="h-full lg:hidden"
-        >
-          <div className="flex w-full">
-            <TabsList className="grid w-full grid-cols-3">
+      <div className="flex min-h-0 flex-1 flex-col p-2">
+        {isDesktop ? (
+          /* Desktop: three side-by-side, collapsible columns */
+          <div className="flex min-h-0 flex-1 gap-2 overflow-hidden">
+            <div
+              className={cn(
+                "h-full shrink-0 overflow-hidden rounded-xl border transition-all duration-300 ease-in-out",
+                isLeftCollapsed ? "w-14" : "w-1/4"
+              )}
+            >
+              <SourcesPanel
+                notebookId={id}
+                isCollapsed={isLeftCollapsed}
+                onToggleCollapse={() => setIsLeftCollapsed(!isLeftCollapsed)}
+              />
+            </div>
+
+            <div className="h-full min-w-0 flex-1 overflow-hidden rounded-xl border">
+              <ChatPanel notebookId={id} />
+            </div>
+
+            <div
+              className={cn(
+                "h-full shrink-0 overflow-hidden rounded-xl border transition-all duration-300 ease-in-out",
+                isRightCollapsed ? "w-14" : "w-1/4"
+              )}
+            >
+              <StudioPanel
+                isCollapsed={isRightCollapsed}
+                onToggleCollapse={() => setIsRightCollapsed(!isRightCollapsed)}
+                onActivate={handleStudioActionActivate}
+                activeFeature={activeStudioFeature}
+              />
+            </div>
+          </div>
+        ) : (
+          /* Mobile / tablet: one panel at a time via tabs */
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) => setActiveTab(value as TabType)}
+            className="flex min-h-0 flex-1 flex-col gap-2"
+          >
+            <TabsList className="grid w-full shrink-0 grid-cols-3">
               <TabsTrigger value="sources">Sources</TabsTrigger>
               <TabsTrigger value="chat">Chat</TabsTrigger>
               <TabsTrigger value="studio">Studio</TabsTrigger>
             </TabsList>
-          </div>
-          <TabsContent value="sources" className="min-h-0">
-            <PanelCard title="Sources">
-              <SourcesPanel notebookId={id} />
-            </PanelCard>
-          </TabsContent>
-          <TabsContent value="chat" className="min-h-0">
-            <PanelCard title="Chat">
-              <ChatPanel notebookId={id} />
-            </PanelCard>
-          </TabsContent>
-          <TabsContent value="studio" className="min-h-0">
-            <PanelCard title="Studio">
-              <StudioPanel />
-            </PanelCard>
-          </TabsContent>
-        </Tabs>
-
-      <div className="flex flex-1 overflow-hidden">
-        <div className={cn(
-          "w-full h-full lg:shrink-0 overflow-hidden transition-all duration-300 ease-in-out",
-          isLeftCollapsed ? "lg:w-14" : "lg:w-1/4",
-          activeTab === "sources" ? "block" : "hidden lg:block"
-        )}>
-          <SourcesPanel
-            notebookId={id}
-            isCollapsed={isLeftCollapsed}
-            onToggleCollapse={() => setIsLeftCollapsed(!isLeftCollapsed)}
-          />
-        </div>
-
-        <div className={cn(
-          "w-full h-full lg:flex-1 lg:min-w-0 overflow-hidden",
-          activeTab === "chat" ? "block" : "hidden lg:block"
-        )}>
-          <ChatPanel notebookId={id} />
-        </div>
-
-        <div className={cn(
-          "w-full h-full lg:shrink-0 overflow-hidden transition-all duration-300 ease-in-out",
-          isRightCollapsed ? "lg:w-14" : "lg:w-1/4",
-          activeTab === "studio" ? "block" : "hidden lg:block"
-        )}>
-          <StudioPanel
-            isCollapsed={isRightCollapsed}
-            onToggleCollapse={() => setIsRightCollapsed(!isRightCollapsed)}
-            onActivate={handleStudioActionActivate}
-            activeFeature={activeStudioFeature}
-          />
-        </div>
+            <TabsContent value="sources" className="mt-0 min-h-0 flex-1">
+              <PanelCard title="Sources">
+                <SourcesPanel notebookId={id} />
+              </PanelCard>
+            </TabsContent>
+            <TabsContent value="chat" className="mt-0 min-h-0 flex-1">
+              <PanelCard title="Chat">
+                <ChatPanel notebookId={id} />
+              </PanelCard>
+            </TabsContent>
+            <TabsContent value="studio" className="mt-0 min-h-0 flex-1">
+              <PanelCard title="Studio">
+                <StudioPanel />
+              </PanelCard>
+            </TabsContent>
+          </Tabs>
+        )}
       </div>
 
-      {/* Edit & Delete Dialog Modals */}
+    {/* Edit & Delete Dialog Modals */}
       <UpdateNotebookDialog
         key={notebook.id}
         open={isEditOpen}

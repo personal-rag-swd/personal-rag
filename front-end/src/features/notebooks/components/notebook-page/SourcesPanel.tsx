@@ -333,6 +333,7 @@ export function SourcesPanel({
 
 function SourceItem({ document }: { document: NotebookDocument }) {
   const status = getDocumentStatus(document.status)
+  const progress = getDocumentProgress(document.status)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false)
   const deleteDocumentMutation = useDeleteNotebookDocumentMutation()
 
@@ -373,6 +374,23 @@ function SourceItem({ document }: { document: NotebookDocument }) {
                 <span aria-hidden="true">/</span>
                 <Badge variant={status.variant}>{status.label}</Badge>
               </div>
+              {progress.active ? (
+                <div className="mt-2">
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full animate-pulse rounded-full bg-primary transition-all duration-500 ease-out"
+                      style={{ width: `${progress.percent}%` }}
+                    />
+                  </div>
+                  <div className="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                    <Loader2Icon className="size-3 animate-spin" />
+                    <span>{progress.label}</span>
+                    <span className="ml-auto tabular-nums">
+                      {progress.percent}%
+                    </span>
+                  </div>
+                </div>
+              ) : null}
               {document.status === "failed" && document.errorMessage ? (
                 <p className="mt-2 line-clamp-2 text-[11px] leading-relaxed text-destructive">
                   {document.errorMessage}
@@ -510,6 +528,32 @@ function getDocumentStatus(status: string) {
         label: "Waiting for upload",
         variant: "outline" as const,
       }
+  }
+}
+
+/**
+ * Maps a document's server-side lifecycle to an overall ingestion percentage so
+ * the UI can keep showing forward progress after the raw S3 upload finishes
+ * (uploaded -> processing -> indexed), not just during the byte transfer.
+ */
+function getDocumentProgress(status: string): {
+  percent: number
+  label: string
+  active: boolean
+} {
+  switch (status) {
+    case "pending":
+      return { percent: 15, label: "Uploading to storage", active: true }
+    case "uploaded":
+      return { percent: 45, label: "Queued for processing", active: true }
+    case "processing":
+      return { percent: 80, label: "Chunking & embedding", active: true }
+    case "indexed":
+      return { percent: 100, label: "Indexed", active: false }
+    case "failed":
+      return { percent: 100, label: "Failed", active: false }
+    default:
+      return { percent: 5, label: "Waiting for upload", active: true }
   }
 }
 
