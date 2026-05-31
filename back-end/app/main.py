@@ -3,11 +3,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from app.core.config import get_settings
-from app.core.patches import patch_agui_event_stream
 from app.core.telemetry import setup_telemetry
-
-# Apply patches early
-patch_agui_event_stream()
 
 # Configure logging and telemetry early
 settings = get_settings()
@@ -35,13 +31,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     
     # Resolve Chat Model & Provider
     chat_prov = settings.chat_provider.strip().lower()
-    chat_model = settings.gemini_model if chat_prov == "gemini" else settings.openrouter_model
+    chat_model = settings.chat_model
     
     # Resolve Embedding Model & Provider
     embed_prov = settings.embedding_provider.strip().lower()
     if embed_prov == "auto":
-        embed_prov = "gemini" if settings.gemini_api_key else "openai_compatible"
-    embed_model = settings.gemini_embedding_model if embed_prov == "gemini" else settings.embedding_model
+        embed_prov = "gemini" if settings.embedding_api_key else "openai_compatible"
+    embed_model = settings.embedding_model
     
     logger = logging.getLogger("app.startup")
     logger.info("============================================================")

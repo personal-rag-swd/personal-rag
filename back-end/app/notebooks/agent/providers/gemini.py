@@ -13,5 +13,5 @@ class GeminiChatProvider(ChatModelProvider):
     @lru_cache
     def build_model(self) -> Model:
         settings = get_settings()
-        provider = GoogleProvider(api_key=settings.gemini_api_key)
-        return GoogleModel(settings.gemini_model, provider=provider)
+        provider = GoogleProvider(api_key=settings.chat_api_key)
+        return GoogleModel(settings.chat_model, provider=provider)

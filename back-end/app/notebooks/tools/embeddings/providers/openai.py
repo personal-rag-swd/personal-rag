@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pydantic_ai import Embedder
+from pydantic_ai.embeddings import EmbeddingSettings
 from pydantic_ai.embeddings.openai import OpenAIEmbeddingModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -14,6 +15,7 @@ class OpenAICompatibleEmbeddingAdapter(PydanticAIEmbeddingAdapter):
         api_key: str,
         model: str,
         base_url: str | None = None,
+        output_dimensionality: int | None = None,
     ) -> None:
         self.model = model
 
@@ -23,5 +25,9 @@ class OpenAICompatibleEmbeddingAdapter(PydanticAIEmbeddingAdapter):
             provider=provider,
         )
 
-        embedder = Embedder(embedding_model)
+        settings = None
+        if output_dimensionality and output_dimensionality > 0:
+            settings = EmbeddingSettings(dimensions=output_dimensionality)
+
+        embedder = Embedder(embedding_model, settings=settings)
         super().__init__(embedder)

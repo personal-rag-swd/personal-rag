@@ -48,17 +48,15 @@ services:
       OTP_MAX_ATTEMPTS: ${OTP_MAX_ATTEMPTS:-5}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-noreply@example.com}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-4o-mini}
       CHAT_PROVIDER: ${CHAT_PROVIDER:-openrouter}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
-      GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-gemini-embedding-2}
+      CHAT_API_KEY: ${CHAT_API_KEY:-}
+      CHAT_PROVIDER_URL: ${CHAT_PROVIDER_URL:-}
+      CHAT_MODEL: ${CHAT_MODEL:-openai/gpt-4o-mini}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-auto}
-      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
-      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_PROVIDER_URL: ${EMBEDDING_PROVIDER_URL:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-1536}
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173","http://localhost:8000"]}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
@@ -80,6 +78,11 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/ping')\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   minio-mc:
     image: minio/mc:latest
@@ -90,18 +93,20 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     entrypoint: >
       /bin/sh -c "
+      set -e;
       until mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; do sleep 2; done;
       mc mb --ignore-existing local/$${S3_BUCKET};
-      mc admin config set local notify_webhook:backend endpoint=http://backend:8000/api/v1/file/callback;
+      until mc admin config set local notify_webhook:backend endpoint=http://backend:8000/api/v1/file/callback; do sleep 2; done;
       mc admin service restart --json --disable-pager local;
-      sleep 3;
-      mc event add local/$${S3_BUCKET} arn:minio:sqs::backend:webhook --event put || true;
+      until mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; do sleep 2; done;
+      until mc event add local/$${S3_BUCKET} arn:minio:sqs::backend:webhook --event put; do sleep 2; done;
+      mc event ls local/$${S3_BUCKET};
       "
     depends_on:
       minio:
         condition: service_healthy
       backend:
-        condition: service_started
+        condition: service_healthy
 
   frontend:
     image: node:24-alpine

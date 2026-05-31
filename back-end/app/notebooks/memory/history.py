@@ -17,7 +17,6 @@ CITATION_PATTERN = re.compile(
     r"(?:,\s*doc_id=(?P<doc_id_end>[^,\]]+))?\]"
 )
 
-
 def load_notebook_chat_history(session: Session, notebook: Notebook) -> list[ModelMessage]:
     statement = (
         select(NotebookMessage.message)

@@ -16,9 +16,13 @@ import { STUDIO_ACTIONS } from "./studioActions";
 export function StudioPanel({
   isCollapsed,
   onToggleCollapse,
+  onActivate,
+  activeFeature,
 }: {
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
+  onActivate?: (actionId: string) => void;
+  activeFeature?: string | null;
 }) {
   return (
     <div className={cn(
@@ -43,9 +47,26 @@ export function StudioPanel({
 
             <ScrollArea className="w-full flex-1 max-h-[calc(100vh-140px)]">
               <div className="flex flex-col items-center gap-2.5 px-2">
-                {STUDIO_ACTIONS.map((action) => (
-                  <StudioActionTooltip key={action.id} action={action} />
-                ))}
+                {STUDIO_ACTIONS.map((action) => {
+                  const ActionIcon = action.icon;
+                  return (
+                    <Tooltip key={action.id}>
+                      <TooltipTrigger
+                        onClick={() => onActivate?.(action.id)}
+                        className={cn(
+                          "flex size-8 shrink-0 items-center justify-center rounded-lg border transition-all duration-200 hover:scale-105 cursor-pointer",
+                          activeFeature === action.id
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "bg-muted text-muted-foreground hover:text-foreground"
+                        )}
+                        aria-label={action.label}
+                      >
+                        <ActionIcon className="size-4" />
+                      </TooltipTrigger>
+                      <TooltipContent side="left">{action.label}</TooltipContent>
+                    </Tooltip>
+                  );
+                })}
               </div>
             </ScrollArea>
           </div>
@@ -73,9 +94,20 @@ export function StudioPanel({
                   return (
                     <button
                       key={action.id}
-                      className="group flex w-full items-center gap-2.5 rounded-2xl border bg-background p-3 text-left transition-all duration-200 hover:bg-muted"
+                      onClick={() => onActivate?.(action.id)}
+                      className={cn(
+                        "group flex w-full items-center gap-2.5 rounded-2xl border p-3 text-left transition-all duration-200 hover:bg-muted",
+                        activeFeature === action.id
+                          ? "border-primary/40 bg-primary/5 ring-1 ring-primary/20"
+                          : "bg-background border-border"
+                      )}
                     >
-                      <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground transition-colors group-hover:text-foreground">
+                      <span className={cn(
+                        "flex size-8 shrink-0 items-center justify-center rounded-xl transition-colors group-hover:text-foreground",
+                        activeFeature === action.id
+                          ? "bg-primary/20 text-primary"
+                          : "bg-muted text-muted-foreground"
+                      )}>
                         <ActionIcon className="size-4" />
                       </span>
                       <span className="flex min-w-0 flex-col gap-1">
@@ -131,22 +163,4 @@ export function StudioPanel({
   );
 }
 
-function StudioActionTooltip({
-  action,
-}: {
-  action: (typeof STUDIO_ACTIONS)[number];
-}) {
-  const ActionIcon = action.icon;
 
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-muted text-xs font-medium text-muted-foreground transition-all duration-200 hover:scale-105 hover:text-foreground"
-        aria-label={action.label}
-      >
-        <ActionIcon className="size-4" />
-      </TooltipTrigger>
-      <TooltipContent side="left">{action.label}</TooltipContent>
-    </Tooltip>
-  );
-}

@@ -4,7 +4,7 @@ from typing import Any
 from uuid import UUID
 from uuid import uuid4
 
-os.environ["OPENROUTER_API_KEY"] = "test-key"
+os.environ["CHAT_API_KEY"] = "test-key"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,6 +13,7 @@ from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
     ModelResponse,
+    SystemPromptPart,
     TextPart,
     ToolReturnPart,
     UserPromptPart,
@@ -31,13 +32,22 @@ from app.users.models import User
 
 
 @pytest.fixture
-def settings() -> Settings:
-    return Settings(
+def settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
+    s = Settings(
         database_url="sqlite://",
         jwt_secret_key="test-secret-with-at-least-32-bytes",
         jwt_algorithm="HS256",
-        openrouter_api_key="test-key",
+        chat_api_key="test-key",
     )
+    from app.core import config
+    from app.notebooks.agent.providers import OpenRouterChatProvider, OpenAICompatibleChatProvider, GeminiChatProvider
+    OpenRouterChatProvider.build_model.cache_clear()
+    OpenAICompatibleChatProvider.build_model.cache_clear()
+    GeminiChatProvider.build_model.cache_clear()
+    config.get_settings.cache_clear()
+    
+    monkeypatch.setattr(config, "get_settings", lambda: s)
+    return s
 
 
 @pytest.fixture
@@ -536,4 +546,99 @@ def test_append_notebook_chat_history_does_not_delete_old_messages(session: Sess
     assert stored_2[2].message["parts"][0]["content"] == "How are you?"
     assert stored_2[3].seq == 4
     assert stored_2[3].message["parts"][0]["content"] == "I am doing great"
+
+
+def test_keep_recent_retains_system_prompts_and_more_history(
+    client: TestClient,
+    settings: Settings,
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = make_user("test_trimming@example.com")
+    session.add(user)
+    session.commit()
+
+    headers = auth_headers(user, settings)
+    created = client.post(
+        "/api/v1/notebooks/",
+        json={"name": "Trimming Test", "description": "", "tags": []},
+        headers=headers,
+    ).json()
+
+    # Create a long message history:
+    # 1. Message with SystemPromptPart
+    # 2. Message with instructions field
+    # 3. 20 other messages (10 alternating user & assistant turns)
+    messages = []
+    
+    # 1. System prompt part message
+    messages.append(ModelRequest(parts=[SystemPromptPart(content="System prompt 1")]))
+    
+    # 2. Instructions message
+    messages.append(ModelRequest(parts=[], instructions="System instructions 2"))
+    
+    # 3. 20 alternating turns (10 user, 10 assistant)
+    for i in range(1, 11):
+        messages.append(ModelRequest(parts=[UserPromptPart(content=f"User question {i}")]))
+        messages.append(ModelResponse(parts=[TextPart(content=f"Assistant answer {i}")]))
+
+    notebook = session.get(Notebook, UUID(created["id"]))
+    assert notebook is not None
+    json_messages = ModelMessagesTypeAdapter.dump_python(messages, mode="json")
+    session.add_all(
+        [
+            NotebookMessage(notebook_id=notebook.id, seq=idx, message=message)
+            for idx, message in enumerate(json_messages, start=1)
+        ]
+    )
+    session.commit()
+
+    captured: dict[str, Any] = {}
+
+    async def fake_dispatch_request(request: object, agent: object, **kwargs: Any) -> Response:
+        history = kwargs["message_history"]
+        for cap in kwargs.get("capabilities", []):
+            if type(cap).__name__ == "ProcessHistory":
+                history = await cap.processor(history)
+                break
+        captured["message_history"] = history
+        return Response(content="ok", media_type="text/plain")
+
+    monkeypatch.setattr(AGUIAdapter, "dispatch_request", fake_dispatch_request)
+
+    response = client.post(
+        f"/api/v1/notebooks/{created['id']}/chat",
+        json={"messages": []},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    
+    trimmed_history = captured["message_history"]
+    # Total other (non-system) messages: 20
+    # Sliding window limit: 15
+    # Since we preserve all system prompts (2 of them) and keep the 15 most recent other messages,
+    # the total should be 2 + 15 = 17 messages.
+    assert len(trimmed_history) == 17
+
+    # First two must be the system prompt messages
+    assert isinstance(trimmed_history[0], ModelRequest)
+    assert any(isinstance(p, SystemPromptPart) for p in trimmed_history[0].parts)
+    assert trimmed_history[0].parts[0].content == "System prompt 1"
+
+    assert isinstance(trimmed_history[1], ModelRequest)
+    assert trimmed_history[1].instructions == "System instructions 2"
+
+    # The remaining 15 should be the last 15 messages of the 20 non-system messages.
+    # The 20 non-system messages were:
+    # 2: User 1, 3: Assistant 1, 4: User 2, 5: Assistant 2, 6: User 3, 7: Assistant 3, ...
+    # Trimming the first 5 other messages (User 1, Assistant 1, User 2, Assistant 2, User 3) leaves:
+    # Assistant 3, User 4, Assistant 4, ..., User 10, Assistant 10.
+    # Let's verify the first of the trimmed messages (which should be Assistant answer 3)
+    assert isinstance(trimmed_history[2], ModelResponse)
+    assert trimmed_history[2].parts[0].content == "Assistant answer 3"
+
+    # And the last one should be Assistant answer 10
+    assert isinstance(trimmed_history[-1], ModelResponse)
+    assert trimmed_history[-1].parts[0].content == "Assistant answer 10"
 
