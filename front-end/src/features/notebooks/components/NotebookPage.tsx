@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useNotebookQuery } from "@/features/notebooks/api";
+import type { NotebookReport } from "@/features/notebooks/types";
 
 import { ChatPanel } from "./notebook-page/ChatPanel";
 import { NotebookHeader } from "./notebook-page/NotebookHeader";
@@ -32,6 +33,12 @@ export function NotebookPage() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [isReportsOpen, setIsReportsOpen] = useState(false);
+  const [selectedReport, setSelectedReport] = useState<NotebookReport | null>(null);
+
+  const handleViewReport = (report: NotebookReport) => {
+    setSelectedReport(report);
+    setIsReportsOpen(true);
+  };
 
   if (!id) {
     return (
@@ -68,32 +75,37 @@ export function NotebookPage() {
         <Tabs
           value={activeTab}
           onValueChange={(value) => setActiveTab(value as TabType)}
-          className="h-full lg:hidden"
+          className="flex h-full flex-col lg:hidden"
         >
-          <div className="flex w-full">
+          <div className="flex w-full shrink-0">
             <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="sources">Sources</TabsTrigger>
               <TabsTrigger value="chat">Chat</TabsTrigger>
               <TabsTrigger value="studio">Studio</TabsTrigger>
             </TabsList>
           </div>
-          <TabsContent value="sources" className="min-h-0">
+          <TabsContent value="sources" className="flex-1 min-h-0">
             <PanelCard title="Sources">
               <SourcesPanel notebookId={id} />
             </PanelCard>
           </TabsContent>
-          <TabsContent value="chat" className="min-h-0">
+          <TabsContent value="chat" className="flex-1 min-h-0">
             <PanelCard title="Chat">
               <ChatPanel notebookId={id} />
             </PanelCard>
           </TabsContent>
-          <TabsContent value="studio" className="min-h-0">
+          <TabsContent value="studio" className="flex-1 min-h-0">
             <PanelCard title="Studio">
-              <StudioPanel onActivate={(actionId) => {
-                if (actionId === "reports") {
-                  setIsReportsOpen(true);
-                }
-              }} />
+              <StudioPanel
+                notebookId={id}
+                onActivate={(actionId) => {
+                  if (actionId === "reports") {
+                    setSelectedReport(null);
+                    setIsReportsOpen(true);
+                  }
+                }}
+                onViewReport={handleViewReport}
+              />
             </PanelCard>
           </TabsContent>
         </Tabs>
@@ -106,11 +118,16 @@ export function NotebookPage() {
             <ChatPanel notebookId={id} />
           </PanelCard>
           <PanelCard title="Studio">
-            <StudioPanel onActivate={(actionId) => {
-              if (actionId === "reports") {
-                setIsReportsOpen(true);
-              }
-            }} />
+            <StudioPanel
+              notebookId={id}
+              onActivate={(actionId) => {
+                if (actionId === "reports") {
+                  setSelectedReport(null);
+                  setIsReportsOpen(true);
+                }
+              }}
+              onViewReport={handleViewReport}
+            />
           </PanelCard>
         </div>
       </div>
@@ -118,7 +135,11 @@ export function NotebookPage() {
       <ReportsPanel
         notebookId={id}
         open={isReportsOpen}
-        onOpenChange={setIsReportsOpen}
+        onOpenChange={(open) => {
+          setIsReportsOpen(open);
+          if (!open) setSelectedReport(null);
+        }}
+        initialReport={selectedReport}
       />
 
       {/* Edit & Delete Dialog Modals */}
