@@ -1,47 +1,37 @@
 from app.core.config import Settings
-from app.notebooks.agent.factory import resolve_chat_provider
-from app.notebooks.agent.providers import GeminiChatProvider, OpenAICompatibleChatProvider, OpenRouterChatProvider
+from app.notebooks.agent.factory import chat_provider_is_configured, _build_chat_model
+from pydantic_ai.models.google import GoogleModel
+from pydantic_ai.models.openai import OpenAIChatModel
 
 
-def test_resolve_chat_provider_openrouter(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "app.notebooks.agent.factory.get_settings",
-        lambda: Settings(chat_provider="openrouter"),
-    )
-    assert isinstance(resolve_chat_provider(), OpenRouterChatProvider)
+def test_build_chat_model_openrouter(monkeypatch) -> None:
+    settings = Settings(chat_provider="openrouter", chat_api_key="key")
+    model = _build_chat_model(settings)
+    assert isinstance(model, OpenAIChatModel)
 
 
-def test_resolve_chat_provider_openai_compatible(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "app.notebooks.agent.factory.get_settings",
-        lambda: Settings(chat_provider="openai_compatible"),
-    )
-    assert isinstance(resolve_chat_provider(), OpenAICompatibleChatProvider)
+def test_build_chat_model_openai_compatible(monkeypatch) -> None:
+    settings = Settings(chat_provider="openai_compatible", chat_api_key="key")
+    model = _build_chat_model(settings)
+    assert isinstance(model, OpenAIChatModel)
 
 
-def test_resolve_chat_provider_gemini(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "app.notebooks.agent.factory.get_settings",
-        lambda: Settings(chat_provider="gemini"),
-    )
-    assert isinstance(resolve_chat_provider(), GeminiChatProvider)
+def test_build_chat_model_gemini(monkeypatch) -> None:
+    settings = Settings(chat_provider="gemini", chat_api_key="key")
+    model = _build_chat_model(settings)
+    assert isinstance(model, GoogleModel)
 
 
-def test_resolve_chat_provider_unsupported(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "app.notebooks.agent.factory.get_settings",
-        lambda: Settings(chat_provider="other"),
-    )
+def test_build_chat_model_unsupported() -> None:
+    settings = Settings(chat_provider="other", chat_api_key="key")
     try:
-        resolve_chat_provider()
+        _build_chat_model(settings)
         assert False, "Expected ValueError"
     except ValueError as exc:
         assert "openai_compatible" in str(exc)
 
 
 def test_chat_provider_is_configured(monkeypatch) -> None:
-    from app.notebooks.agent.factory import chat_provider_is_configured
-
     # Gemini with API key
     monkeypatch.setattr(
         "app.notebooks.agent.factory.get_settings",
@@ -90,4 +80,3 @@ def test_chat_provider_is_configured(monkeypatch) -> None:
         lambda: Settings(chat_provider="unsupported", chat_api_key="key"),
     )
     assert chat_provider_is_configured() is False
-

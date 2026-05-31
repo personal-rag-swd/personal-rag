@@ -11,7 +11,7 @@ from sqlmodel import Session, delete, select
 from app.core.config import Settings
 from app.core.s3 import get_s3_client
 from app.notebooks.models import Notebook, NotebookDocument, NotebookDocumentChunk
-from app.notebooks.tools.chunking import ChunkingRequest, chunk_document
+from app.notebooks.tools.chunking import chunk_document
 from app.notebooks.tools.embeddings import embed_texts
 from app.users.models import User
 
@@ -185,12 +185,10 @@ def ingest_document_by_id(session: Session, document_id: UUID, settings: Setting
         obj = s3_client.get_object(Bucket=document.s3_bucket, Key=document.s3_key)
         body = obj["Body"].read()
         split_docs = chunk_document(
-            ChunkingRequest(
-                content=body,
-                filename=document.filename,
-                source=document.s3_key,
-                document_id=str(document.id),
-            )
+            body,
+            filename=document.filename,
+            source=document.s3_key,
+            document_id=str(document.id),
         )
         chunk_texts = [doc.page_content for doc in split_docs]
         if not chunk_texts:

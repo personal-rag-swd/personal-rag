@@ -1,34 +1,47 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.models import Model
+from pydantic_ai.models.google import GoogleModel
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.google import GoogleProvider
+from pydantic_ai.providers.openai import OpenAIProvider
 from sqlmodel import Session
 
 from app.core.config import Settings, get_settings
-from app.notebooks.agent.base import ChatModelProvider
-from app.notebooks.agent.providers import GeminiChatProvider, OpenAICompatibleChatProvider, OpenRouterChatProvider
 from app.notebooks.models import Notebook
 from app.notebooks.prompt import CHAT_SYSTEM_INSTRUCTIONS, build_context_block
 from app.notebooks.tools import search_notebook_chunks
 from app.users.models import User
 
-_CHAT_PROVIDER_REGISTRY: dict[str, ChatModelProvider] = {
-    "openrouter": OpenRouterChatProvider(),
-    "openai_compatible": OpenAICompatibleChatProvider(),
-    "gemini": GeminiChatProvider(),
-}
 
-
-def resolve_chat_provider() -> ChatModelProvider:
-    settings = get_settings()
-    selected_provider = settings.chat_provider.strip().lower()
-    resolved = _CHAT_PROVIDER_REGISTRY.get(selected_provider)
-    if resolved is None:
-        raise ValueError(
-            f"Unsupported chat provider '{selected_provider}'. "
-            "Use openrouter, openai_compatible, or gemini."
+def _build_chat_model(settings: Settings) -> Model:
+    """Resolve the configured chat provider and return a ready-to-use model."""
+    provider = settings.chat_provider.strip().lower()
+    if provider == "gemini":
+        return GoogleModel(
+            settings.chat_model,
+            provider=GoogleProvider(api_key=settings.chat_api_key),
         )
-    return resolved
+    if provider in ("openrouter", "openai_compatible"):
+        return OpenAIChatModel(
+            settings.chat_model,
+            provider=OpenAIProvider(
+                api_key=settings.chat_api_key,
+                base_url=settings.chat_provider_url or None,
+            ),
+        )
+    raise ValueError(
+        f"Unsupported chat provider '{provider}'. "
+        "Use openrouter, openai_compatible, or gemini."
+    )
+
+
+def resolve_chat_provider() -> Model:
+    """Return the configured chat model (kept for backwards compatibility)."""
+    return _build_chat_model(get_settings())
 
 
 def chat_provider_is_configured() -> bool:
@@ -38,8 +51,8 @@ def chat_provider_is_configured() -> bool:
     (chat, reports) instead of failing deep inside the provider SDK.
     """
     settings = get_settings()
-    selected_provider = settings.chat_provider.strip().lower()
-    if selected_provider in ("gemini", "openrouter", "openai_compatible"):
+    provider = settings.chat_provider.strip().lower()
+    if provider in ("gemini", "openrouter", "openai_compatible"):
         return bool(settings.chat_api_key)
     return False
 
@@ -53,7 +66,7 @@ class NotebookChatDeps:
 
 
 def get_notebook_chat_agent() -> Agent[NotebookChatDeps, str]:
-    model = resolve_chat_provider().build_model()
+    model = _build_chat_model(get_settings())
     agent = Agent(
         model,
         deps_type=NotebookChatDeps,

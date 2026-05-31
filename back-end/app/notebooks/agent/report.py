@@ -27,7 +27,7 @@ async def generate_briefing_doc(
     additional_instructions: str | None = None,
 ) -> BriefingDocReport:
     agent = Agent(
-        resolve_chat_provider().build_model(),
+        resolve_chat_provider(),
         output_type=BriefingDocReport,
         instructions=BRIEFING_SYSTEM,
     )
@@ -40,7 +40,7 @@ async def generate_study_guide(
     additional_instructions: str | None = None,
 ) -> StudyGuideReport:
     agent = Agent(
-        resolve_chat_provider().build_model(),
+        resolve_chat_provider(),
         output_type=StudyGuideReport,
         instructions=STUDY_GUIDE_SYSTEM,
     )
@@ -53,7 +53,7 @@ async def generate_blog_post(
     additional_instructions: str | None = None,
 ) -> BlogPostReport:
     agent = Agent(
-        resolve_chat_provider().build_model(),
+        resolve_chat_provider(),
         output_type=BlogPostReport,
         instructions=BLOG_SYSTEM,
     )
@@ -67,7 +67,7 @@ async def generate_custom_report(
 ) -> CustomReport:
     """Custom reports treat additional_instructions as the entire core directive."""
     agent = Agent(
-        resolve_chat_provider().build_model(),
+        resolve_chat_provider(),
         output_type=CustomReport,
         instructions=CUSTOM_SYSTEM_BASE,
     )

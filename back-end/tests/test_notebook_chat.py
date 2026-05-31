@@ -41,10 +41,6 @@ def settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
         chat_api_key="test-key",
     )
     from app.core import config
-    from app.notebooks.agent.providers import OpenRouterChatProvider, OpenAICompatibleChatProvider, GeminiChatProvider
-    OpenRouterChatProvider.build_model.cache_clear()
-    OpenAICompatibleChatProvider.build_model.cache_clear()
-    GeminiChatProvider.build_model.cache_clear()
     config.get_settings.cache_clear()
 
     monkeypatch.setattr(config, "get_settings", lambda: s)
