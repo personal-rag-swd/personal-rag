@@ -17,6 +17,7 @@ import { NotebookError, NotebookSkeleton } from "./notebook-page/NotebookStates"
 import { SourcesPanel } from "./notebook-page/SourcesPanel";
 import { StudioPanel } from "./notebook-page/StudioPanel";
 import { ReportsPanel } from "./notebook-page/ReportsPanel";
+import { MindMapDialog } from "./notebook-page/MindMapDialog";
 import { UpdateNotebookDialog } from "./UpdateNotebookDialog";
 import { DeleteNotebookDialog } from "./DeleteNotebookDialog";
 
@@ -32,6 +33,7 @@ export function NotebookPage() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [isReportsOpen, setIsReportsOpen] = useState(false);
+  const [isMindMapOpen, setIsMindMapOpen] = useState(false);
 
   if (!id) {
     return (
@@ -92,6 +94,8 @@ export function NotebookPage() {
               <StudioPanel onActivate={(actionId) => {
                 if (actionId === "reports") {
                   setIsReportsOpen(true);
+                } else if (actionId === "mind-map") {
+                  setIsMindMapOpen(true);
                 }
               }} />
             </PanelCard>
@@ -109,6 +113,8 @@ export function NotebookPage() {
             <StudioPanel onActivate={(actionId) => {
               if (actionId === "reports") {
                 setIsReportsOpen(true);
+              } else if (actionId === "mind-map") {
+                setIsMindMapOpen(true);
               }
             }} />
           </PanelCard>
@@ -119,6 +125,14 @@ export function NotebookPage() {
         notebookId={id}
         open={isReportsOpen}
         onOpenChange={setIsReportsOpen}
+      />
+
+      <MindMapDialog
+        key={isMindMapOpen ? "open" : "closed"}
+        notebookId={id}
+        notebookName={notebook.name}
+        open={isMindMapOpen}
+        onOpenChange={setIsMindMapOpen}
       />
 
       {/* Edit & Delete Dialog Modals */}

@@ -6,6 +6,7 @@ from app.notebooks.schemas import (
     BriefingDocReport,
     CustomReport,
     StudyGuideReport,
+    MindMapReport,
 )
 
 _BRIEFING_SYSTEM = """
@@ -100,4 +101,49 @@ async def generate_custom_report(
         f"SOURCE MATERIAL:\n\n{context}"
     )
     result = await agent.run(user_message)
+    return result.output
+
+
+_MINDMAP_SYSTEM = """
+You are an expert knowledge engineer. Given source excerpts from a notebook, generate a comprehensive mind map that captures the core concepts and their structured relationships.
+
+- central_topic: The core subject of the documents.
+- nodes: A hierarchical list representing the knowledge tree:
+  1. Root node: The central topic itself.
+  2. Main branches: Major topics or categories directly connected to the root.
+  3. Sub-branches: Detailed concepts or sub-topics nested under main branches.
+  Each node must have a unique, short ID, a clear label (concept title), type ('root', 'main', or 'sub'), parent_id (pointing to its parent node), and a brief description/definition.
+- relationships: Key relationships or cross-connections between concepts belonging to different branches (e.g., 'shares features with', 'opposes', 'is a prerequisite for').
+
+Ensure the hierarchy corresponds to the requested level of detail:
+- 'simple': Generate exactly 3-5 main branches and 5-10 sub-branches.
+- 'intermediate': Generate exactly 5-8 main branches and 10-20 sub-branches.
+- 'detailed': Generate exactly 8-12 main branches and 20-35 sub-branches.
+
+Respond only with the structured JSON output. Do not fabricate information not present in the sources.
+""".strip()
+
+
+async def generate_mindmap(
+    context: str,
+    detail_level: str | None = None,
+    additional_instructions: str | None = None,
+) -> MindMapReport:
+    agent = Agent(
+        resolve_chat_provider().build_model(),
+        output_type=MindMapReport,
+        instructions=_MINDMAP_SYSTEM,
+    )
+    user_msg_parts = [f"SOURCE MATERIAL:\n\n{context}"]
+    
+    level = (detail_level or "intermediate").strip().lower()
+    if level not in ("simple", "intermediate", "detailed"):
+        level = "intermediate"
+        
+    user_msg_parts.append(f"Target Detail Level: {level.upper()}")
+    
+    if additional_instructions and additional_instructions.strip():
+        user_msg_parts.append(f"Additional User Requirements: {additional_instructions.strip()}")
+        
+    result = await agent.run("\n\n".join(user_msg_parts))
     return result.output

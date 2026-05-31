@@ -21,6 +21,7 @@ from app.notebooks.agent import (
     generate_custom_report,
     generate_study_guide,
     get_notebook_chat_agent,
+    generate_mindmap,
 )
 from app.notebooks.memory import (
     append_notebook_chat_history,
@@ -48,6 +49,7 @@ from app.notebooks.schemas import (
     ReportGenerateRequest,
     StudyGuideReport,
     NotebookUpdate,
+    MindMapReport,
 )
 from app.notebooks.service import (
     create_notebook,
@@ -440,7 +442,7 @@ async def generate_notebook_report(
             detail="additional_instructions is required for report_type 'custom'.",
         )
 
-    report_content: BriefingDocReport | StudyGuideReport | BlogPostReport | CustomReport
+    report_content: BriefingDocReport | StudyGuideReport | BlogPostReport | CustomReport | MindMapReport
     try:
         match payload.report_type:
             case "briefing":
@@ -451,6 +453,8 @@ async def generate_notebook_report(
                 report_content = await generate_blog_post(context, instructions)
             case "custom":
                 report_content = await generate_custom_report(context, instructions)
+            case "mindmap":
+                report_content = await generate_mindmap(context, payload.detail_level, instructions)
     except ModelHTTPError as exc:
         # Surface provider failures (rate limits, upstream errors) cleanly instead
         # of an opaque 500. Free-tier Gemini in particular returns 429 when the

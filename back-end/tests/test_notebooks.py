@@ -526,3 +526,55 @@ def test_generate_report_maps_provider_rate_limit(
         headers=headers,
     )
     assert response.status_code == 429
+
+
+def test_generate_mindmap_report_persists(
+    client: TestClient,
+    settings: Settings,
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = make_user("rep_mm@example.com")
+    session.add(user)
+    session.commit()
+    headers = auth_headers(user, settings)
+    notebook_id = _create_notebook(client, headers)
+    _add_indexed_chunk(session, UUID(notebook_id), user.id)
+
+    monkeypatch.setattr("app.notebooks.router.chat_provider_is_configured", lambda: True)
+
+    from app.notebooks.schemas import MindMapReport, MindMapNode
+
+    captured: dict[str, object] = {}
+
+    async def fake_mindmap(
+        context: str, detail_level: str | None = None, instructions: str | None = None
+    ) -> MindMapReport:
+        captured["context"] = context
+        captured["detail_level"] = detail_level
+        captured["instructions"] = instructions
+        return MindMapReport(
+            central_topic="AI Project",
+            nodes=[
+                MindMapNode(id="root", label="AI Project", type="root", parent_id=None, description="Central topic"),
+                MindMapNode(id="main1", label="RAG", type="main", parent_id="root", description="Retrieval Augmented Generation"),
+            ],
+            relationships=[],
+        )
+
+    monkeypatch.setattr("app.notebooks.router.generate_mindmap", fake_mindmap)
+
+    response = client.post(
+        f"/api/v1/notebooks/{notebook_id}/reports",
+        json={"report_type": "mindmap", "detail_level": "detailed", "additional_instructions": "add specific links"},
+        headers=headers,
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["report_type"] == "mindmap"
+    assert body["content"]["central_topic"] == "AI Project"
+    assert len(body["content"]["nodes"]) == 2
+    assert body["content"]["nodes"][1]["label"] == "RAG"
+    assert captured["detail_level"] == "detailed"
+    assert captured["instructions"] == "add specific links"
