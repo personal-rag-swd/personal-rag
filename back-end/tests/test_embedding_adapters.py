@@ -1,10 +1,10 @@
 import pytest
+from pydantic_ai.exceptions import ModelHTTPError
 
 from app.core.config import Settings
 from app.notebooks.tools.embeddings import factory
 from app.notebooks.tools.embeddings import (
     GeminiEmbeddingAdapter,
-    OpenAICompatibleEmbeddingAdapter,
     embed_texts,
     get_embedding_adapter,
 )
@@ -35,7 +35,14 @@ def test_openai_compatible_embedding_uses_provider_url(monkeypatch: pytest.Monke
     captured: dict[str, str | None] = {}
 
     class DummyAdapter:
-        def __init__(self, *, api_key: str, model: str, base_url: str | None = None, output_dimensionality: int | None = None) -> None:
+        def __init__(
+            self,
+            *,
+            api_key: str,
+            model: str,
+            base_url: str | None = None,
+            output_dimensionality: int | None = None,
+        ) -> None:
             captured["api_key"] = api_key
             captured["model"] = model
             captured["base_url"] = base_url
@@ -100,3 +107,42 @@ def test_pydantic_ai_embedding_adapter_embeds_texts_correctly() -> None:
 
     result = adapter.embed_texts(["one", "two"])
     assert result == [[1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0]]
+
+
+def test_pydantic_ai_embedding_adapter_logs_model_http_error(caplog: pytest.LogCaptureFixture) -> None:
+    from app.notebooks.tools.embeddings.base import PydanticAIEmbeddingAdapter
+
+    class FailingEmbedder:
+        def embed_documents_sync(self, texts: list[str]):
+            raise ModelHTTPError(
+                status_code=401,
+                model_name="openai/text-embedding-3-small",
+                body={"error": "invalid key"},
+            )
+
+    adapter = PydanticAIEmbeddingAdapter(FailingEmbedder())
+    with pytest.raises(RuntimeError, match="status_code=401"):
+        adapter.embed_texts(["one"])
+
+    assert "openai/text-embedding-3-small" in caplog.text
+    assert "invalid key" in caplog.text
+
+
+def test_openai_compatible_adapter_openrouter_settings() -> None:
+    from app.notebooks.tools.embeddings.providers.openai import OpenAICompatibleEmbeddingAdapter, OpenRouterEmbeddingModel
+
+    adapter = OpenAICompatibleEmbeddingAdapter(
+        api_key="test-key",
+        model="test-model",
+        base_url="https://openrouter.ai/api/v1",
+        output_dimensionality=256
+    )
+
+    # Assert custom OpenRouter model was instantiated and configured
+    assert isinstance(adapter.embedder.model, OpenRouterEmbeddingModel)
+    assert adapter.embedder.model.check_embedding_ctx_length is False
+    assert adapter.embedder.model.model_kwargs == {"encoding_format": "float"}
+
+    # Check that settings are merged into extra_body
+    assert adapter.embedder._settings.get("extra_body") == {"encoding_format": "float"}
+    assert adapter.embedder._settings.get("dimensions") == 256

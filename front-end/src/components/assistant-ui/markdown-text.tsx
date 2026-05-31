@@ -2,11 +2,22 @@
 
 import {
   type CodeHeaderProps,
+  type StreamdownTextComponents,
   StreamdownTextPrimitive,
   useIsStreamdownCodeBlock,
 } from "@assistant-ui/react-streamdown"
-import remarkGfm from "remark-gfm"
-import { type FC, memo, useState, useEffect, useRef } from "react"
+import { code } from "@streamdown/code";
+import { math } from "@streamdown/math";
+import { mermaid } from "@streamdown/mermaid";
+import { cjk } from "@streamdown/cjk";
+import {
+  type FC,
+  type ReactNode,
+  memo,
+  useState,
+  useEffect,
+  useRef,
+} from "react"
 import {
   CheckIcon,
   CopyIcon,
@@ -101,9 +112,9 @@ const preprocessCitations = (text: string) => {
 const MarkdownTextImpl = () => {
   return (
     <StreamdownTextPrimitive
-      remarkPlugins={[remarkGfm]}
+      plugins={{ code, math, mermaid, cjk }}
       containerClassName="aui-md"
-      components={defaultComponents}
+      components={defaultComponents as StreamdownTextComponents}
       preprocess={preprocessCitations}
     />
   )
@@ -481,8 +492,18 @@ const useCopyToClipboard = ({
   return { isCopied, copyToClipboard }
 }
 
+type MarkdownNodeProps = {
+  className?: string
+  children?: ReactNode
+  [key: string]: any
+}
+
+type MarkdownLinkProps = MarkdownNodeProps & {
+  href?: string
+}
+
 const defaultComponents = {
-  h1: ({ className, ...props }) => (
+  h1: ({ className, ...props }: MarkdownNodeProps) => (
     <h1
       className={cn(
         "aui-md-h1 mb-2 scroll-m-20 text-base font-semibold first:mt-0 last:mb-0",
@@ -491,7 +512,7 @@ const defaultComponents = {
       {...props}
     />
   ),
-  h2: ({ className, ...props }) => (
+  h2: ({ className, ...props }: MarkdownNodeProps) => (
     <h2
       className={cn(
         "aui-md-h2 mt-3 mb-1.5 scroll-m-20 text-sm font-semibold first:mt-0 last:mb-0",
@@ -500,7 +521,7 @@ const defaultComponents = {
       {...props}
     />
   ),
-  h3: ({ className, ...props }) => (
+  h3: ({ className, ...props }: MarkdownNodeProps) => (
     <h3
       className={cn(
         "aui-md-h3 mt-2.5 mb-1 scroll-m-20 text-sm font-semibold first:mt-0 last:mb-0",
@@ -509,7 +530,7 @@ const defaultComponents = {
       {...props}
     />
   ),
-  h4: ({ className, ...props }) => (
+  h4: ({ className, ...props }: MarkdownNodeProps) => (
     <h4
       className={cn(
         "aui-md-h4 mt-2 mb-1 scroll-m-20 text-sm font-medium first:mt-0 last:mb-0",
@@ -518,7 +539,7 @@ const defaultComponents = {
       {...props}
     />
   ),
-  h5: ({ className, ...props }) => (
+  h5: ({ className, ...props }: MarkdownNodeProps) => (
     <h5
       className={cn(
         "aui-md-h5 mt-2 mb-1 text-sm font-medium first:mt-0 last:mb-0",
@@ -527,7 +548,7 @@ const defaultComponents = {
       {...props}
     />
   ),
-  h6: ({ className, ...props }) => (
+  h6: ({ className, ...props }: MarkdownNodeProps) => (
     <h6
       className={cn(
         "aui-md-h6 mt-2 mb-1 text-sm font-medium first:mt-0 last:mb-0",
@@ -536,7 +557,7 @@ const defaultComponents = {
       {...props}
     />
   ),
-  p: ({ className, ...props }) => (
+  p: ({ className, ...props }: MarkdownNodeProps) => (
     <p
       className={cn(
         "aui-md-p my-2.5 leading-normal first:mt-0 last:mb-0",
@@ -545,8 +566,8 @@ const defaultComponents = {
       {...props}
     />
   ),
-  a: ({ href, children, className, ...props }) => {
-    if (href && href.startsWith("#cite/")) {
+  a: ({ href, children, className, ...props }: MarkdownLinkProps) => {
+    if (typeof href === "string" && href.startsWith("#cite/")) {
       const parts = href.split("/")
       const numericCitation = Number.parseInt(parts[1], 10)
       const fallbackFilename = parts[2]
@@ -589,7 +610,7 @@ const defaultComponents = {
       </a>
     )
   },
-  blockquote: ({ className, ...props }) => (
+  blockquote: ({ className, ...props }: MarkdownNodeProps) => (
     <blockquote
       className={cn(
         "aui-md-blockquote my-2.5 border-s-2 border-muted-foreground/30 ps-3 text-muted-foreground italic",
@@ -598,7 +619,7 @@ const defaultComponents = {
       {...props}
     />
   ),
-  ul: ({ className, ...props }) => (
+  ul: ({ className, ...props }: MarkdownNodeProps) => (
     <ul
       className={cn(
         "aui-md-ul my-2 ms-4 list-disc marker:text-muted-foreground [&>li]:mt-1",
@@ -607,7 +628,7 @@ const defaultComponents = {
       {...props}
     />
   ),
-  ol: ({ className, ...props }) => (
+  ol: ({ className, ...props }: MarkdownNodeProps) => (
     <ol
       className={cn(
         "aui-md-ol my-2 ms-4 list-decimal marker:text-muted-foreground [&>li]:mt-1",
@@ -616,13 +637,13 @@ const defaultComponents = {
       {...props}
     />
   ),
-  hr: ({ className, ...props }) => (
+  hr: ({ className, ...props }: MarkdownNodeProps) => (
     <hr
       className={cn("aui-md-hr my-2 border-muted-foreground/20", className)}
       {...props}
     />
   ),
-  table: ({ className, ...props }) => (
+  table: ({ className, ...props }: MarkdownNodeProps) => (
     <table
       className={cn(
         "aui-md-table my-2 w-full border-separate border-spacing-0 overflow-y-auto",
@@ -631,7 +652,7 @@ const defaultComponents = {
       {...props}
     />
   ),
-  th: ({ className, ...props }) => (
+  th: ({ className, ...props }: MarkdownNodeProps) => (
     <th
       className={cn(
         "aui-md-th bg-muted px-2 py-1 text-start font-medium first:rounded-ss-lg last:rounded-se-lg [[align=center]]:text-center [[align=right]]:text-right",
@@ -640,7 +661,7 @@ const defaultComponents = {
       {...props}
     />
   ),
-  td: ({ className, ...props }) => (
+  td: ({ className, ...props }: MarkdownNodeProps) => (
     <td
       className={cn(
         "aui-md-td border-s border-b border-muted-foreground/20 px-2 py-1 text-start last:border-e [[align=center]]:text-center [[align=right]]:text-right",
@@ -649,7 +670,7 @@ const defaultComponents = {
       {...props}
     />
   ),
-  tr: ({ className, ...props }) => (
+  tr: ({ className, ...props }: MarkdownNodeProps) => (
     <tr
       className={cn(
         "aui-md-tr m-0 border-b p-0 first:border-t [&:last-child>td:first-child]:rounded-es-lg [&:last-child>td:last-child]:rounded-ee-lg",
@@ -658,16 +679,16 @@ const defaultComponents = {
       {...props}
     />
   ),
-  li: ({ className, ...props }) => (
+  li: ({ className, ...props }: MarkdownNodeProps) => (
     <li className={cn("aui-md-li leading-normal", className)} {...props} />
   ),
-  sup: ({ className, ...props }) => (
+  sup: ({ className, ...props }: MarkdownNodeProps) => (
     <sup
       className={cn("aui-md-sup [&>a]:text-xs [&>a]:no-underline", className)}
       {...props}
     />
   ),
-  pre: ({ className, ...props }) => (
+  pre: ({ className, ...props }: MarkdownNodeProps) => (
     <pre
       className={cn(
         "aui-md-pre overflow-x-auto rounded-t-none rounded-b-lg border border-t-0 border-border/50 bg-muted/30 p-3 text-xs leading-relaxed",
@@ -676,7 +697,7 @@ const defaultComponents = {
       {...props}
     />
   ),
-  code: function Code({ className, ...props }) {
+  code: function Code({ className, ...props }: MarkdownNodeProps) {
     const isCodeBlock = useIsStreamdownCodeBlock()
     return (
       <code

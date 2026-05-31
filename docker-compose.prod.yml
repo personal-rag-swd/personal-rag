@@ -94,6 +94,8 @@ services:
       set -e;
       until mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; do sleep 2; done;
       mc mb --ignore-existing local/$${S3_BUCKET};
+      mc event rm --force local/$${S3_BUCKET} arn:minio:sqs::backend:webhook --event put || true;
+      mc event remove --force local/$${S3_BUCKET} arn:minio:sqs::backend:webhook --event put || true;
       until mc event add local/$${S3_BUCKET} arn:minio:sqs::backend:webhook --event put; do sleep 2; done;
       mc event ls local/$${S3_BUCKET};
       "

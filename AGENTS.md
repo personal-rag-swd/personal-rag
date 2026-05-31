@@ -33,6 +33,7 @@ Run frontend commands from `front-end/`:
 ## Coding Style & Naming Conventions
 
 Use feature-oriented backend modules: `models.py`, `schemas.py`, `service.py`, and `router.py`. Keep route handlers thin and business logic in services. Python uses 4-space indentation, type hints, and snake_case names.
+Keep imports at the top of Python files; avoid inline imports in application code. Inline imports are acceptable in test files when needed for test isolation or fixtures.
 
 Frontend code uses TypeScript, React 19, Tailwind CSS, and shadcn-style components. Use PascalCase components, camelCase functions and variables, and kebab-case reusable UI filenames.
 
@@ -59,3 +60,9 @@ Production compose requires these variables (see `docker-compose.prod.yml`):
 - `CORS_ORIGINS`
 - `S3_PUBLIC_ENDPOINT_URL`
 - `VITE_API_URL`
+
+## Agent Model Filtering Guidelines
+
+To maintain the highest standards of code quality and prevent codebase pollution:
+- **Allowed Models**: Only premium, high-intelligence models (such as Gemini 1.5 Pro, Claude 3.5 Sonnet, and GPT-4o) are permitted to perform edits, refactoring, or code generation on this repository.
+- **Prohibited Models**: Under no circumstances should cheap, lightweight, or free-tier models (such as Gemini Flash, Claude Haiku, GPT-4o-mini, GPT-3.5, or similar) be utilized for development work on this codebase. These models lack the reasoning depth required for this project and tend to introduce subtle bugs or low-quality code patterns.

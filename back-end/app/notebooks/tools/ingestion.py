@@ -4,6 +4,7 @@ import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
+from botocore.exceptions import ClientError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session, delete, select
 
@@ -15,6 +16,8 @@ from app.notebooks.tools.embeddings import embed_texts
 from app.users.models import User
 
 logger = logging.getLogger(__name__)
+
+INGESTIBLE_STATUSES = {"pending", "uploaded"}
 
 
 def _is_created_event(event_name: str | None) -> bool:
@@ -77,6 +80,69 @@ def mark_document_uploaded_and_get_id(
     session.add(document)
     session.commit()
     return document.id
+
+
+def _is_missing_object_error(exc: ClientError) -> bool:
+    code = str(exc.response.get("Error", {}).get("Code", "")).lower()
+    status_code = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+    return status_code == 404 or code in {"404", "nosuchkey", "notfound"}
+
+
+def mark_pending_document_uploaded_if_object_exists(
+    session: Session,
+    document: NotebookDocument,
+    settings: Settings,
+) -> bool:
+    """Promote a pending upload only after object storage confirms the key exists."""
+    if document.status != "pending":
+        return document.status == "uploaded"
+
+    s3_client = get_s3_client(settings)
+    try:
+        metadata = s3_client.head_object(Bucket=document.s3_bucket, Key=document.s3_key)
+    except ClientError as exc:
+        if _is_missing_object_error(exc):
+            logger.debug("Notebook document upload is not visible yet: %s", document.id)
+            return False
+        raise
+
+    document.status = "uploaded"
+    document.size = metadata.get("ContentLength")
+    document.error_message = None
+    document.updated_at = datetime.now(UTC)
+    session.add(document)
+    session.commit()
+    return True
+
+
+def process_unprocessed_notebook_documents(
+    session: Session,
+    settings: Settings,
+    *,
+    limit: int = 20,
+) -> dict[str, int]:
+    """Poll pending/uploaded documents and ingest every object that is available."""
+    stats = {"checked": 0, "uploaded": 0, "ingested": 0, "skipped": 0}
+    statement = (
+        select(NotebookDocument)
+        .where(NotebookDocument.status.in_(INGESTIBLE_STATUSES))
+        .order_by(NotebookDocument.created_at)
+        .limit(limit)
+    )
+    documents = list(session.exec(statement))
+
+    for document in documents:
+        stats["checked"] += 1
+        if document.status == "pending":
+            if not mark_pending_document_uploaded_if_object_exists(session, document, settings):
+                stats["skipped"] += 1
+                continue
+            stats["uploaded"] += 1
+
+        ingest_document_by_id(session, document.id, settings)
+        stats["ingested"] += 1
+
+    return stats
 
 
 def mark_document_upload_failed(

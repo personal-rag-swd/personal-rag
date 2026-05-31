@@ -4,6 +4,7 @@ from typing import Any
 from uuid import UUID
 from uuid import uuid4
 
+os.environ.setdefault("DATABASE_URL", "sqlite://")
 os.environ["CHAT_API_KEY"] = "test-key"
 
 import pytest
@@ -45,7 +46,7 @@ def settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
     OpenAICompatibleChatProvider.build_model.cache_clear()
     GeminiChatProvider.build_model.cache_clear()
     config.get_settings.cache_clear()
-    
+
     monkeypatch.setattr(config, "get_settings", lambda: s)
     return s
 
@@ -286,7 +287,7 @@ def test_parse_chunks_from_context_block() -> None:
     assert chunks[0]["document_id"] == "5f3e9c42-5ba3-4c91-9e7f-1d8975bb42f1"
     assert chunks[0]["chunk_index"] == 0
     assert chunks[0]["content"] == "1.1 Supervised learning\nSupervised learning is nice."
-    
+
     assert chunks[1]["filename"] == "UDL2.pdf"
     assert chunks[1]["document_id"] == "6f3e9c42-5ba3-4c91-9e7f-1d8975bb42f2"
     assert chunks[1]["chunk_index"] == 1
@@ -570,13 +571,13 @@ def test_keep_recent_retains_system_prompts_and_more_history(
     # 2. Message with instructions field
     # 3. 20 other messages (10 alternating user & assistant turns)
     messages = []
-    
+
     # 1. System prompt part message
     messages.append(ModelRequest(parts=[SystemPromptPart(content="System prompt 1")]))
-    
+
     # 2. Instructions message
     messages.append(ModelRequest(parts=[], instructions="System instructions 2"))
-    
+
     # 3. 20 alternating turns (10 user, 10 assistant)
     for i in range(1, 11):
         messages.append(ModelRequest(parts=[UserPromptPart(content=f"User question {i}")]))
@@ -613,7 +614,7 @@ def test_keep_recent_retains_system_prompts_and_more_history(
     )
 
     assert response.status_code == 200
-    
+
     trimmed_history = captured["message_history"]
     # Total other (non-system) messages: 20
     # Sliding window limit: 15
@@ -641,4 +642,80 @@ def test_keep_recent_retains_system_prompts_and_more_history(
     # And the last one should be Assistant answer 10
     assert isinstance(trimmed_history[-1], ModelResponse)
     assert trimmed_history[-1].parts[0].content == "Assistant answer 10"
+
+
+def test_chat_history_includes_tool_calls(
+    client: TestClient,
+    settings: Settings,
+    session: Session,
+) -> None:
+    from pydantic_ai.messages import ToolCallPart
+
+    user = make_user("toolhistory@example.com")
+    session.add(user)
+    session.commit()
+    headers = auth_headers(user, settings)
+
+    created = client.post(
+        "/api/v1/notebooks/",
+        json={"name": "ToolsHistory", "description": "", "tags": []},
+        headers=headers,
+    ).json()
+
+    messages = [
+        ModelRequest(parts=[UserPromptPart(content="Search for stuff")]),
+        ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="search_notebook_context",
+                    args={"query": "machine learning"},
+                    tool_call_id="call_ml_123",
+                )
+            ]
+        ),
+        ModelRequest(
+            parts=[
+                ToolReturnPart(
+                    tool_name="search_notebook_context",
+                    content="SOURCE [filename=ml.pdf doc_id=5f3e9c42-5ba3-4c91-9e7f-1d8975bb42f1 chunk=0]\nML is awesome.",
+                    tool_call_id="call_ml_123",
+                )
+            ]
+        ),
+        ModelResponse(parts=[TextPart(content="ML stands for Machine Learning.")]),
+    ]
+
+    notebook = session.get(Notebook, UUID(created["id"]))
+    assert notebook is not None
+    json_messages = ModelMessagesTypeAdapter.dump_python(messages, mode="json")
+    session.add_all(
+        [
+            NotebookMessage(notebook_id=notebook.id, seq=idx, message=message)
+            for idx, message in enumerate(json_messages, start=1)
+        ]
+    )
+    session.commit()
+
+    response = client.get(
+        f"/api/v1/notebooks/{created['id']}/chat/history",
+        headers=headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+
+    assistant_messages = [msg for msg in payload if msg["role"] == "assistant"]
+    assert len(assistant_messages) == 2
+
+    first_assistant = assistant_messages[0]
+    assert len(first_assistant["parts"]) == 1
+    assert first_assistant["parts"][0]["type"] == "tool-call"
+    assert first_assistant["parts"][0]["toolCallId"] == "call_ml_123"
+    assert first_assistant["parts"][0]["toolName"] == "search_notebook_context"
+    assert "machine learning" in first_assistant["parts"][0]["argsText"]
+    assert first_assistant["parts"][0]["result"] == "SOURCE [filename=ml.pdf doc_id=5f3e9c42-5ba3-4c91-9e7f-1d8975bb42f1 chunk=0]\nML is awesome."
+
+    second_assistant = assistant_messages[1]
+    assert len(second_assistant["parts"]) == 1
+    assert second_assistant["parts"][0]["type"] == "text"
+    assert second_assistant["parts"][0]["content"] == "ML stands for Machine Learning."
 

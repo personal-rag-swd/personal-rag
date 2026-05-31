@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -15,14 +16,15 @@ logging.basicConfig(
     format="%(levelname)s:     %(name)s - %(message)s",
 )
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from scalar_fastapi import get_scalar_api_reference
+from fastapi import FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from scalar_fastapi import get_scalar_api_reference  # noqa: E402
 
-from app.auth.router import router as auth_router
-from app.file.router import router as file_router
-from app.notebooks.router import router as notebooks_router
-from app.users.router import router as users_router
+from app.auth.router import router as auth_router  # noqa: E402
+from app.file.router import router as file_router  # noqa: E402
+from app.notebooks.router import router as notebooks_router  # noqa: E402
+from app.notebooks.worker import run_notebook_document_worker  # noqa: E402
+from app.users.router import router as users_router  # noqa: E402
 
 
 @asynccontextmanager
@@ -47,7 +49,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info(f"  Embedding Provider: {embed_prov.upper()}")
     logger.info(f"  Embedding Model:    {embed_model}")
     logger.info("============================================================")
-    yield
+    worker_task: asyncio.Task[None] | None = None
+    if settings.file_ingestion_worker_enabled:
+        worker_task = asyncio.create_task(run_notebook_document_worker(settings))
+    try:
+        yield
+    finally:
+        if worker_task is not None:
+            worker_task.cancel()
+            try:
+                await worker_task
+            except asyncio.CancelledError:
+                pass
 
 
 app = FastAPI(title="Personal RAG", docs_url=None, redoc_url=None, lifespan=lifespan)

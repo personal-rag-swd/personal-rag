@@ -51,6 +51,7 @@ import {
 } from "@/components/ui/tooltip"
 import { getPresignedUploadUrl, reportUploadFailed } from "@/features/files/api"
 import {
+  useNotebookDocumentEvents,
   useDeleteNotebookDocumentMutation,
   useNotebookDocumentsQuery,
 } from "@/features/notebooks/api"
@@ -72,11 +73,12 @@ export function SourcesPanel({
   onToggleCollapse?: () => void
 }) {
   const queryClient = useQueryClient()
+  const streamHealth = useNotebookDocumentEvents(notebookId)
   const {
     data: documents = [],
     isLoading,
     isError,
-  } = useNotebookDocumentsQuery(notebookId)
+  } = useNotebookDocumentsQuery(notebookId, streamHealth)
   const [searchValue, setSearchValue] = React.useState("")
   const [uploadState, setUploadState] = React.useState<UploadState>("idle")
   const [uploadProgress, setUploadProgress] = React.useState(0)

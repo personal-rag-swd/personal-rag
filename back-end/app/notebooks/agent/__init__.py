@@ -1,5 +1,6 @@
 from app.notebooks.agent.base import ChatModelProvider
 from app.notebooks.agent.factory import (
+    NotebookChatDeps,
     chat_provider_is_configured,
     get_notebook_chat_agent,
     resolve_chat_provider,
@@ -15,6 +16,7 @@ from app.notebooks.agent.report import (
 __all__ = [
     "ChatModelProvider",
     "GeminiChatProvider",
+    "NotebookChatDeps",
     "OpenRouterChatProvider",
     "chat_provider_is_configured",
     "get_notebook_chat_agent",

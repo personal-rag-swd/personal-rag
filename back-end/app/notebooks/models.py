@@ -5,11 +5,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import Column, DateTime, ForeignKey, Index, JSON, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
-
-try:
-    from pgvector.sqlalchemy import Vector
-except Exception:  # pragma: no cover - fallback for environments without pgvector installed
-    Vector = None
+from pgvector.sqlalchemy import Vector
 
 chat_history_type = JSON().with_variant(JSONB(), "postgresql")
 
@@ -108,9 +104,7 @@ class NotebookReport(SQLModel, table=True):
 
 
 def _embedding_column() -> Column:
-    if Vector is not None:
-        return Column(Vector(1536), nullable=False)
-    return Column(JSON, nullable=False)
+    return Column(Vector(1536), nullable=False)
 
 
 class NotebookDocumentChunk(SQLModel, table=True):
