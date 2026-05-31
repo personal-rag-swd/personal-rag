@@ -67,6 +67,7 @@ data/
 uploads/
 tmp/
 temp/
+back-end/scratch_inspect.py
 *.sqlite
 *.sqlite3
 *.db
