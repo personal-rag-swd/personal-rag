@@ -1,7 +1,6 @@
 from datetime import UTC, datetime
-from functools import cached_property
 from pydantic_ai.capabilities.process_history import ProcessHistory
-from pydantic_ai.messages import ModelMessage, ModelRequest, SystemPromptPart
+from pydantic_ai.messages import ModelMessage, ModelRequest
 from typing import Annotated
 from uuid import UUID
 
@@ -26,7 +25,6 @@ from app.notebooks.memory import (
     append_notebook_chat_history,
     extract_notebook_chat_transcript,
     load_notebook_chat_history,
-    save_notebook_chat_history,
 )
 from app.notebooks.models import (
     Notebook,

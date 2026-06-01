@@ -27,7 +27,13 @@ from app.core.config import Settings, get_settings
 from app.core.security import create_access_token
 from app.dependencies import get_session
 from app.main import app
-from app.notebooks.models import Notebook, NotebookMessage
+from app.notebooks.memory.history import parse_chunks_from_context_block
+from app.notebooks.models import (
+    Notebook,
+    NotebookDocument,
+    NotebookDocumentChunk,
+    NotebookMessage,
+)
 from app.users.models import User
 
 
@@ -266,10 +272,6 @@ def test_notebook_chat_endpoint_is_scoped_to_owner(
 
     assert response.status_code == 404
     assert called["value"] is False
-
-
-from app.notebooks.memory.history import parse_chunks_from_context_block
-from app.notebooks.models import NotebookDocument, NotebookDocumentChunk
 
 
 def test_parse_chunks_from_context_block() -> None:
@@ -641,4 +643,3 @@ def test_keep_recent_retains_system_prompts_and_more_history(
     # And the last one should be Assistant answer 10
     assert isinstance(trimmed_history[-1], ModelResponse)
     assert trimmed_history[-1].parts[0].content == "Assistant answer 10"
-

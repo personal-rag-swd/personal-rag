@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic_ai.exceptions import ModelHTTPError
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, Session, create_engine, select
 
@@ -13,6 +14,7 @@ from app.core.security import create_access_token
 from app.dependencies import get_session
 from app.main import app
 from app.notebooks.models import NotebookDocument, NotebookDocumentChunk
+from app.notebooks.schemas import BriefingDocReport
 from app.users.models import User
 
 os.environ.setdefault("DATABASE_URL", "sqlite://")
@@ -343,11 +345,6 @@ def test_create_notebook_requires_name(
 # ---------------------------------------------------------------------------
 # Report generation flow
 # ---------------------------------------------------------------------------
-
-from pydantic_ai.exceptions import ModelHTTPError
-
-from app.notebooks.schemas import BriefingDocReport
-
 
 def _create_notebook(client: TestClient, headers: dict[str, str]) -> str:
     return client.post(

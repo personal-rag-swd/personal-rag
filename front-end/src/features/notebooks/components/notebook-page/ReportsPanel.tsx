@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   ArrowLeftIcon,
   CheckCircle2Icon,
@@ -111,14 +111,18 @@ export function ReportsPanel({
     useNotebookReportsQuery(notebookId);
   const generateMutation = useGenerateNotebookReportMutation(notebookId);
 
-  // Reset state every time the dialog is closed.
-  useEffect(() => {
-    if (!open) {
-      setSelectedType("custom");
-      setInstructions("");
-      setViewingReport(null);
+  const resetPanelState = () => {
+    setSelectedType("custom");
+    setInstructions("");
+    setViewingReport(null);
+  };
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      resetPanelState();
     }
-  }, [open]);
+    onOpenChange(nextOpen);
+  };
 
   const activeMeta = REPORT_TYPE_BY_ID[selectedType];
   const isCustom = selectedType === "custom";
@@ -317,7 +321,7 @@ export function ReportsPanel({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         showCloseButton={false}
         className="flex flex-col p-0 gap-0 max-w-[min(100%-2rem,56rem)] sm:max-w-[min(100%-2rem,56rem)] h-[min(100%-4rem,42rem)] overflow-hidden"
@@ -326,7 +330,7 @@ export function ReportsPanel({
           title={headerTitle}
           subtitle={headerSubtitle}
           onBack={headerBack}
-          onClose={() => onOpenChange(false)}
+          onClose={() => handleOpenChange(false)}
         />
         {body}
       </DialogContent>

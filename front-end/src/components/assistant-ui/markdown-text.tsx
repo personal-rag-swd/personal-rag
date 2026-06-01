@@ -2,6 +2,8 @@
 
 import {
   type CodeHeaderProps,
+  type StreamdownProps,
+  type StreamdownTextComponents,
   StreamdownTextPrimitive,
   useIsStreamdownCodeBlock,
 } from "@assistant-ui/react-streamdown"
@@ -481,7 +483,9 @@ const useCopyToClipboard = ({
   return { isCopied, copyToClipboard }
 }
 
-const defaultComponents = {
+type MarkdownComponents = NonNullable<StreamdownProps["components"]>
+
+const markdownComponents = {
   h1: ({ className, ...props }) => (
     <h1
       className={cn(
@@ -689,5 +693,9 @@ const defaultComponents = {
       />
     )
   },
+} satisfies MarkdownComponents
+
+const defaultComponents = {
+  ...markdownComponents,
   CodeHeader,
-}
+} as unknown as StreamdownTextComponents
