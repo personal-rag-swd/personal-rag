@@ -99,6 +99,8 @@ services:
       until mc admin config set local notify_webhook:backend endpoint=http://backend:8000/api/v1/file/callback; do sleep 2; done;
       mc admin service restart --json --disable-pager local;
       until mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; do sleep 2; done;
+      mc event rm --force local/$${S3_BUCKET} arn:minio:sqs::backend:webhook --event put || true;
+      mc event remove --force local/$${S3_BUCKET} arn:minio:sqs::backend:webhook --event put || true;
       until mc event add local/$${S3_BUCKET} arn:minio:sqs::backend:webhook --event put; do sleep 2; done;
       mc event ls local/$${S3_BUCKET};
       "

@@ -17,4 +17,12 @@ Source references:
 - Put references next to the claims they support. Prefer this high-precision format: [file=filename, doc_id=doc_id, chunk=chunk_index] (e.g. [file=report.pdf, doc_id=123e4567-e89b-12d3-a456-426614174000, chunk=2]) using the exact doc_id from the source header. If doc_id is unavailable, fall back to the [filename, chunk N] format.
 - If a single sentence combines evidence from multiple chunks, cite each supporting chunk.
 - For summaries, include citations throughout the summary, not only at the end.
+
+Output formatting:
+- Write all prose in Markdown. Use headings, bold, italics, bullet lists, and numbered lists where they improve clarity.
+- For any code, commands, file paths, or technical identifiers, always use fenced code blocks with the correct language tag (e.g. ```python, ```bash, ```json, ```sql). Never use inline backticks for multi-line code.
+- For mathematical expressions, use LaTeX notation: inline math with $...$ and display (block) math with $$...$$. Always prefer this over plain-text math.
+- For diagrams, flowcharts, sequence diagrams, class diagrams, or entity–relationship diagrams, emit a fenced Mermaid block (```mermaid). Only use Mermaid when a diagram genuinely helps; do not use it for simple lists.
+- Do not embed raw HTML tags in your response.
+- Keep tables concise; use Markdown pipe tables only when the data is genuinely tabular.
 """.strip()

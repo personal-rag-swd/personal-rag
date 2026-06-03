@@ -4,6 +4,7 @@ from app.notebooks.tools.ingestion import (
     ingest_document_by_id,
     mark_document_upload_failed,
     mark_document_uploaded_and_get_id,
+    process_unprocessed_notebook_documents,
     register_pending_notebook_document,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "ingest_document_by_id",
     "mark_document_upload_failed",
     "mark_document_uploaded_and_get_id",
+    "process_unprocessed_notebook_documents",
     "register_pending_notebook_document",
 ]

@@ -1,5 +1,7 @@
+import json
 import re
 from datetime import UTC, datetime
+from typing import Any
 
 from pydantic_ai import ModelMessage, ModelMessagesTypeAdapter
 from pydantic_ai.messages import ModelRequest, ModelResponse
@@ -140,7 +142,7 @@ def extract_notebook_chat_transcript(
 
         if isinstance(message, ModelResponse):
             assistant_message_seq += 1
-            parts: list[dict[str, str]] = []
+            parts: list[dict[str, Any]] = []
             if include_reasoning:
                 reasoning_chunks = [
                     part.content
@@ -151,6 +153,39 @@ def extract_notebook_chat_transcript(
                 if reasoning_chunks:
                     parts.append({"type": "reasoning", "content": "\n".join(reasoning_chunks).strip()})
 
+            # Extract tool calls
+            for part in message.parts:
+                if getattr(part, "part_kind", "") == "tool-call":
+                    tool_name = getattr(part, "tool_name", "")
+                    tool_call_id = getattr(part, "tool_call_id", "")
+                    args = getattr(part, "args", "")
+
+                    # Find matching tool return in subsequent messages
+                    tool_result = None
+                    for next_msg in messages[idx + 1:]:
+                        if isinstance(next_msg, ModelRequest):
+                            for r_part in next_msg.parts:
+                                if getattr(r_part, "part_kind", "") == "tool-return" and getattr(r_part, "tool_call_id", "") == tool_call_id:
+                                    tool_result = getattr(r_part, "content", None)
+                                    break
+                            if tool_result is not None:
+                                break
+
+                    args_text = ""
+                    if args:
+                        if isinstance(args, dict):
+                            args_text = json.dumps(args, indent=2)
+                        else:
+                            args_text = str(args)
+
+                    parts.append({
+                        "type": "tool-call",
+                        "toolCallId": tool_call_id,
+                        "toolName": tool_name,
+                        "argsText": args_text,
+                        "result": tool_result,
+                    })
+
             assistant_chunks = [
                 part.content
                 for part in message.parts
@@ -160,7 +195,10 @@ def extract_notebook_chat_transcript(
             if assistant_chunks:
                 parts.append({"type": "text", "content": "\n".join(assistant_chunks).strip()})
 
-            parts = [part for part in parts if part["content"]]
+            parts = [
+                part for part in parts
+                if part.get("type") == "tool-call" or (isinstance(part.get("content"), str) and part["content"].strip())
+            ]
             if parts:
                 # scan backward to find search_notebook_context results returned since the previous response
                 sources = []
@@ -198,7 +236,7 @@ def extract_notebook_chat_transcript(
                     source = None
                     if doc_id:
                         source = source_lookup.get((filename, doc_id, chunk_index))
-                    
+
                     if source is None:
                         # Fallback for legacy citations or missing doc_id
                         for (f, d, c), src in source_lookup.items():

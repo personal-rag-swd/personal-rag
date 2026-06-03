@@ -229,6 +229,37 @@ def test_list_notebook_documents_is_scoped_to_owner(
     assert other_response.status_code == 404
 
 
+def test_notebook_document_events_requires_auth(
+    client: TestClient,
+) -> None:
+    response = client.get(f"/api/v1/notebooks/{uuid4()}/documents/events")
+    assert response.status_code == 401
+
+
+def test_notebook_document_events_is_scoped_to_owner(
+    client: TestClient,
+    settings: Settings,
+    session: Session,
+) -> None:
+    owner = make_user("owner-doc-events@example.com")
+    other_user = make_user("other-doc-events@example.com")
+    session.add(owner)
+    session.add(other_user)
+    session.commit()
+
+    notebook = client.post(
+        "/api/v1/notebooks/",
+        json={"name": "Private", "description": "", "tags": []},
+        headers=auth_headers(owner, settings),
+    ).json()
+
+    response = client.get(
+        f"/api/v1/notebooks/{notebook['id']}/documents/events",
+        headers=auth_headers(other_user, settings),
+    )
+    assert response.status_code == 404
+
+
 def test_delete_notebook_document_removes_source_and_chunks(
     client: TestClient,
     settings: Settings,

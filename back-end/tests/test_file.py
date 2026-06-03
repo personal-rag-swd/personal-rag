@@ -4,6 +4,7 @@ from uuid import uuid4
 from unittest.mock import patch, MagicMock
 
 import pytest
+from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, Session, create_engine, select
@@ -13,6 +14,7 @@ from app.core.security import create_access_token
 from app.dependencies import get_session
 from app.main import app
 from app.notebooks.models import Notebook, NotebookDocument
+from app.notebooks.tools.ingestion import process_unprocessed_notebook_documents
 from app.users.models import User
 
 os.environ.setdefault("DATABASE_URL", "sqlite://")
@@ -362,3 +364,90 @@ def test_report_upload_failed_marks_pending_document_failed(
     session.refresh(document)
     assert document.status == "failed"
     assert "403" in (document.error_message or "")
+
+
+@patch("app.notebooks.tools.ingestion.ingest_document_by_id")
+@patch("app.notebooks.tools.ingestion.get_s3_client")
+def test_process_unprocessed_documents_promotes_visible_pending_upload(
+    mock_get_s3_client: MagicMock,
+    mock_ingest_document_by_id: MagicMock,
+    settings: Settings,
+    session: Session,
+) -> None:
+    user = make_user("user@example.com")
+    session.add(user)
+    session.commit()
+
+    notebook = Notebook(user_id=user.id, name="N", description="", tags=[])
+    session.add(notebook)
+    session.commit()
+
+    document = NotebookDocument(
+        notebook_id=notebook.id,
+        user_id=user.id,
+        s3_bucket="test-bucket",
+        s3_key=f"users/{user.id}/abc/test-file.pdf",
+        filename="test-file.pdf",
+        content_type="application/pdf",
+        status="pending",
+    )
+    session.add(document)
+    session.commit()
+
+    mock_s3 = MagicMock()
+    mock_s3.head_object.return_value = {"ContentLength": 1234}
+    mock_get_s3_client.return_value = mock_s3
+
+    stats = process_unprocessed_notebook_documents(session, settings)
+
+    assert stats == {"checked": 1, "uploaded": 1, "ingested": 1, "skipped": 0}
+    mock_s3.head_object.assert_called_once_with(Bucket="test-bucket", Key=document.s3_key)
+    mock_ingest_document_by_id.assert_called_once_with(session, document.id, settings)
+
+    session.refresh(document)
+    assert document.status == "uploaded"
+    assert document.size == 1234
+
+
+@patch("app.notebooks.tools.ingestion.ingest_document_by_id")
+@patch("app.notebooks.tools.ingestion.get_s3_client")
+def test_process_unprocessed_documents_skips_pending_upload_until_object_exists(
+    mock_get_s3_client: MagicMock,
+    mock_ingest_document_by_id: MagicMock,
+    settings: Settings,
+    session: Session,
+) -> None:
+    user = make_user("user@example.com")
+    session.add(user)
+    session.commit()
+
+    notebook = Notebook(user_id=user.id, name="N", description="", tags=[])
+    session.add(notebook)
+    session.commit()
+
+    document = NotebookDocument(
+        notebook_id=notebook.id,
+        user_id=user.id,
+        s3_bucket="test-bucket",
+        s3_key=f"users/{user.id}/abc/missing.pdf",
+        filename="missing.pdf",
+        content_type="application/pdf",
+        status="pending",
+    )
+    session.add(document)
+    session.commit()
+
+    mock_s3 = MagicMock()
+    mock_s3.head_object.side_effect = ClientError(
+        {"Error": {"Code": "NoSuchKey"}, "ResponseMetadata": {"HTTPStatusCode": 404}},
+        "HeadObject",
+    )
+    mock_get_s3_client.return_value = mock_s3
+
+    stats = process_unprocessed_notebook_documents(session, settings)
+
+    assert stats == {"checked": 1, "uploaded": 0, "ingested": 0, "skipped": 1}
+    mock_ingest_document_by_id.assert_not_called()
+
+    session.refresh(document)
+    assert document.status == "pending"

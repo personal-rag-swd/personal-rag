@@ -1,11 +1,14 @@
 from datetime import UTC, datetime
 from functools import cached_property
+import asyncio
+import json
 from pydantic_ai.capabilities.process_history import ProcessHistory
 from pydantic_ai.messages import ModelMessage, ModelRequest, SystemPromptPart
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import StreamingResponse
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.run import AgentRunResult
 from pydantic_ai.ui.ag_ui import AGUIAdapter
@@ -13,8 +16,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session, select
 
 from app.core.config import get_settings
-from app.core.database import get_session
+from app.core.database import engine, get_session
 from app.notebooks.agent import (
+    NotebookChatDeps,
     chat_provider_is_configured,
     generate_blog_post,
     generate_briefing_doc,
@@ -35,7 +39,7 @@ from app.notebooks.models import (
     NotebookDocumentChunk,
     NotebookReport,
 )
-from app.notebooks.prompt import build_context_block
+
 from app.notebooks.schemas import (
     BlogPostReport,
     BriefingDocReport,
@@ -62,7 +66,7 @@ from app.notebooks.service import (
     touch_notebook,
     update_notebook,
 )
-from app.notebooks.tools import search_notebook_chunks
+
 from app.users.dependencies import get_current_user
 from app.users.models import User
 
@@ -139,6 +143,68 @@ def read_notebook_documents(
     return list_notebook_documents(session, notebook_id, current_user)
 
 
+@router.get("/{notebook_id}/documents/events")
+async def read_notebook_document_events(
+    notebook_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    # Verify notebook existence and owner scoping immediately
+    get_notebook(session, notebook_id, current_user)
+
+    async def event_generator():
+        last_state = {}
+        first_tick = True
+
+        try:
+            while True:
+                # Query all documents for this notebook using the service layer
+                docs = list_notebook_documents(session, notebook_id, current_user)
+
+                if first_tick:
+                    serialized_docs = [
+                        NotebookDocumentRead.model_validate(doc).model_dump(mode="json")
+                        for doc in docs
+                    ]
+                    yield f"data: {json.dumps({'type': 'snapshot', 'documents': serialized_docs})}\n\n"
+                    last_state = {
+                        doc.id: (doc.status, doc.updated_at)
+                        for doc in docs
+                    }
+                    first_tick = False
+                else:
+                    current_ids = set()
+                    for doc in docs:
+                        current_ids.add(doc.id)
+                        prev = last_state.get(doc.id)
+                        if prev is None or prev != (doc.status, doc.updated_at):
+                            serialized_doc = NotebookDocumentRead.model_validate(doc).model_dump(mode="json")
+                            yield f"data: {json.dumps({'type': 'document_update', 'document': serialized_doc})}\n\n"
+                            last_state[doc.id] = (doc.status, doc.updated_at)
+
+                    # Clean up removed documents from tracking
+                    removed_ids = set(last_state.keys()) - current_ids
+                    for rid in removed_ids:
+                        del last_state[rid]
+
+                # Expire the SQLAlchemy session identity map cache to ensure consecutive ticks
+                # fetch fresh document records directly from the database rather than from memory.
+                session.expire_all()
+
+                await asyncio.sleep(1.0)
+        except asyncio.CancelledError:
+            pass
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
+
+
 @router.delete(
     "/{notebook_id}/documents/{document_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -162,19 +228,14 @@ async def chat_notebook_route(
 ) -> Response:
     notebook = get_notebook(session, notebook_id, current_user)
     message_history = load_notebook_chat_history(session, notebook)
-
     settings = get_settings()
 
-    def _context_retriever(query: str) -> str:
-        chunks = search_notebook_chunks(
-            session,
-            notebook=notebook,
-            current_user=current_user,
-            query=query,
-            settings=settings,
-            top_k=6,
-        )
-        return build_context_block(chunks)
+    deps = NotebookChatDeps(
+        session=session,
+        notebook=notebook,
+        current_user=current_user,
+        settings=settings,
+    )
 
     async def persist_chat_history(result: AgentRunResult[object]) -> None:
         append_notebook_chat_history(session, notebook, result.new_messages())
@@ -208,7 +269,8 @@ async def chat_notebook_route(
 
     return await AGUIAdapter.dispatch_request(
         request,
-        agent=get_notebook_chat_agent(_context_retriever),
+        agent=get_notebook_chat_agent(),
+        deps=deps,
         message_history=message_history,
         conversation_id=str(notebook.id),
         on_complete=persist_chat_history,

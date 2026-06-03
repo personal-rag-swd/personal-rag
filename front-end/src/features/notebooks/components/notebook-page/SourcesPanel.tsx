@@ -51,6 +51,7 @@ import {
 } from "@/components/ui/tooltip"
 import { getPresignedUploadUrl, reportUploadFailed } from "@/features/files/api"
 import {
+  useNotebookDocumentEvents,
   useDeleteNotebookDocumentMutation,
   useNotebookDocumentsQuery,
 } from "@/features/notebooks/api"
@@ -72,11 +73,12 @@ export function SourcesPanel({
   onToggleCollapse?: () => void
 }) {
   const queryClient = useQueryClient()
+  const streamHealth = useNotebookDocumentEvents(notebookId)
   const {
     data: documents = [],
     isLoading,
     isError,
-  } = useNotebookDocumentsQuery(notebookId)
+  } = useNotebookDocumentsQuery(notebookId, streamHealth)
   const [searchValue, setSearchValue] = React.useState("")
   const [uploadState, setUploadState] = React.useState<UploadState>("idle")
   const [uploadProgress, setUploadProgress] = React.useState(0)
@@ -204,7 +206,7 @@ export function SourcesPanel({
           </Tooltip>
 
           {documents.length > 0 && (
-            <ScrollArea className="w-full flex-1 max-h-[calc(100vh-140px)]">
+            <ScrollArea className="w-full flex-1 min-h-0">
               <div className="flex flex-col items-center gap-2.5 px-2 pb-4">
                 {documents.map((document) => {
                   const status = getDocumentStatus(document.status)
@@ -271,7 +273,7 @@ export function SourcesPanel({
             ) : null}
           </div>
 
-          <ScrollArea className="flex-1 w-full">
+          <ScrollArea className="flex-1 min-h-0 w-full">
             <div className="px-3 pt-3">
               <Input
                 placeholder="Search uploaded sources"

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from typing import Callable
-from pydantic_ai import Agent
+from dataclasses import dataclass
+from pydantic_ai import Agent, RunContext
+from sqlmodel import Session
 
-from app.core.config import get_settings
-from app.notebooks.prompt import CHAT_SYSTEM_INSTRUCTIONS
+from app.core.config import Settings, get_settings
 from app.notebooks.agent.base import ChatModelProvider
 from app.notebooks.agent.providers import GeminiChatProvider, OpenAICompatibleChatProvider, OpenRouterChatProvider
+from app.notebooks.models import Notebook
+from app.notebooks.prompt import CHAT_SYSTEM_INSTRUCTIONS, build_context_block
+from app.notebooks.tools import search_notebook_chunks
+from app.users.models import User
 
 _CHAT_PROVIDER_REGISTRY: dict[str, ChatModelProvider] = {
     "openrouter": OpenRouterChatProvider(),
@@ -40,17 +44,33 @@ def chat_provider_is_configured() -> bool:
     return False
 
 
-def get_notebook_chat_agent(
-    context_retriever: Callable[[str], str] | None = None,
-) -> Agent:
+@dataclass
+class NotebookChatDeps:
+    session: Session
+    notebook: Notebook
+    current_user: User
+    settings: Settings
+
+
+def get_notebook_chat_agent() -> Agent[NotebookChatDeps, str]:
     model = resolve_chat_provider().build_model()
-    agent = Agent(model, instructions=CHAT_SYSTEM_INSTRUCTIONS)
+    agent = Agent(
+        model,
+        deps_type=NotebookChatDeps,
+        instructions=CHAT_SYSTEM_INSTRUCTIONS,
+    )
 
-    if context_retriever is not None:
-
-        @agent.tool_plain
-        def search_notebook_context(query: str) -> str:
-            """Search indexed notebook sources and return labeled excerpts to cite."""
-            return context_retriever(query)
+    @agent.tool
+    def search_notebook_context(ctx: RunContext[NotebookChatDeps], query: str) -> str:
+        """Search indexed notebook sources and return labeled excerpts to cite."""
+        chunks = search_notebook_chunks(
+            session=ctx.deps.session,
+            notebook=ctx.deps.notebook,
+            current_user=ctx.deps.current_user,
+            query=query,
+            settings=ctx.deps.settings,
+            top_k=6,
+        )
+        return build_context_block(chunks)
 
     return agent

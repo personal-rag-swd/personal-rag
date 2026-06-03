@@ -90,7 +90,11 @@ class NotebookDocumentRead(BaseModel):
 
 class NotebookChatHistoryPart(BaseModel):
     type: str
-    content: str
+    content: str | None = None
+    toolCallId: str | None = None
+    toolName: str | None = None
+    argsText: str | None = None
+    result: Any | None = None
 
 
 class NotebookChatSource(BaseModel):

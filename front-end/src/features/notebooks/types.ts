@@ -36,6 +36,25 @@ export type NotebookDocument = {
   updatedAt: string;
 };
 
+export type NotebookDocumentEvent =
+  | {
+      type: "snapshot";
+      notebook_id: string;
+      documents: NotebookDocumentApiPayload[];
+      timestamp: string;
+    }
+  | {
+      type: "document_update";
+      notebook_id: string;
+      document: NotebookDocumentApiPayload;
+      timestamp: string;
+    }
+  | {
+      type: "ping";
+      notebook_id: string;
+      timestamp: string;
+    };
+
 export type NotebookActionState = {
   values?: Partial<NotebookValues>;
   notebook?: Notebook;

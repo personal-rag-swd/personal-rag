@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     embedding_provider_url: str = ""
     embedding_model: str = "text-embedding-3-small"
     embedding_dimension: int = 1536
+    embedding_batch_size: int = 16
+    embedding_delay_seconds: float = 0.5
+    embedding_max_retries: int = 5
+    file_ingestion_worker_enabled: bool = False
+    file_ingestion_worker_interval_seconds: float = 10.0
+    file_ingestion_worker_batch_size: int = 20
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173", "http://localhost:8000"]
 
     @field_validator("cors_origins", mode="before")

@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useEffect, useState } from "react"
 import type { ThreadMessage } from "@assistant-ui/core"
 import { apiFetch } from "@/lib/api-client"
 import {
@@ -7,10 +8,20 @@ import {
   type NotebookPopulateApiPayload,
   type NotebookDocument,
   type NotebookDocumentApiPayload,
+  type NotebookDocumentEvent,
   type NotebookReport,
   type NotebookReportApiPayload,
   type ReportType,
 } from "./types"
+
+function buildApiUrl(path: string): string {
+  const base = import.meta.env.VITE_API_URL
+  if (!base || base === "/") {
+    return path
+  }
+  const normalizedBase = base.endsWith("/") ? base : `${base}/`
+  return new URL(path.replace(/^\//, ""), normalizedBase).toString()
+}
 
 function mapNotebookReport(payload: NotebookReportApiPayload): NotebookReport {
   return {
@@ -154,7 +165,107 @@ export function useNotebookQuery(id: string | undefined) {
 
 const ACTIVE_DOCUMENT_STATUSES = new Set(["pending", "uploaded", "processing"])
 
-export function useNotebookDocumentsQuery(notebookId: string | undefined) {
+export type NotebookDocumentEventsHealth =
+  | "idle"
+  | "connected"
+  | "reconnecting"
+  | "failed"
+
+export function useNotebookDocumentEvents(notebookId: string | undefined) {
+  const queryClient = useQueryClient()
+  const [health, setHealth] = useState<NotebookDocumentEventsHealth>("idle")
+  const [isVisible, setIsVisible] = useState(
+    typeof document === "undefined" ? true : document.visibilityState === "visible"
+  )
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      setIsVisible(document.visibilityState === "visible")
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!notebookId || !isVisible) {
+      return
+    }
+
+    let hasConnected = false
+    const source = new EventSource(
+      buildApiUrl(`/api/v1/notebooks/${notebookId}/documents/events`)
+    )
+
+    source.onopen = () => {
+      hasConnected = true
+      setHealth("connected")
+      console.info(
+        `[notebook-doc-events] connected notebook=${notebookId}`
+      )
+    }
+
+    source.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data) as NotebookDocumentEvent
+        if (payload.type === "snapshot") {
+          queryClient.setQueryData(
+            ["notebooks", notebookId, "documents"],
+            payload.documents.map(mapNotebookDocument)
+          )
+          return
+        }
+        if (payload.type === "document_update") {
+          queryClient.setQueryData<NotebookDocument[]>(
+            ["notebooks", notebookId, "documents"],
+            (current = []) => {
+              const nextDocument = mapNotebookDocument(payload.document)
+              const existingIndex = current.findIndex(
+                (document) => document.id === nextDocument.id
+              )
+              if (existingIndex === -1) {
+                return [nextDocument, ...current]
+              }
+              const next = [...current]
+              next[existingIndex] = nextDocument
+              return next
+            }
+          )
+        }
+      } catch (error) {
+        console.warn(
+          `[notebook-doc-events] failed to parse event notebook=${notebookId}`,
+          error
+        )
+      }
+    }
+
+    source.onerror = () => {
+      setHealth(hasConnected ? "reconnecting" : "failed")
+      console.warn(
+        `[notebook-doc-events] ${hasConnected ? "reconnecting" : "failed"} notebook=${notebookId}`
+      )
+    }
+
+    return () => {
+      source.close()
+      console.info(
+        `[notebook-doc-events] disconnected notebook=${notebookId}`
+      )
+    }
+  }, [isVisible, notebookId, queryClient])
+
+  if (!notebookId || !isVisible) {
+    return "idle"
+  }
+  return health
+}
+
+export function useNotebookDocumentsQuery(
+  notebookId: string | undefined,
+  streamHealth: NotebookDocumentEventsHealth = "idle"
+) {
   return useQuery<NotebookDocument[]>({
     queryKey: ["notebooks", notebookId, "documents"],
     queryFn: async () => {
@@ -167,6 +278,9 @@ export function useNotebookDocumentsQuery(notebookId: string | undefined) {
     // Poll quickly while documents are still being ingested so the lifecycle
     // progress stays live, then back off once everything settles.
     refetchInterval: (query) => {
+      if (streamHealth === "connected") {
+        return 30000
+      }
       const docs = query.state.data
       const hasActive = docs?.some((doc) =>
         ACTIVE_DOCUMENT_STATUSES.has(doc.status)
@@ -216,7 +330,14 @@ export function useTouchNotebookMutation() {
 
 type NotebookChatHistoryMessage = {
   role: "user" | "assistant"
-  parts: { type: "text" | "reasoning"; content: string }[]
+  parts: {
+    type: "text" | "reasoning" | "tool-call"
+    content?: string
+    toolCallId?: string
+    toolName?: string
+    argsText?: string
+    result?: any
+  }[]
   sources?: {
     filename: string
     document_id: string
@@ -294,11 +415,29 @@ export async function fetchNotebookChatHistory(
       return {
         ...base,
         role: "assistant",
-        content: message.parts.map((part) =>
-          part.type === "reasoning"
-            ? { type: "reasoning", text: part.content }
-            : { type: "text", text: part.content }
-        ),
+        content: message.parts.map((part) => {
+          if (part.type === "reasoning") {
+            return { type: "reasoning" as const, text: part.content ?? "" }
+          }
+          if (part.type === "tool-call") {
+            return {
+              type: "tool-call" as const,
+              toolCallId: part.toolCallId ?? "",
+              toolName: part.toolName ?? "",
+              argsText: part.argsText ?? "",
+              args: (() => {
+                try {
+                  return part.argsText ? JSON.parse(part.argsText) : {}
+                } catch {
+                  return {}
+                }
+              })(),
+              result: part.result,
+              status: { type: "complete" as const }
+            }
+          }
+          return { type: "text" as const, text: part.content ?? "" }
+        }),
         status: { type: "complete", reason: "stop" },
         metadata: {
           ...base.metadata,
@@ -318,8 +457,8 @@ export async function fetchNotebookChatHistory(
       ...base,
       role: "user",
       content: message.parts.map((part) => ({
-        type: "text",
-        text: part.content,
+        type: "text" as const,
+        text: part.content ?? "",
       })),
       attachments: [],
     }

@@ -17,6 +17,7 @@ class GeminiEmbeddingAdapter(PydanticAIEmbeddingAdapter):
     ) -> None:
         self.model = model
         self.output_dimensionality = output_dimensionality
+        self.provider_url = "https://generativelanguage.googleapis.com"
 
         provider = GoogleProvider(api_key=api_key)
         embedding_model = GoogleEmbeddingModel(
