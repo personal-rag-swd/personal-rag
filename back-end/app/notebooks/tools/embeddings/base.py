@@ -22,8 +22,14 @@ class PydanticAIEmbeddingAdapter(EmbeddingAdapter):
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
+        # Batch to avoid provider limits (e.g. Gemini limit is 100)
+        batch_size = 100
+        embeddings = []
         try:
-            result = self.embedder.embed_documents_sync(texts)
+            for i in range(0, len(texts), batch_size):
+                batch = texts[i : i + batch_size]
+                result = self.embedder.embed_documents_sync(batch)
+                embeddings.extend([list(emb) for emb in result.embeddings])
         except ModelHTTPError as exc:
             logger.exception(
                 "Embedding provider HTTP error: status_code=%s model=%s body=%r",
@@ -45,4 +51,4 @@ class PydanticAIEmbeddingAdapter(EmbeddingAdapter):
                     "For OpenRouter, use EMBEDDING_PROVIDER_URL=https://openrouter.ai/api/v1."
                 ) from exc
             raise
-        return [list(emb) for emb in result.embeddings]
+        return embeddings
