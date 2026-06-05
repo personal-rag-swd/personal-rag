@@ -47,18 +47,24 @@ export function MindMapDialog({
   notebookName,
   open,
   onOpenChange,
+  initialMap,
 }: {
   notebookId: string;
   notebookName: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  initialMap?: NotebookReport | null;
 }) {
   const [detailLevel, setDetailLevel] = useState<"simple" | "intermediate" | "detailed">("intermediate");
   const [instructions, setInstructions] = useState("");
   
   // Custom selections
-  const [selectedMap, setSelectedMap] = useState<NotebookReport | null>(null);
-  const [userIsGeneratingNew, setUserIsGeneratingNew] = useState<boolean | null>(null);
+  const [selectedMap, setSelectedMap] = useState<NotebookReport | null>(() =>
+    initialMap?.reportType === "mindmap" ? initialMap : null
+  );
+  const [userIsGeneratingNew, setUserIsGeneratingNew] = useState<boolean | null>(() =>
+    initialMap?.reportType === "mindmap" ? false : null
+  );
 
   // Graph canvas dimension and pan/zoom state
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
@@ -210,12 +216,12 @@ export function MindMapDialog({
     const positions: Record<string, Position> = {};
 
     // Base dimensions for nodes
-    const nodeWidths = { root: 220, main: 190, sub: 160 };
-    const nodeHeights = { root: 85, main: 70, sub: 50 };
+    const nodeWidths = { root: 260, main: 230, sub: 200 };
+    const nodeHeights = { root: 100, main: 85, sub: 70 };
 
-    const xSpacing = 280;
-    const subYSpacing = 65;
-    const mainGap = 50;
+    const xSpacing = 330;
+    const subYSpacing = 85;
+    const mainGap = 65;
 
     // Helper to calculate height of a main branch subtree
     const getSubtreeHeight = (children: MindMapNode[]) => {
@@ -456,18 +462,18 @@ export function MindMapDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="flex flex-col p-0 gap-0 max-w-[95vw] w-[1400px] h-[90vh] overflow-hidden bg-slate-950 border-slate-800 text-slate-100 rounded-xl"
+        className="flex flex-col p-0 gap-0 max-w-[min(100%-2rem,1400px)] sm:max-w-[min(100%-2rem,1400px)] h-[min(100%-4rem,90vh)] overflow-hidden bg-background border-border text-foreground rounded-xl"
       >
         {/* Header */}
-        <div className="flex items-center gap-3 px-5 py-3.5 border-b border-slate-800 shrink-0 bg-slate-900/50">
+        <div className="flex items-center gap-3 px-5 py-3.5 border-b border-border shrink-0 bg-muted/40">
           <div className="min-w-0 flex-1">
-            <DialogTitle className="text-base font-semibold text-slate-100 flex items-center gap-2">
+            <DialogTitle className="text-base font-semibold text-foreground flex items-center gap-2">
               <span className="bg-primary/20 text-primary px-2 py-0.5 rounded text-xs border border-primary/30">
                 Mind Map
               </span>
               <span>{notebookName}</span>
             </DialogTitle>
-            <DialogDescription className="text-xs text-slate-400 mt-0.5 truncate">
+            <DialogDescription className="text-xs text-muted-foreground mt-0.5 truncate">
               {activeMap
                 ? `Active: Generated ${formatDistanceToNow(new Date(activeMap.createdAt), { addSuffix: true })}`
                 : "Generate a concept network from your notebook materials."}
@@ -482,7 +488,7 @@ export function MindMapDialog({
                   const map = mindMaps.find((m) => m.id === e.target.value);
                   if (map) setSelectedMap(map);
                 }}
-                className="bg-slate-800 border border-slate-700 text-xs rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary text-slate-200"
+                className="bg-background border border-border text-xs rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary text-foreground"
               >
                 {mindMaps.map((m, idx) => (
                   <option key={m.id} value={m.id}>
@@ -497,7 +503,7 @@ export function MindMapDialog({
                 variant="outline"
                 size="sm"
                 onClick={() => setUserIsGeneratingNew(true)}
-                className="h-8 text-xs border-slate-700 hover:bg-slate-800 text-slate-200 gap-1.5"
+                className="h-8 text-xs border-border hover:bg-muted text-foreground gap-1.5"
               >
                 <PlusIcon className="size-3.5" />
                 Generate New
@@ -506,7 +512,7 @@ export function MindMapDialog({
 
             <button
               onClick={() => onOpenChange(false)}
-              className="flex size-8 items-center justify-center rounded bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-400 hover:text-slate-100 transition-colors cursor-pointer"
+              className="flex size-8 items-center justify-center rounded bg-muted border border-border hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
               aria-label="Close dialog"
             >
               <XIcon className="size-4" />
@@ -516,10 +522,10 @@ export function MindMapDialog({
 
         {/* Content Body */}
         {isGeneratingNew ? (
-          <div className="flex-1 min-h-0 flex flex-col md:flex-row bg-slate-950">
+          <div className="flex-1 min-h-0 flex flex-col md:flex-row bg-background">
             {/* Generate Setup Panel */}
-            <div className="w-full md:w-96 border-r border-slate-800 p-6 flex flex-col shrink-0 overflow-y-auto">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-5 flex items-center gap-1.5">
+            <div className="w-full md:w-96 border-r border-border p-6 flex flex-col shrink-0 overflow-y-auto bg-card">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-5 flex items-center gap-1.5">
                 <SparklesIcon className="size-4 text-primary animate-pulse" />
                 Generate Settings
               </h2>
@@ -527,7 +533,7 @@ export function MindMapDialog({
               <div className="space-y-5 flex-1">
                 {/* Detail Level */}
                 <div className="space-y-2">
-                  <label className="text-xs font-medium text-slate-300">
+                  <label className="text-xs font-medium text-foreground">
                     Depth / Level of Detail
                   </label>
                   <ToggleGroup
@@ -542,24 +548,24 @@ export function MindMapDialog({
                   >
                     <ToggleGroupItem
                       value="simple"
-                      className="px-3 py-1.5 text-xs rounded border-slate-700 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:border-primary"
+                      className="px-3 py-1.5 text-xs rounded border-border data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:border-primary"
                     >
                       Simple
                     </ToggleGroupItem>
                     <ToggleGroupItem
                       value="intermediate"
-                      className="px-3 py-1.5 text-xs rounded border-slate-700 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:border-primary"
+                      className="px-3 py-1.5 text-xs rounded border-border data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:border-primary"
                     >
                       Intermediate
                     </ToggleGroupItem>
                     <ToggleGroupItem
                       value="detailed"
-                      className="px-3 py-1.5 text-xs rounded border-slate-700 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:border-primary"
+                      className="px-3 py-1.5 text-xs rounded border-border data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:border-primary"
                     >
                       Detailed
                     </ToggleGroupItem>
                   </ToggleGroup>
-                  <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                  <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">
                     {detailLevel === "simple" && "Generates high-level outline: 3-5 main branches and 5-10 sub-concepts."}
                     {detailLevel === "intermediate" && "Balanced representation: 5-8 main branches and 10-20 sub-concepts."}
                     {detailLevel === "detailed" && "Deep knowledge graph: 8-12 main branches and 20-35 sub-concepts."}
@@ -568,7 +574,7 @@ export function MindMapDialog({
 
                 {/* Additional instructions */}
                 <div className="space-y-2">
-                  <label className="text-xs font-medium text-slate-300">
+                  <label className="text-xs font-medium text-foreground">
                     Focus Instructions (Optional)
                   </label>
                   <Textarea
@@ -576,13 +582,13 @@ export function MindMapDialog({
                     onChange={(e) => setInstructions(e.target.value)}
                     placeholder="Focus on specific topics (e.g. 'Concentrate on deployment procedures and MinIO configs')"
                     rows={8}
-                    className="bg-slate-900 border-slate-700 focus-visible:ring-primary text-xs resize-none"
+                    className="bg-background border-border focus-visible:ring-primary text-xs resize-none text-foreground"
                   />
                 </div>
               </div>
 
               {/* Generate Trigger */}
-              <div className="pt-4 border-t border-slate-800 space-y-2">
+              <div className="pt-4 border-t border-border space-y-2">
                 <Button
                   onClick={handleGenerate}
                   disabled={generateMutation.isPending}
@@ -605,7 +611,7 @@ export function MindMapDialog({
                   <Button
                     variant="ghost"
                     onClick={() => setUserIsGeneratingNew(false)}
-                    className="w-full text-xs text-slate-400 hover:text-slate-200"
+                    className="w-full text-xs text-muted-foreground hover:text-foreground"
                   >
                     Cancel
                   </Button>
@@ -614,24 +620,24 @@ export function MindMapDialog({
             </div>
 
             {/* Explanatory Panel / Graphic mock */}
-            <div className="flex-1 bg-slate-900/20 p-8 flex flex-col items-center justify-center text-center">
+            <div className="flex-1 bg-muted/20 p-8 flex flex-col items-center justify-center text-center">
               <div className="size-16 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary mb-4 animate-pulse">
                 <SparklesIcon className="size-8" />
               </div>
-              <h3 className="text-sm font-semibold text-slate-200">
+              <h3 className="text-sm font-semibold text-foreground">
                 Visualize Document Relationships
               </h3>
-              <p className="text-xs text-slate-400 max-w-sm mt-1.5 leading-relaxed">
+              <p className="text-xs text-muted-foreground max-w-sm mt-1.5 leading-relaxed">
                 Personal RAG automatically scans files parsed into your notebook, extracts core subjects, organizes sub-branches, and drafts relationships.
               </p>
             </div>
           </div>
         ) : (
-          <div className="flex-1 min-h-0 flex bg-slate-950 relative overflow-hidden">
+          <div className="flex-1 min-h-0 flex bg-background relative overflow-hidden">
             {/* Interactive Graph Canvas */}
             <div
               ref={containerRef}
-              className="flex-1 min-h-0 relative select-none cursor-grab active:cursor-grabbing bg-[#0b0f19]"
+              className="flex-1 min-h-0 relative select-none cursor-grab active:cursor-grabbing bg-background"
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUpOrLeave}
@@ -646,7 +652,7 @@ export function MindMapDialog({
                     height="24"
                     patternUnits="userSpaceOnUse"
                   >
-                    <circle cx="2" cy="2" r="1.2" fill="rgba(255,255,255,0.06)" />
+                    <circle cx="2" cy="2" r="1.2" fill="rgba(120,120,120,0.15)" />
                   </pattern>
                 </defs>
                 <rect width="100%" height="100%" fill="url(#grid-dots)" />
@@ -784,17 +790,18 @@ export function MindMapDialog({
                               e.stopPropagation();
                               setSelectedNodeId(nodeId);
                             }}
+                            title={node.label}
                             className={cn(
                               "w-full h-full p-2.5 rounded-lg border flex flex-col justify-center transition-all duration-200 cursor-pointer shadow-md select-none",
                               // Root node styles
                               node.type === "root" &&
-                                "bg-slate-900 border-blue-500/80 ring-2 ring-blue-500/20 hover:scale-105",
+                                "bg-primary/10 dark:bg-primary/25 border-primary ring-2 ring-primary/20 hover:scale-105",
                               // Main nodes styles
                               node.type === "main" &&
-                                "bg-slate-900 border-slate-700 hover:border-blue-500 hover:scale-[1.03]",
+                                "bg-card border-border hover:border-primary/80 hover:scale-[1.03]",
                               // Sub nodes styles
                               node.type === "sub" &&
-                                "bg-slate-950 border-slate-800 hover:border-slate-600 hover:scale-[1.03]",
+                                "bg-muted/40 dark:bg-muted/20 border-border/80 hover:border-muted-foreground/50 hover:scale-[1.03]",
                               // Highlights
                               isSelected && "border-primary ring-2 ring-primary/30",
                               highlightState === "highlighted" &&
@@ -805,15 +812,19 @@ export function MindMapDialog({
                             {/* Node labels */}
                             <div
                               className={cn(
-                                "font-medium text-slate-100 leading-snug line-clamp-2 select-none",
-                                node.type === "root" ? "text-[12px] font-bold text-blue-400" : "text-[11px]"
+                                "font-medium leading-snug select-none",
+                                node.type === "root"
+                                  ? "text-[12px] font-bold text-primary line-clamp-2"
+                                  : node.type === "sub"
+                                    ? "text-[11px] text-foreground line-clamp-3"
+                                    : "text-[11px] text-foreground line-clamp-2"
                               )}
                             >
                               {node.label}
                             </div>
                             {/* Branch type badge & short excerpt */}
                             {node.description && node.type !== "sub" && (
-                              <div className="text-[9px] text-slate-400 mt-0.5 line-clamp-1 select-none">
+                              <div className="text-[9px] text-muted-foreground mt-0.5 line-clamp-1 select-none">
                                 {node.description}
                               </div>
                             )}
@@ -825,30 +836,53 @@ export function MindMapDialog({
                 </svg>
               )}
 
+              {!layout && (
+                <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
+                  <div className="max-w-sm rounded-lg border border-border bg-card p-5 shadow-sm">
+                    <h3 className="text-sm font-semibold text-foreground">
+                      Mind map data is incomplete
+                    </h3>
+                    <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                      This saved output does not contain renderable nodes. Generate a new mind map or open another saved version.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setUserIsGeneratingNew(true)}
+                      className="mt-4 h-8 text-xs"
+                    >
+                      Generate New
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               {/* Overlay Canvas Controls */}
-              <div className="absolute left-4 bottom-4 flex flex-col gap-2 pointer-events-auto">
-                <div className="flex bg-slate-900/90 backdrop-blur border border-slate-800 rounded-lg p-1 gap-1 shadow-lg">
+              {layout && (
+                <div className="absolute left-4 bottom-4 flex flex-col gap-2 pointer-events-auto">
+                <div className="flex bg-background/90 backdrop-blur border border-border rounded-lg p-1 gap-1 shadow-lg">
                   <TooltipIconButton icon={<ZoomInIcon className="size-4" />} onClick={zoomIn} label="Zoom In" />
                   <TooltipIconButton icon={<ZoomOutIcon className="size-4" />} onClick={zoomOut} label="Zoom Out" />
                   <TooltipIconButton icon={<Maximize2Icon className="size-4" />} onClick={fitToView} label="Fit Canvas" />
                   <TooltipIconButton icon={<Minimize2Icon className="size-4" />} onClick={resetView} label="Reset View" />
                 </div>
-              </div>
+                </div>
+              )}
 
               {/* Search Control Overlay */}
               <div className="absolute left-4 top-4 pointer-events-auto w-64">
                 <div className="relative">
-                  <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-slate-400" />
+                  <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
                   <Input
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search concepts..."
-                    className="bg-slate-900/95 backdrop-blur border-slate-800 text-xs pl-8.5 pr-8 h-9 shadow-lg focus-visible:ring-primary w-full text-slate-200"
+                    className="bg-background/95 backdrop-blur border-border text-xs pl-9 pr-8 h-9 shadow-lg focus-visible:ring-primary w-full text-foreground"
                   />
                   {searchQuery && (
                     <button
                       onClick={() => setSearchQuery("")}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 size-5 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded cursor-pointer"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 size-5 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted rounded cursor-pointer"
                     >
                       <XIcon className="size-3" />
                     </button>
@@ -862,7 +896,7 @@ export function MindMapDialog({
                   onClick={handleExportJSON}
                   size="sm"
                   variant="outline"
-                  className="bg-slate-900/90 border-slate-800 hover:bg-slate-800 hover:border-slate-700 text-xs gap-1.5 h-9"
+                  className="bg-background/90 border-border hover:bg-muted text-foreground text-xs gap-1.5 h-9"
                 >
                   <FileJsonIcon className="size-3.5 text-emerald-500" />
                   Export JSON
@@ -871,7 +905,7 @@ export function MindMapDialog({
                   onClick={handleExportSVG}
                   size="sm"
                   variant="outline"
-                  className="bg-slate-900/90 border-slate-800 hover:bg-slate-800 hover:border-slate-700 text-xs gap-1.5 h-9"
+                  className="bg-background/90 border-border hover:bg-muted text-foreground text-xs gap-1.5 h-9"
                 >
                   <ImageIcon className="size-3.5 text-blue-500" />
                   Export SVG
@@ -881,14 +915,14 @@ export function MindMapDialog({
 
             {/* Concept details Drawer Panel */}
             {selectedNode && (
-              <div className="w-80 border-l border-slate-800 bg-slate-900/50 flex flex-col shrink-0 overflow-hidden relative animate-in slide-in-from-right duration-250 z-10">
-                <div className="flex items-center justify-between px-4 py-3.5 border-b border-slate-800 bg-slate-900/70">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              <div className="w-80 border-l border-border bg-card flex flex-col shrink-0 overflow-hidden relative animate-in slide-in-from-right duration-250 z-10">
+                <div className="flex items-center justify-between px-4 py-3.5 border-b border-border bg-muted/40">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     Concept Details
                   </span>
                   <button
                     onClick={() => setSelectedNodeId(null)}
-                    className="size-6 flex items-center justify-center text-slate-400 hover:text-slate-100 hover:bg-slate-800 rounded transition-colors cursor-pointer"
+                    className="size-6 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors cursor-pointer"
                   >
                     <XIcon className="size-3.5" />
                   </button>
@@ -903,17 +937,17 @@ export function MindMapDialog({
                         {selectedNode.type === "main" && "Core Concept"}
                         {selectedNode.type === "sub" && "Concept Detail"}
                       </span>
-                      <h3 className="text-sm font-bold text-slate-100 mt-2 leading-snug">
+                      <h3 className="text-sm font-bold text-foreground mt-2 leading-snug">
                         {selectedNode.label}
                       </h3>
                     </div>
 
                     {/* Node Definition / Content Description */}
                     <div className="space-y-1">
-                      <h4 className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                      <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                         Summary & Definition
                       </h4>
-                      <p className="text-xs text-slate-300 leading-relaxed bg-slate-950/60 rounded border border-slate-800/80 p-3 whitespace-pre-wrap select-text">
+                      <p className="text-xs text-foreground leading-relaxed bg-muted/40 rounded border border-border p-3 whitespace-pre-wrap select-text">
                         {selectedNode.description || "No description provided for this concept."}
                       </p>
                     </div>
@@ -921,7 +955,7 @@ export function MindMapDialog({
                     {/* Symmetrical jump connections */}
                     {selectedNodeRelationships.length > 0 && (
                       <div className="space-y-2">
-                        <h4 className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                        <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                           Concept Relationships
                         </h4>
                         <div className="space-y-1.5">
@@ -935,17 +969,17 @@ export function MindMapDialog({
                               <button
                                 key={idx}
                                 onClick={() => setSelectedNodeId(partnerId)}
-                                className="group flex w-full items-center justify-between p-2 rounded text-left bg-slate-950/30 border border-slate-800 hover:bg-slate-800/50 hover:border-slate-700 transition-colors text-xs"
+                                className="group flex w-full items-center justify-between p-2 rounded text-left bg-muted/20 border border-border hover:bg-accent hover:text-accent-foreground transition-colors text-xs"
                               >
                                 <div className="min-w-0 flex-1">
-                                  <div className="text-[9px] text-orange-400 font-semibold truncate">
+                                  <div className="text-[9px] text-orange-500 font-semibold truncate">
                                     {isSource ? `leads to →` : `← relates from`}
                                   </div>
-                                  <div className="font-medium text-slate-200 group-hover:text-primary truncate mt-0.5">
+                                  <div className="font-medium text-foreground group-hover:text-primary truncate mt-0.5">
                                     {partner.label}
                                   </div>
                                 </div>
-                                <ChevronRightIcon className="size-3.5 text-slate-500 group-hover:text-slate-300 ml-2" />
+                                <ChevronRightIcon className="size-3.5 text-muted-foreground group-hover:text-foreground ml-2" />
                               </button>
                             );
                           })}
@@ -976,7 +1010,7 @@ function TooltipIconButton({
   return (
     <button
       onClick={onClick}
-      className="size-7 flex items-center justify-center rounded text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-colors cursor-pointer"
+      className="size-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
       title={label}
       aria-label={label}
     >

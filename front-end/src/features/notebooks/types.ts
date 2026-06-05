@@ -127,6 +127,11 @@ export type MindMapNode = {
   description?: string | null;
 };
 
+export type MindMapNodeApiPayload = Omit<MindMapNode, "parentId"> & {
+  parent_id?: string | null;
+  parentId?: string | null;
+};
+
 export type MindMapRelationship = {
   source: string;
   target: string;
@@ -139,6 +144,10 @@ export type MindMapContent = {
   relationships?: MindMapRelationship[];
 };
 
+export type MindMapContentApiPayload = Omit<MindMapContent, "nodes"> & {
+  nodes: MindMapNodeApiPayload[];
+};
+
 export type ReportContent =
   | BriefingDocContent
   | StudyGuideContent
@@ -146,11 +155,18 @@ export type ReportContent =
   | CustomReportContent
   | MindMapContent;
 
+export type ReportContentApiPayload =
+  | BriefingDocContent
+  | StudyGuideContent
+  | BlogPostContent
+  | CustomReportContent
+  | MindMapContentApiPayload;
+
 export type NotebookReportApiPayload = {
   id: string;
   notebook_id: string;
   report_type: ReportType;
-  content: ReportContent;
+  content: ReportContentApiPayload;
   created_at: string;
   updated_at: string;
 };

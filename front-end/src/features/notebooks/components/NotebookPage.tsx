@@ -36,10 +36,16 @@ export function NotebookPage() {
   const [isReportsOpen, setIsReportsOpen] = useState(false);
   const [isMindMapOpen, setIsMindMapOpen] = useState(false);
   const [selectedReport, setSelectedReport] = useState<NotebookReport | null>(null);
+  const [selectedMindMap, setSelectedMindMap] = useState<NotebookReport | null>(null);
 
   const handleViewReport = (report: NotebookReport) => {
-    setSelectedReport(report);
-    setIsReportsOpen(true);
+    if (report.reportType === "mindmap") {
+      setSelectedMindMap(report);
+      setIsMindMapOpen(true);
+    } else {
+      setSelectedReport(report);
+      setIsReportsOpen(true);
+    }
   };
 
   if (!id) {
@@ -105,6 +111,7 @@ export function NotebookPage() {
                     setSelectedReport(null);
                     setIsReportsOpen(true);
                   } else if (actionId === "mind-map") {
+                    setSelectedMindMap(null);
                     setIsMindMapOpen(true);
                   }
                 }}
@@ -129,6 +136,7 @@ export function NotebookPage() {
                   setSelectedReport(null);
                   setIsReportsOpen(true);
                 } else if (actionId === "mind-map") {
+                  setSelectedMindMap(null);
                   setIsMindMapOpen(true);
                 }
               }}
@@ -153,7 +161,11 @@ export function NotebookPage() {
         notebookId={id}
         notebookName={notebook.name}
         open={isMindMapOpen}
-        onOpenChange={setIsMindMapOpen}
+        onOpenChange={(open) => {
+          setIsMindMapOpen(open);
+          if (!open) setSelectedMindMap(null);
+        }}
+        initialMap={selectedMindMap}
       />
 
       {/* Edit & Delete Dialog Modals */}

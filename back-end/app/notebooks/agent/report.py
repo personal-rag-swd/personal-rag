@@ -1,4 +1,9 @@
+from __future__ import annotations
+
+import asyncio
+import logfire
 from pydantic_ai import Agent
+from pydantic_ai.exceptions import ModelHTTPError
 
 from app.notebooks.agent.factory import resolve_chat_provider
 from app.notebooks.prompt import (
@@ -23,6 +28,30 @@ def _build_user_message(context: str, additional_instructions: str | None) -> st
     return "\n\n".join(parts)
 
 
+async def _run_agent_with_retry(
+    agent: Agent,
+    user_msg: str,
+    max_retries: int = 4,
+    initial_delay: float = 2.0,
+) -> any:
+    delay = initial_delay
+    for attempt in range(max_retries):
+        try:
+            return await agent.run(user_msg)
+        except ModelHTTPError as exc:
+            if exc.status_code in (429, 502, 503, 500) and attempt < max_retries - 1:
+                logfire.warning(
+                    "Model HTTP error status_code={status_code} on attempt {attempt_num}. Retrying in {delay}s...",
+                    status_code=exc.status_code,
+                    attempt_num=attempt + 1,
+                    delay=delay,
+                )
+                await asyncio.sleep(delay)
+                delay *= 2
+            else:
+                raise exc
+
+
 async def generate_briefing_doc(
     context: str,
     additional_instructions: str | None = None,
@@ -32,7 +61,7 @@ async def generate_briefing_doc(
         output_type=BriefingDocReport,
         instructions=BRIEFING_SYSTEM,
     )
-    result = await agent.run(_build_user_message(context, additional_instructions))
+    result = await _run_agent_with_retry(agent, _build_user_message(context, additional_instructions))
     return result.output
 
 
@@ -45,7 +74,7 @@ async def generate_study_guide(
         output_type=StudyGuideReport,
         instructions=STUDY_GUIDE_SYSTEM,
     )
-    result = await agent.run(_build_user_message(context, additional_instructions))
+    result = await _run_agent_with_retry(agent, _build_user_message(context, additional_instructions))
     return result.output
 
 
@@ -58,7 +87,7 @@ async def generate_blog_post(
         output_type=BlogPostReport,
         instructions=BLOG_SYSTEM,
     )
-    result = await agent.run(_build_user_message(context, additional_instructions))
+    result = await _run_agent_with_retry(agent, _build_user_message(context, additional_instructions))
     return result.output
 
 
@@ -76,7 +105,7 @@ async def generate_custom_report(
         f"USER REQUEST: {additional_instructions.strip()}\n\n"
         f"SOURCE MATERIAL:\n\n{context}"
     )
-    result = await agent.run(user_message)
+    result = await _run_agent_with_retry(agent, user_message)
     return result.output
 
 
@@ -121,5 +150,5 @@ async def generate_mindmap(
     if additional_instructions and additional_instructions.strip():
         user_msg_parts.append(f"Additional User Requirements: {additional_instructions.strip()}")
         
-    result = await agent.run("\n\n".join(user_msg_parts))
+    result = await _run_agent_with_retry(agent, "\n\n".join(user_msg_parts))
     return result.output
