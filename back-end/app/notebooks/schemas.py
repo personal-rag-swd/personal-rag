@@ -157,16 +157,37 @@ class CustomReport(BaseModel):
     markdown_content: str
 
 
+class MindMapNode(BaseModel):
+    id: str = Field(description="Unique node identifier, e.g. 'root', 'm1', 's1_1'")
+    label: str = Field(description="Short text label of the concept")
+    type: Literal["root", "main", "sub"] = Field(description="Branch level hierarchy")
+    parent_id: str | None = Field(default=None, description="Parent node ID or null for central topic")
+    description: str | None = Field(default=None, description="Detailed explanation/definition of the concept")
+
+
+class MindMapRelationship(BaseModel):
+    source: str = Field(description="Source node ID")
+    target: str = Field(description="Target node ID")
+    label: str = Field(description="Description of concept relationship, e.g., 'prerequisite of'")
+
+
+class MindMapReport(BaseModel):
+    central_topic: str = Field(description="Central theme of the documents")
+    nodes: list[MindMapNode] = Field(description="Tree structure nodes")
+    relationships: list[MindMapRelationship] = Field(default_factory=list, description="Cross-connections")
+
+
 # ---------------------------------------------------------------------------
 # Report API schemas
 # ---------------------------------------------------------------------------
 
-ReportType = Literal["briefing", "study_guide", "blog", "custom"]
+ReportType = Literal["briefing", "study_guide", "blog", "custom", "mindmap"]
 
 
 class ReportGenerateRequest(BaseModel):
     report_type: ReportType
     additional_instructions: str | None = Field(default=None, max_length=2000)
+    detail_level: str | None = Field(default=None, max_length=20)
 
 
 class NotebookReportRead(BaseModel):

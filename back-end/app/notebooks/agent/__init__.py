@@ -11,6 +11,7 @@ from app.notebooks.agent.report import (
     generate_blog_post,
     generate_custom_report,
     generate_study_guide,
+    generate_mindmap,
 )
 
 __all__ = [
@@ -25,4 +26,5 @@ __all__ = [
     "generate_blog_post",
     "generate_custom_report",
     "generate_study_guide",
+    "generate_mindmap",
 ]

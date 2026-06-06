@@ -91,7 +91,7 @@ export type NotebookDocumentApiPayload = {
 
 // ─── Reports ────────────────────────────────────────────────────────────────
 
-export type ReportType = "briefing" | "study_guide" | "blog" | "custom";
+export type ReportType = "briefing" | "study_guide" | "blog" | "custom" | "mindmap";
 
 export type BriefingDocContent = {
   executive_summary: string;
@@ -119,17 +119,54 @@ export type CustomReportContent = {
   markdown_content: string;
 };
 
+export type MindMapNode = {
+  id: string;
+  label: string;
+  type: "root" | "main" | "sub";
+  parentId?: string | null;
+  description?: string | null;
+};
+
+export type MindMapNodeApiPayload = Omit<MindMapNode, "parentId"> & {
+  parent_id?: string | null;
+  parentId?: string | null;
+};
+
+export type MindMapRelationship = {
+  source: string;
+  target: string;
+  label: string;
+};
+
+export type MindMapContent = {
+  central_topic: string;
+  nodes: MindMapNode[];
+  relationships?: MindMapRelationship[];
+};
+
+export type MindMapContentApiPayload = Omit<MindMapContent, "nodes"> & {
+  nodes: MindMapNodeApiPayload[];
+};
+
 export type ReportContent =
   | BriefingDocContent
   | StudyGuideContent
   | BlogPostContent
-  | CustomReportContent;
+  | CustomReportContent
+  | MindMapContent;
+
+export type ReportContentApiPayload =
+  | BriefingDocContent
+  | StudyGuideContent
+  | BlogPostContent
+  | CustomReportContent
+  | MindMapContentApiPayload;
 
 export type NotebookReportApiPayload = {
   id: string;
   notebook_id: string;
   report_type: ReportType;
-  content: ReportContent;
+  content: ReportContentApiPayload;
   created_at: string;
   updated_at: string;
 };
