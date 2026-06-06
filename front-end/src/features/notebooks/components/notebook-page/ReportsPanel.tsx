@@ -58,8 +58,6 @@ export function ReportsPanel({
     useNotebookReportsQuery(notebookId);
   const generateMutation = useGenerateNotebookReportMutation(notebookId);
 
-  const textReports = reports ? reports.filter((r) => r.reportType !== "mindmap") : [];
-
   // When opened with a pre-selected report (from StudioPanel), show it directly.
   useEffect(() => {
     if (open && initialReport) {
@@ -121,7 +119,7 @@ export function ReportsPanel({
 
   if (viewingReport) {
     const meta = REPORT_TYPE_BY_ID[viewingReport.reportType];
-    headerTitle = meta?.label ?? viewingReport.reportType;
+    headerTitle = meta.label;
     headerSubtitle = `Generated ${formatDistanceToNow(new Date(viewingReport.createdAt), { addSuffix: true })}`;
     headerBack = () => setViewingReport(null);
     body = (
@@ -222,7 +220,7 @@ export function ReportsPanel({
           </Button>
 
           {/* Recent reports */}
-          {(isReportsLoading || textReports.length > 0) && (
+          {(isReportsLoading || (reports && reports.length > 0)) && (
             <section className="pt-2">
               <h3 className="px-1 mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Recent reports
@@ -233,7 +231,7 @@ export function ReportsPanel({
                 </div>
               ) : (
                 <div className="space-y-1.5">
-                  {textReports.map((r) => {
+                  {reports!.map((r) => {
                     const meta = REPORT_TYPE_BY_ID[r.reportType];
                     return (
                       <button
@@ -345,8 +343,6 @@ function ReportContentView({ report }: { report: NotebookReport }) {
       return <BlogPostView content={report.content as BlogPostContent} />;
     case "custom":
       return <CustomReportView content={report.content as CustomReportContent} />;
-    default:
-      return null;
   }
 }
 

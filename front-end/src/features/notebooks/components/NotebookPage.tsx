@@ -18,7 +18,6 @@ import { NotebookError, NotebookSkeleton } from "./notebook-page/NotebookStates"
 import { SourcesPanel } from "./notebook-page/SourcesPanel";
 import { StudioPanel } from "./notebook-page/StudioPanel";
 import { ReportsPanel } from "./notebook-page/ReportsPanel";
-import { MindMapDialog } from "./notebook-page/MindMapDialog";
 import { UpdateNotebookDialog } from "./UpdateNotebookDialog";
 import { DeleteNotebookDialog } from "./DeleteNotebookDialog";
 
@@ -34,18 +33,11 @@ export function NotebookPage() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [isReportsOpen, setIsReportsOpen] = useState(false);
-  const [isMindMapOpen, setIsMindMapOpen] = useState(false);
   const [selectedReport, setSelectedReport] = useState<NotebookReport | null>(null);
-  const [selectedMindMap, setSelectedMindMap] = useState<NotebookReport | null>(null);
 
   const handleViewReport = (report: NotebookReport) => {
-    if (report.reportType === "mindmap") {
-      setSelectedMindMap(report);
-      setIsMindMapOpen(true);
-    } else {
-      setSelectedReport(report);
-      setIsReportsOpen(true);
-    }
+    setSelectedReport(report);
+    setIsReportsOpen(true);
   };
 
   if (!id) {
@@ -110,9 +102,6 @@ export function NotebookPage() {
                   if (actionId === "reports") {
                     setSelectedReport(null);
                     setIsReportsOpen(true);
-                  } else if (actionId === "mind-map") {
-                    setSelectedMindMap(null);
-                    setIsMindMapOpen(true);
                   }
                 }}
                 onViewReport={handleViewReport}
@@ -135,9 +124,6 @@ export function NotebookPage() {
                 if (actionId === "reports") {
                   setSelectedReport(null);
                   setIsReportsOpen(true);
-                } else if (actionId === "mind-map") {
-                  setSelectedMindMap(null);
-                  setIsMindMapOpen(true);
                 }
               }}
               onViewReport={handleViewReport}
@@ -154,18 +140,6 @@ export function NotebookPage() {
           if (!open) setSelectedReport(null);
         }}
         initialReport={selectedReport}
-      />
-
-      <MindMapDialog
-        key={isMindMapOpen ? "open" : "closed"}
-        notebookId={id}
-        notebookName={notebook.name}
-        open={isMindMapOpen}
-        onOpenChange={(open) => {
-          setIsMindMapOpen(open);
-          if (!open) setSelectedMindMap(null);
-        }}
-        initialMap={selectedMindMap}
       />
 
       {/* Edit & Delete Dialog Modals */}

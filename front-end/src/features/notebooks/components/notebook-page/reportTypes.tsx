@@ -3,7 +3,6 @@ import {
   GraduationCapIcon,
   NewspaperIcon,
   PenLineIcon,
-  GitForkIcon,
 } from "lucide-react";
 
 import type { ReportType } from "@/features/notebooks/types";
@@ -57,15 +56,6 @@ export const REPORT_TYPES: ReportTypeMeta[] = [
   },
 ];
 
-export const REPORT_TYPE_BY_ID = {
-  ...Object.fromEntries(REPORT_TYPES.map((t) => [t.id, t])),
-  mindmap: {
-    id: "mindmap" as ReportType,
-    label: "Mind Map",
-    shortLabel: "Mind Map",
-    description: "Visual concept map and semantic relationship graph.",
-    icon: <GitForkIcon className="size-4" />,
-    colorClass: "text-blue-500 bg-blue-500/10 border-blue-500/20",
-    placeholder: "",
-  },
-} as Record<ReportType, ReportTypeMeta>;
+export const REPORT_TYPE_BY_ID = Object.fromEntries(
+  REPORT_TYPES.map((t) => [t.id, t])
+) as Record<ReportType, ReportTypeMeta>;
