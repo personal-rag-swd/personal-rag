@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   ArrowLeftIcon,
   CheckCircle2Icon,
@@ -58,21 +58,24 @@ export function ReportsPanel({
     useNotebookReportsQuery(notebookId);
   const generateMutation = useGenerateNotebookReportMutation(notebookId);
 
-  // When opened with a pre-selected report (from StudioPanel), show it directly.
-  useEffect(() => {
-    if (open && initialReport) {
-      setViewingReport(initialReport);
-    }
-  }, [open, initialReport]);
+  const textReports = reports ? reports.filter((r) => r.reportType !== "mindmap") : [];
 
-  // Reset state every time the dialog is closed.
-  useEffect(() => {
+  const [prevOpen, setPrevOpen] = useState(open);
+  const [prevInitialReport, setPrevInitialReport] = useState(initialReport);
+
+  if (open !== prevOpen || initialReport !== prevInitialReport) {
+    setPrevOpen(open);
+    setPrevInitialReport(initialReport);
+
     if (!open) {
       setSelectedType("custom");
       setInstructions("");
       setViewingReport(null);
+    } else if (initialReport && (initialReport !== prevInitialReport || open !== prevOpen)) {
+      setViewingReport(initialReport);
     }
-  }, [open]);
+  }
+
 
   const activeMeta = REPORT_TYPE_BY_ID[selectedType];
   const isCustom = selectedType === "custom";
@@ -220,7 +223,7 @@ export function ReportsPanel({
           </Button>
 
           {/* Recent reports */}
-          {(isReportsLoading || (reports && reports.length > 0)) && (
+          {(isReportsLoading || textReports.length > 0) && (
             <section className="pt-2">
               <h3 className="px-1 mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Recent reports
@@ -231,7 +234,7 @@ export function ReportsPanel({
                 </div>
               ) : (
                 <div className="space-y-1.5">
-                  {reports!.map((r) => {
+                  {textReports.map((r) => {
                     const meta = REPORT_TYPE_BY_ID[r.reportType];
                     return (
                       <button

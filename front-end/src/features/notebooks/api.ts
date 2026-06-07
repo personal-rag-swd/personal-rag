@@ -11,6 +11,10 @@ import {
   type NotebookDocumentEvent,
   type NotebookReport,
   type NotebookReportApiPayload,
+  type MindMapContent,
+  type MindMapContentApiPayload,
+  type MindMapNodeApiPayload,
+  type ReportContent,
   type ReportType,
 } from "./types"
 
@@ -28,12 +32,51 @@ function mapNotebookReport(payload: NotebookReportApiPayload): NotebookReport {
     id: payload.id,
     notebookId: payload.notebook_id,
     reportType: payload.report_type,
-    content: payload.content,
+    content:
+      payload.report_type === "mindmap"
+        ? mapMindMapContent(payload.content)
+        : (payload.content as ReportContent),
     createdAt: payload.created_at,
     updatedAt: payload.updated_at,
   }
 }
 
+function mapMindMapContent(content: NotebookReportApiPayload["content"]): MindMapContent {
+  if (!isMindMapContentPayload(content)) {
+    return {
+      central_topic: "Mind map",
+      nodes: [],
+      relationships: [],
+    }
+  }
+
+  return {
+    central_topic: content.central_topic,
+    nodes: content.nodes.map(mapMindMapNode),
+    relationships: content.relationships ?? [],
+  }
+}
+
+function mapMindMapNode(node: MindMapNodeApiPayload) {
+  return {
+    id: node.id,
+    label: node.label,
+    type: node.type,
+    parentId: node.parentId ?? node.parent_id ?? null,
+    description: node.description ?? null,
+  }
+}
+
+function isMindMapContentPayload(
+  content: ReportContent | NotebookReportApiPayload["content"]
+): content is MindMapContentApiPayload {
+  return Boolean(
+    content &&
+      typeof content === "object" &&
+      "nodes" in content &&
+      Array.isArray(content.nodes)
+  )
+}
 export function mapNotebook(payload: NotebookApiPayload): Notebook {
   return {
     id: payload.id,
@@ -336,7 +379,7 @@ type NotebookChatHistoryMessage = {
     toolCallId?: string
     toolName?: string
     argsText?: string
-    result?: any
+    result?: unknown
   }[]
   sources?: {
     filename: string
@@ -372,9 +415,9 @@ export function useGenerateNotebookReportMutation(notebookId: string) {
   return useMutation<
     NotebookReport,
     Error,
-    { reportType: ReportType; additionalInstructions?: string }
+    { reportType: ReportType; additionalInstructions?: string; detailLevel?: string }
   >({
-    mutationFn: async ({ reportType, additionalInstructions }) => {
+    mutationFn: async ({ reportType, additionalInstructions, detailLevel }) => {
       const data = await apiFetch<NotebookReportApiPayload>(
         `/api/v1/notebooks/${notebookId}/reports`,
         {
@@ -382,6 +425,7 @@ export function useGenerateNotebookReportMutation(notebookId: string) {
           data: {
             report_type: reportType,
             additional_instructions: additionalInstructions,
+            detail_level: detailLevel,
           },
         }
       )

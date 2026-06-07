@@ -27,6 +27,7 @@ export function ChatPanel({ notebookId }: { notebookId: string }) {
           ? `${apiBaseUrl.replace(/\/$/, "")}/api/v1/notebooks/${notebookId}/chat`
           : `/api/v1/notebooks/${notebookId}/chat`,
         agentId: "notebook-chat",
+        fetch: window.fetch.bind(window),
       }),
     [apiBaseUrl, notebookId]
   );
