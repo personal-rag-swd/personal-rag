@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   ArrowLeftIcon,
   CheckCircle2Icon,
@@ -60,21 +60,22 @@ export function ReportsPanel({
 
   const textReports = reports ? reports.filter((r) => r.reportType !== "mindmap") : [];
 
-  // When opened with a pre-selected report (from StudioPanel), show it directly.
-  useEffect(() => {
-    if (open && initialReport) {
-      setViewingReport(initialReport);
-    }
-  }, [open, initialReport]);
+  const [prevOpen, setPrevOpen] = useState(open);
+  const [prevInitialReport, setPrevInitialReport] = useState(initialReport);
 
-  // Reset state every time the dialog is closed.
-  useEffect(() => {
+  if (open !== prevOpen || initialReport !== prevInitialReport) {
+    setPrevOpen(open);
+    setPrevInitialReport(initialReport);
+
     if (!open) {
       setSelectedType("custom");
       setInstructions("");
       setViewingReport(null);
+    } else if (initialReport && (initialReport !== prevInitialReport || open !== prevOpen)) {
+      setViewingReport(initialReport);
     }
-  }, [open]);
+  }
+
 
   const activeMeta = REPORT_TYPE_BY_ID[selectedType];
   const isCustom = selectedType === "custom";

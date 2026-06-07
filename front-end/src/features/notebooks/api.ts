@@ -12,6 +12,7 @@ import {
   type NotebookReport,
   type NotebookReportApiPayload,
   type MindMapContent,
+  type MindMapContentApiPayload,
   type MindMapNodeApiPayload,
   type ReportContent,
   type ReportType,
@@ -68,7 +69,7 @@ function mapMindMapNode(node: MindMapNodeApiPayload) {
 
 function isMindMapContentPayload(
   content: ReportContent | NotebookReportApiPayload["content"]
-): content is NotebookReportApiPayload["content"] & { nodes: MindMapNodeApiPayload[] } {
+): content is MindMapContentApiPayload {
   return Boolean(
     content &&
       typeof content === "object" &&
