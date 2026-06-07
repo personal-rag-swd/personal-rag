@@ -223,7 +223,7 @@ export function ReportsPanel({
           </Button>
 
           {/* Recent reports */}
-          {(isReportsLoading || (reports && reports.length > 0)) && (
+          {(isReportsLoading || textReports.length > 0) && (
             <section className="pt-2">
               <h3 className="px-1 mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Recent reports
@@ -234,7 +234,7 @@ export function ReportsPanel({
                 </div>
               ) : (
                 <div className="space-y-1.5">
-                  {reports!.map((r) => {
+                  {textReports.map((r) => {
                     const meta = REPORT_TYPE_BY_ID[r.reportType];
                     return (
                       <button

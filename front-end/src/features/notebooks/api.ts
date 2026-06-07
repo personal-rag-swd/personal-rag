@@ -379,7 +379,7 @@ type NotebookChatHistoryMessage = {
     toolCallId?: string
     toolName?: string
     argsText?: string
-    result?: any
+    result?: unknown
   }[]
   sources?: {
     filename: string
@@ -415,9 +415,9 @@ export function useGenerateNotebookReportMutation(notebookId: string) {
   return useMutation<
     NotebookReport,
     Error,
-    { reportType: ReportType; additionalInstructions?: string }
+    { reportType: ReportType; additionalInstructions?: string; detailLevel?: string }
   >({
-    mutationFn: async ({ reportType, additionalInstructions }) => {
+    mutationFn: async ({ reportType, additionalInstructions, detailLevel }) => {
       const data = await apiFetch<NotebookReportApiPayload>(
         `/api/v1/notebooks/${notebookId}/reports`,
         {
@@ -425,6 +425,7 @@ export function useGenerateNotebookReportMutation(notebookId: string) {
           data: {
             report_type: reportType,
             additional_instructions: additionalInstructions,
+            detail_level: detailLevel,
           },
         }
       )
