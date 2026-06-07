@@ -77,7 +77,6 @@ function isMindMapContentPayload(
       Array.isArray(content.nodes)
   )
 }
-
 export function mapNotebook(payload: NotebookApiPayload): Notebook {
   return {
     id: payload.id,
@@ -380,7 +379,7 @@ type NotebookChatHistoryMessage = {
     toolCallId?: string
     toolName?: string
     argsText?: string
-    result?: unknown
+    result?: any
   }[]
   sources?: {
     filename: string
@@ -416,9 +415,9 @@ export function useGenerateNotebookReportMutation(notebookId: string) {
   return useMutation<
     NotebookReport,
     Error,
-    { reportType: ReportType; additionalInstructions?: string; detailLevel?: string }
+    { reportType: ReportType; additionalInstructions?: string }
   >({
-    mutationFn: async ({ reportType, additionalInstructions, detailLevel }) => {
+    mutationFn: async ({ reportType, additionalInstructions }) => {
       const data = await apiFetch<NotebookReportApiPayload>(
         `/api/v1/notebooks/${notebookId}/reports`,
         {
@@ -426,7 +425,6 @@ export function useGenerateNotebookReportMutation(notebookId: string) {
           data: {
             report_type: reportType,
             additional_instructions: additionalInstructions,
-            detail_level: detailLevel,
           },
         }
       )
