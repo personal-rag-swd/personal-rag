@@ -238,7 +238,8 @@ export function useNotebookDocumentEvents(notebookId: string | undefined) {
 
     let hasConnected = false
     const source = new EventSource(
-      buildApiUrl(`/api/v1/notebooks/${notebookId}/documents/events`)
+      buildApiUrl(`/api/v1/notebooks/${notebookId}/documents/events`),
+      { withCredentials: true }
     )
 
     source.onopen = () => {
