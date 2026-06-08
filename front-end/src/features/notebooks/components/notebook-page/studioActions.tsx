@@ -1,76 +1,75 @@
-import type { LucideIcon } from "lucide-react";
+import type { LucideIcon } from "lucide-react"
 import {
   AudioLinesIcon,
   BarChart3Icon,
   BrainCircuitIcon,
   FileQuestionIcon,
-  ImagesIcon,
   LayoutPanelTopIcon,
-  Rows3Icon,
   SquareStackIcon,
   VideoIcon,
-} from "lucide-react";
+} from "lucide-react"
 
 export type StudioAction = {
-  id: string;
-  label: string;
-  description: string;
-  icon: LucideIcon;
-};
+  id: string
+  label: string
+  description: string
+  icon: LucideIcon
+  implemented: boolean
+}
 
-export const STUDIO_ACTIONS: StudioAction[] = [
-  {
-    id: "audio-overview",
-    label: "Audio Overview",
-    description: "Create a narrated summary.",
-    icon: AudioLinesIcon,
-  },
-  {
-    id: "slide-deck",
-    label: "Slide Deck",
-    description: "Turn notes into slides.",
-    icon: LayoutPanelTopIcon,
-  },
-  {
-    id: "video-overview",
-    label: "Video Overview",
-    description: "Draft a video outline.",
-    icon: VideoIcon,
-  },
+const ALL_STUDIO_ACTIONS: StudioAction[] = [
   {
     id: "mind-map",
     label: "Mind Map",
-    description: "Map source concepts.",
+    description: "Map concepts",
     icon: BrainCircuitIcon,
+    implemented: true,
   },
   {
     id: "reports",
     label: "Reports",
-    description: "Generate a report.",
+    description: "Data analysis",
     icon: BarChart3Icon,
+    implemented: true,
+  },
+  {
+    id: "audio-overview",
+    label: "Audio Overview",
+    description: "Narrated summary",
+    icon: AudioLinesIcon,
+    implemented: false,
+  },
+  {
+    id: "slide-deck",
+    label: "Slide Deck",
+    description: "Notes into slides",
+    icon: LayoutPanelTopIcon,
+    implemented: false,
+  },
+  {
+    id: "video-draft",
+    label: "Video Draft",
+    description: "Video outline",
+    icon: VideoIcon,
+    implemented: false,
   },
   {
     id: "flashcards",
     label: "Flashcards",
-    description: "Build review cards.",
+    description: "Review cards",
     icon: SquareStackIcon,
+    implemented: false,
   },
   {
     id: "quiz",
     label: "Quiz",
-    description: "Create practice questions.",
+    description: "Practice questions",
     icon: FileQuestionIcon,
+    implemented: false,
   },
-  {
-    id: "infographic",
-    label: "Infographic",
-    description: "Extract visual points.",
-    icon: ImagesIcon,
-  },
-  {
-    id: "data-table",
-    label: "Data Table",
-    description: "Structure key facts.",
-    icon: Rows3Icon,
-  },
-];
+]
+
+export const STUDIO_ACTIONS: StudioAction[] = [
+  ...ALL_STUDIO_ACTIONS.filter((a) => a.implemented),
+  ...ALL_STUDIO_ACTIONS.filter((a) => !a.implemented),
+]

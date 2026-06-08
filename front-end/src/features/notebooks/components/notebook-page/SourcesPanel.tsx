@@ -8,10 +8,17 @@ import {
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
   PlusIcon,
+  Search,
   Trash2Icon,
   UploadIcon,
 } from "lucide-react"
 import { toast } from "sonner"
+
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 
 import {
   AlertDialog,
@@ -41,7 +48,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Input } from "@/components/ui/input"
+
 import { Progress } from "@/components/ui/progress"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
@@ -160,12 +167,12 @@ export function SourcesPanel({
   const isUploading = uploadState === "uploading"
 
   return (
-    <div className={cn(
-      "flex h-full min-h-0 flex-col bg-card transition-all duration-300",
-      isCollapsed
-        ? "w-14 shrink-0 items-center gap-3 py-2"
-        : ""
-    )}>
+    <div
+      className={cn(
+        "flex h-full min-h-0 flex-col bg-card transition-all duration-300",
+        isCollapsed ? "w-14 shrink-0 items-center gap-3 py-2" : ""
+      )}
+    >
       {isCollapsed ? (
         <>
           <Tooltip>
@@ -206,7 +213,7 @@ export function SourcesPanel({
           </Tooltip>
 
           {documents.length > 0 && (
-            <ScrollArea className="w-full flex-1 min-h-0">
+            <ScrollArea className="min-h-0 w-full flex-1">
               <div className="flex flex-col items-center gap-2.5 px-2 pb-4">
                 {documents.map((document) => {
                   const status = getDocumentStatus(document.status)
@@ -218,9 +225,14 @@ export function SourcesPanel({
                       >
                         <FileTextIcon className="size-4" />
                       </TooltipTrigger>
-                      <TooltipContent side="right" className="max-w-xs break-all">
+                      <TooltipContent
+                        side="right"
+                        className="max-w-xs break-all"
+                      >
                         <div className="space-y-0.5">
-                          <p className="font-medium text-xs leading-tight">{document.filename}</p>
+                          <p className="text-xs leading-tight font-medium">
+                            {document.filename}
+                          </p>
                           <p className="text-[10px] leading-normal text-muted-foreground">
                             {formatBytes(document.size)} / {status.label}
                           </p>
@@ -251,7 +263,10 @@ export function SourcesPanel({
               className="my-2 w-full justify-start border-dashed"
             >
               {isUploading ? (
-                <Loader2Icon data-icon="inline-start" className="animate-spin" />
+                <Loader2Icon
+                  data-icon="inline-start"
+                  className="animate-spin"
+                />
               ) : (
                 <PlusIcon data-icon="inline-start" />
               )}
@@ -273,14 +288,22 @@ export function SourcesPanel({
             ) : null}
           </div>
 
-          <ScrollArea className="flex-1 min-h-0 w-full">
+          <ScrollArea className="min-h-0 w-full flex-1">
             <div className="px-3 pt-3">
-              <Input
-                placeholder="Search uploaded sources"
-                className="bg-muted/40 text-xs"
-                value={searchValue}
-                onChange={(e) => setSearchValue(e.target.value)}
-              />
+              <InputGroup className="w-full bg-muted/40">
+                <InputGroupAddon>
+                  <Search className="size-4" />
+                </InputGroupAddon>
+                <InputGroupInput
+                  placeholder="Search uploaded sources"
+                  className="text-xs"
+                  value={searchValue}
+                  onChange={(e) => setSearchValue(e.target.value)}
+                />
+                <InputGroupAddon align="inline-end" className="text-[10px] text-muted-foreground select-none">
+                  {filteredDocuments.length} {filteredDocuments.length === 1 ? "result" : "results"}
+                </InputGroupAddon>
+              </InputGroup>
             </div>
             {isLoading ? (
               <SourcesPlaceholder label="Loading sources..." />
@@ -458,9 +481,7 @@ function SourcesPlaceholder({
         </EmptyMedia>
         <EmptyTitle className="text-sm">{label}</EmptyTitle>
         {description ? (
-          <EmptyDescription className="text-xs">
-            {description}
-          </EmptyDescription>
+          <EmptyDescription className="text-xs">{description}</EmptyDescription>
         ) : null}
       </EmptyHeader>
     </Empty>

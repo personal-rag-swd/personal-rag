@@ -1,42 +1,19 @@
-import os
 from collections.abc import Generator
 from uuid import UUID
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, create_engine, select
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import Session, select
 
 from app.core.config import Settings, get_settings
 from app.core.security import create_access_token
 from app.dependencies import get_session
 from app.main import app
-from app.notebooks.models import NotebookDocument, NotebookDocumentChunk
+from app.notebooks.models import Notebook, NotebookDocument, NotebookDocumentChunk
 from app.users.models import User
 
-os.environ.setdefault("DATABASE_URL", "sqlite://")
-
-
-@pytest.fixture
-def settings() -> Settings:
-    return Settings(
-        database_url="sqlite://",
-        jwt_secret_key="test-secret-with-at-least-32-bytes",
-        jwt_algorithm="HS256",
-    )
-
-
-@pytest.fixture
-def session() -> Generator[Session, None, None]:
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    SQLModel.metadata.create_all(engine)
-    with Session(engine) as session:
-        yield session
 
 
 @pytest.fixture
@@ -232,11 +209,11 @@ def test_list_notebook_documents_is_scoped_to_owner(
 def test_notebook_document_events_requires_auth(
     client: TestClient,
 ) -> None:
-    response = client.get(f"/api/v1/notebooks/{uuid4()}/documents/events")
+    response = client.get("/api/v1/notebooks/events")
     assert response.status_code == 401
 
 
-def test_notebook_document_events_is_scoped_to_owner(
+def test_notebook_document_events_scoping(
     client: TestClient,
     settings: Settings,
     session: Session,
@@ -247,17 +224,41 @@ def test_notebook_document_events_is_scoped_to_owner(
     session.add(other_user)
     session.commit()
 
-    notebook = client.post(
+    owner_notebook = client.post(
         "/api/v1/notebooks/",
         json={"name": "Private", "description": "", "tags": []},
         headers=auth_headers(owner, settings),
     ).json()
 
-    response = client.get(
-        f"/api/v1/notebooks/{notebook['id']}/documents/events",
+    owner_doc = NotebookDocument(
+        notebook_id=UUID(owner_notebook["id"]),
+        user_id=owner.id,
+        s3_bucket="test-bucket",
+        s3_key=f"users/{owner.id}/doc.pdf",
+        filename="doc.pdf",
+        content_type="application/pdf",
+        size=123,
+        status="indexed",
+    )
+    session.add(owner_doc)
+    session.commit()
+
+    # Request events as owner
+    owner_response = client.get(
+        "/api/v1/notebooks/events",
+        headers=auth_headers(owner, settings),
+    )
+    assert owner_response.status_code == 200
+    assert "doc.pdf" in owner_response.text
+    assert str(owner_notebook["id"]) in owner_response.text
+
+    # Request events as other_user
+    other_response = client.get(
+        "/api/v1/notebooks/events",
         headers=auth_headers(other_user, settings),
     )
-    assert response.status_code == 404
+    assert other_response.status_code == 200
+    assert "doc.pdf" not in other_response.text
 
 
 def test_delete_notebook_document_removes_source_and_chunks(
@@ -292,8 +293,6 @@ def test_delete_notebook_document_removes_source_and_chunks(
 
     chunk = NotebookDocumentChunk(
         document_id=document.id,
-        notebook_id=document.notebook_id,
-        user_id=user.id,
         chunk_index=0,
         content="Notebook source text",
         chunk_metadata={"source": document.s3_key},
@@ -404,14 +403,41 @@ def _add_indexed_chunk(session: Session, notebook_id: UUID, user_id: UUID) -> No
         NotebookDocumentChunk(
             id=uuid4(),
             document_id=doc.id,
-            notebook_id=notebook_id,
-            user_id=user_id,
             chunk_index=0,
             content="Indexed source content about the project.",
             embedding=[0.0] * 1536,
         )
     )
     session.commit()
+
+
+def test_notebook_document_status_is_constrained(session: Session) -> None:
+    user = make_user("doc-status@example.com")
+    session.add(user)
+    session.commit()
+
+    notebook = Notebook(
+        user_id=user.id,
+        name="Status Notebook",
+        description="",
+        tags=[],
+    )
+    session.add(notebook)
+    session.commit()
+
+    session.add(
+        NotebookDocument(
+            notebook_id=notebook.id,
+            user_id=user.id,
+            s3_bucket="bucket",
+            s3_key=f"status-{uuid4()}",
+            filename="invalid-status.txt",
+            status="not-a-real-status",
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
 
 
 def test_generate_report_requires_configured_provider(

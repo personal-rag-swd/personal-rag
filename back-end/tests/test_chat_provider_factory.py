@@ -1,6 +1,5 @@
 from app.core.config import Settings
-from app.notebooks.agent.factory import resolve_chat_provider
-from app.notebooks.agent.providers import GeminiChatProvider, OpenAICompatibleChatProvider, OpenRouterChatProvider
+from app.notebooks.agent.factory import resolve_chat_provider, GeminiChatProvider, OpenAICompatibleChatProvider, OpenRouterChatProvider
 
 
 def test_resolve_chat_provider_openrouter(monkeypatch) -> None:

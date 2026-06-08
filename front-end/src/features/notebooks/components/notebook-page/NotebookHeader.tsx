@@ -1,20 +1,20 @@
-import {
-  ArrowLeftIcon,
-  PencilIcon,
-  Trash2Icon,
-} from "lucide-react";
-import { Link } from "react-router-dom";
+import { PencilIcon, Trash2Icon } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { AviaryLogo } from "@/components/branding/aviary-logo"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 type NotebookHeaderProps = {
-  name: string;
-  tags: string[];
-  onEditClick: () => void;
-  onDeleteClick: () => void;
-};
+  name: string
+  tags: string[]
+  onEditClick: () => void
+  onDeleteClick: () => void
+}
 
 export function NotebookHeader({
   name,
@@ -23,18 +23,12 @@ export function NotebookHeader({
   onDeleteClick,
 }: NotebookHeaderProps) {
   return (
-    <div className="flex min-h-12 shrink-0 items-center gap-2 border-b bg-background px-3 md:px-4">
-      <Link
-        to="/dashboard"
-        className="inline-flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-      >
-        <ArrowLeftIcon className="size-3" />
-        <span>Notebooks</span>
-      </Link>
+    <div className="flex min-h-12 shrink-0 items-center gap-3 border-b bg-background px-3 md:px-4">
+      <AviaryLogo className="size-18 shrink-0 object-contain" />
 
       <div className="flex min-w-0 flex-1 items-center gap-3">
         <div className="min-w-0">
-          <h1 className="truncate font-heading text-base font-medium leading-tight text-foreground">
+          <h1 className="truncate font-heading text-base leading-tight font-medium text-foreground">
             {name}
           </h1>
         </div>
@@ -88,5 +82,5 @@ export function NotebookHeader({
         </Tooltip>
       </div>
     </div>
-  );
+  )
 }

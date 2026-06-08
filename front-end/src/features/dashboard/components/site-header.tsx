@@ -1,5 +1,5 @@
-import { Separator } from "@/components/ui/separator";
-import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Separator } from "@/components/ui/separator"
+import { SidebarTrigger } from "@/components/ui/sidebar"
 
 export function SiteHeader() {
   return (
@@ -10,10 +10,12 @@ export function SiteHeader() {
           orientation="vertical"
           className="mx-2 h-4 data-vertical:self-auto"
         />
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm text-muted-foreground font-medium shrink-0">Workspace</span>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="shrink-0 text-sm font-medium text-muted-foreground">
+            Workspace
+          </span>
         </div>
       </div>
     </header>
-  );
+  )
 }

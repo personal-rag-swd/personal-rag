@@ -32,6 +32,22 @@ services:
       timeout: 5s
       retries: 20
 
+  rabbitmq:
+    image: rabbitmq:4-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-guest}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   backend:
     build: ./back-end
     command: >
@@ -48,6 +64,7 @@ services:
       OTP_MAX_ATTEMPTS: ${OTP_MAX_ATTEMPTS:-5}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-noreply@example.com}
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
       CHAT_PROVIDER: ${CHAT_PROVIDER:-openrouter}
       CHAT_API_KEY: ${CHAT_API_KEY:-}
       CHAT_PROVIDER_URL: ${CHAT_PROVIDER_URL:-}
@@ -66,6 +83,17 @@ services:
       S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-http://localhost:9000}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      RABBITMQ_CONSUMER_ENABLED: ${RABBITMQ_CONSUMER_ENABLED:-true}
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
+      RABBITMQ_EXCHANGE_NAME: ${RABBITMQ_EXCHANGE_NAME:-minio-events}
+      RABBITMQ_EXCHANGE_TYPE: ${RABBITMQ_EXCHANGE_TYPE:-direct}
+      RABBITMQ_ROUTING_KEY: ${RABBITMQ_ROUTING_KEY:-minio.object.created}
+      RABBITMQ_QUEUE_NAME: ${RABBITMQ_QUEUE_NAME:-notebook-document-ingestion}
+      RABBITMQ_DEAD_LETTER_EXCHANGE_NAME: ${RABBITMQ_DEAD_LETTER_EXCHANGE_NAME:-minio-events-dlx}
+      RABBITMQ_DEAD_LETTER_QUEUE_NAME: ${RABBITMQ_DEAD_LETTER_QUEUE_NAME:-notebook-document-ingestion-dead-letter}
+      RABBITMQ_DEAD_LETTER_ROUTING_KEY: ${RABBITMQ_DEAD_LETTER_ROUTING_KEY:-notebook-document-ingestion.dead-letter}
+      RABBITMQ_PREFETCH_COUNT: ${RABBITMQ_PREFETCH_COUNT:-1}
+      RABBITMQ_RECONNECT_DELAY_SECONDS: ${RABBITMQ_RECONNECT_DELAY_SECONDS:-5}
       LOGFIRE_TOKEN: ${LOGFIRE_TOKEN:-}
     volumes:
       - ./back-end/app:/app/app
@@ -77,6 +105,8 @@ services:
       postgres:
         condition: service_healthy
       minio:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/ping')\""]
@@ -91,21 +121,25 @@ services:
       S3_BUCKET: ${S3_BUCKET:-personal-rag-bucket}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-guest}
     entrypoint: >
       /bin/sh -c "
       set -e;
       until mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; do sleep 2; done;
       mc mb --ignore-existing local/$${S3_BUCKET};
-      until mc admin config set local notify_webhook:backend endpoint=http://backend:8000/api/v1/file/callback; do sleep 2; done;
+      until mc admin config set local notify_amqp:backend url=\"amqp://$${RABBITMQ_DEFAULT_USER}:$${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672\" exchange=\"${RABBITMQ_EXCHANGE_NAME:-minio-events}\" exchange_type=\"${RABBITMQ_EXCHANGE_TYPE:-direct}\" routing_key=\"${RABBITMQ_ROUTING_KEY:-minio.object.created}\" durable=\"on\"; do sleep 2; done;
       mc admin service restart --json --disable-pager local;
       until mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; do sleep 2; done;
-      mc event rm --force local/$${S3_BUCKET} arn:minio:sqs::backend:webhook --event put || true;
-      mc event remove --force local/$${S3_BUCKET} arn:minio:sqs::backend:webhook --event put || true;
-      until mc event add local/$${S3_BUCKET} arn:minio:sqs::backend:webhook --event put; do sleep 2; done;
+      mc event rm --force local/$${S3_BUCKET} arn:minio:sqs::backend:amqp --event put || true;
+      mc event remove --force local/$${S3_BUCKET} arn:minio:sqs::backend:amqp --event put || true;
+      until mc event add local/$${S3_BUCKET} arn:minio:sqs::backend:amqp --event put; do sleep 2; done;
       mc event ls local/$${S3_BUCKET};
       "
     depends_on:
       minio:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
       backend:
         condition: service_healthy
@@ -115,7 +149,7 @@ services:
     working_dir: /app
     command: sh -c "npm ci && npm run dev -- --host 0.0.0.0 --port 5173"
     environment:
-      VITE_PROXY_TARGET: ${VITE_PROXY_TARGET:-http://backend:8000}
+      VITE_PROXY_TARGET: http://backend:8000
       VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
     volumes:
       - ./front-end:/app
@@ -129,4 +163,5 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  rabbitmq_data:
   frontend_node_modules:

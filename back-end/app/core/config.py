@@ -3,6 +3,8 @@ from functools import lru_cache
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+REQUIRED_EMBEDDING_DIMENSION = 1536
+
 
 class Settings(BaseSettings):
     database_url: str = ""
@@ -14,6 +16,7 @@ class Settings(BaseSettings):
     otp_max_attempts: int = 5
     resend_api_key: str = ""
     resend_from_email: str = "noreply@example.com"
+    log_level: str = "INFO"
     
     # Centralized Chat / LLM settings
     chat_provider: str = "openrouter"
@@ -30,9 +33,21 @@ class Settings(BaseSettings):
     embedding_batch_size: int = 16
     embedding_delay_seconds: float = 0.5
     embedding_max_retries: int = 5
-    file_ingestion_worker_enabled: bool = False
-    file_ingestion_worker_interval_seconds: float = 10.0
-    file_ingestion_worker_batch_size: int = 20
+    notebook_retrieval_top_k: int = 6
+    notebook_chunk_size: int = 1000
+    notebook_chunk_overlap: int = 200
+    file_ingestion_processing_timeout_minutes: int = 15
+    rabbitmq_consumer_enabled: bool = False
+    rabbitmq_url: str = "amqp://guest:guest@rabbitmq:5672/"
+    rabbitmq_exchange_name: str = "minio-events"
+    rabbitmq_exchange_type: str = "direct"
+    rabbitmq_routing_key: str = "minio.object.created"
+    rabbitmq_queue_name: str = "notebook-document-ingestion"
+    rabbitmq_dead_letter_exchange_name: str | None = "minio-events-dlx"
+    rabbitmq_dead_letter_queue_name: str | None = "notebook-document-ingestion-dead-letter"
+    rabbitmq_dead_letter_routing_key: str = "notebook-document-ingestion.dead-letter"
+    rabbitmq_prefetch_count: int = 1
+    rabbitmq_reconnect_delay_seconds: float = 5.0
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173", "http://localhost:8000"]
 
     @field_validator("cors_origins", mode="before")
@@ -83,3 +98,12 @@ def get_database_url() -> str:
     if database_url.startswith("postgresql://"):
         return database_url.replace("postgresql://", "postgresql+psycopg://", 1)
     return database_url
+
+
+def validate_rag_embedding_dimension(settings: Settings) -> None:
+    if settings.embedding_dimension != REQUIRED_EMBEDDING_DIMENSION:
+        raise RuntimeError(
+            "Invalid EMBEDDING_DIMENSION. This deployment uses a fixed "
+            f"{REQUIRED_EMBEDDING_DIMENSION}-dimension pgvector schema, but got "
+            f"{settings.embedding_dimension}. Set EMBEDDING_DIMENSION={REQUIRED_EMBEDDING_DIMENSION}."
+        )

@@ -1,14 +1,11 @@
-import os
 from collections.abc import Generator
 from uuid import uuid4
-
-os.environ.setdefault("DATABASE_URL", "sqlite://")
 
 import jwt
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, create_engine
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import Session
 
 from app.core.config import Settings, get_settings
 from app.core.security import create_access_token, hash_password
@@ -20,19 +17,11 @@ from app.users.models import User
 
 @pytest.fixture
 def settings() -> Settings:
-    return Settings(database_url="sqlite://", jwt_secret_key="test-secret-with-at-least-32-bytes", jwt_algorithm="HS256")
-
-
-@pytest.fixture
-def session() -> Generator[Session, None, None]:
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
+    return Settings(
+        database_url="sqlite://",
+        jwt_secret_key="test-secret-with-at-least-32-bytes",
+        jwt_algorithm="HS256",
     )
-    SQLModel.metadata.create_all(engine)
-    with Session(engine) as session:
-        yield session
 
 
 @pytest.fixture
@@ -81,6 +70,13 @@ def test_new_users_default_to_user_role() -> None:
     user = User(email="new@example.com", hashed_password="hashed-password")
 
     assert user.role == "user"
+
+
+def test_user_role_is_constrained(session: Session) -> None:
+    session.add(User(email="bad-role@example.com", hashed_password="hashed-password", role="owner"))
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
 
 
 def test_current_user_response_includes_role(client: TestClient) -> None:

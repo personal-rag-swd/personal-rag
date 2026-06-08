@@ -18,17 +18,12 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    default = (
-        sa.text("'[]'::jsonb")
-        if op.get_bind().dialect.name == "postgresql"
-        else sa.text("'[]'")
-    )
     op.add_column(
         "notebook",
         sa.Column(
             "chat_history",
-            postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"),
-            server_default=default,
+            postgresql.JSONB(astext_type=sa.Text()),
+            server_default=sa.text("'[]'::jsonb"),
             nullable=False,
         ),
     )

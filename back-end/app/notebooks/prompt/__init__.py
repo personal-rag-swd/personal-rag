@@ -6,6 +6,9 @@ from app.notebooks.prompt.report import (
     BLOG_SYSTEM,
     CUSTOM_SYSTEM_BASE,
     MINDMAP_SYSTEM,
+    build_report_user_message,
+    build_custom_report_user_message,
+    build_mindmap_user_message,
 )
 
 __all__ = [
@@ -16,4 +19,9 @@ __all__ = [
     "BLOG_SYSTEM",
     "CUSTOM_SYSTEM_BASE",
     "MINDMAP_SYSTEM",
+    "build_report_user_message",
+    "build_custom_report_user_message",
+    "build_mindmap_user_message",
 ]
+
+

@@ -1,11 +1,11 @@
 # Personal RAG
 
-Personal RAG is a two-part application with a FastAPI backend and a Vite + React frontend. The backend provides authentication, user management, notebooks, and file services (presigned URLs and upload callbacks). The frontend delivers the application UI and client-side workflows.
+Personal RAG is a two-part application with a FastAPI backend and a Vite + React frontend. The backend provides authentication, user management, notebooks, and file services (presigned URLs plus RabbitMQ-driven notebook ingestion). The frontend delivers the application UI and client-side workflows.
 
 ## What This App Includes
 
 - FastAPI API with feature-oriented modules (`auth`, `users`, `file`, `notebooks`)
-- File upload flow with presigned URLs and callback handling
+- File upload flow with presigned URLs, MinIO object notifications, and in-app ingestion
 - React 19 frontend with Tailwind CSS and shadcn/ui components
 - Local dev stack with Postgres + pgvector and MinIO
 
@@ -14,7 +14,7 @@ Personal RAG is a two-part application with a FastAPI backend and a Vite + React
 - Backend API lives under `back-end/app/` and exposes routes under `/api/v1`
 - Scalar API docs are available at `GET /docs`
 - Frontend lives under `front-end/` and talks to the API via `VITE_API_URL`
-- Object storage uses MinIO locally; upload callbacks hit `/api/v1/file/callback`
+- Object storage uses MinIO locally; `ObjectCreated` events are forwarded to RabbitMQ and consumed inside the FastAPI app
 
 ## Repository Structure
 
@@ -24,7 +24,7 @@ Personal RAG is a two-part application with a FastAPI backend and a Vite + React
 │   ├── app/                # API application code
 │   │   ├── auth/           # Authentication flows
 │   │   ├── users/          # User management
-│   │   ├── file/           # File upload + callbacks
+│   │   ├── file/           # File upload endpoints
 │   │   ├── notebooks/      # Notebook endpoints
 │   │   ├── core/           # Settings, DB, security
 │   │   ├── middleware/     # Request middleware
@@ -89,7 +89,7 @@ Service URLs:
 The stack includes:
 
 - Postgres with pgvector
-- MinIO + `mc` bootstrap (bucket + webhook event configuration)
+- MinIO + RabbitMQ + `mc` bootstrap (bucket + AMQP event configuration)
 - FastAPI backend in dev mode
 - Vite frontend dev server
 

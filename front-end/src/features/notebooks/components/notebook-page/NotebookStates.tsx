@@ -1,14 +1,9 @@
-import { AlertCircleIcon, ArrowLeftIcon, Loader2Icon } from "lucide-react";
-import { Link } from "react-router-dom";
+import { AlertCircleIcon, ArrowLeftIcon, Loader2Icon } from "lucide-react"
+import { Link } from "react-router-dom"
 
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 
 export function NotebookSkeleton() {
   return (
@@ -42,7 +37,7 @@ export function NotebookSkeleton() {
         </Card>
       </div>
     </div>
-  );
+  )
 }
 
 export function NotebookError({ message }: { message: string }) {
@@ -66,5 +61,5 @@ export function NotebookError({ message }: { message: string }) {
         </CardContent>
       </Card>
     </div>
-  );
+  )
 }

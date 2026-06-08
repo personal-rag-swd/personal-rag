@@ -1,8 +1,6 @@
 import os
 import uuid
 import logging
-import urllib.parse
-from typing import Any
 
 from botocore.exceptions import ClientError
 from fastapi import HTTPException, status
@@ -11,9 +9,9 @@ from sqlmodel import Session
 from app.core.config import Settings
 from app.core.s3 import get_s3_client
 from app.users.models import User
-from app.file.schemas import PresignedUrlRequest, PresignedUrlResponse, FileCallbackPayload
+from app.file.schemas import PresignedUrlRequest, PresignedUrlResponse
 from app.notebooks.service import get_notebook
-from app.notebooks.tools import mark_document_uploaded_and_get_id, register_pending_notebook_document
+from app.notebooks.tools import register_pending_notebook_document
 
 logger = logging.getLogger(__name__)
 
@@ -103,56 +101,3 @@ def generate_presigned_url_service(
         )
 
     return PresignedUrlResponse(url=presigned_url, key=s3_key)
-
-
-_SENSITIVE_HEADERS = {"authorization", "cookie", "proxy-authorization", "x-api-key"}
-
-
-def handle_file_callback_service(
-    payload: FileCallbackPayload,
-    headers: dict[str, str],
-    query_params: dict[str, str],
-    session: Session,
-) -> dict[str, Any]:
-    """Processes an incoming S3-compatible webhook callback and returns parsed event details."""
-    safe_headers = {k: v for k, v in headers.items() if k.lower() not in _SENSITIVE_HEADERS}
-
-    logger.info(
-        "S3 callback received | query=%s | headers=%s | payload=%s",
-        query_params,
-        safe_headers,
-        payload.model_dump(),
-    )
-
-    event_name, bucket, key, size = payload.get_parsed_details()
-
-    if key and isinstance(key, str):
-        key = urllib.parse.unquote(key)
-        if bucket and key.startswith(f"{bucket}/"):
-            key = key[len(bucket) + 1:]
-
-    if key or bucket:
-        logger.info(
-            "S3 upload event | event=%s | bucket=%s | key=%s | size=%s",
-            event_name, bucket, key, size,
-        )
-
-    document_id = mark_document_uploaded_and_get_id(
-        session,
-        bucket=bucket,
-        key=key,
-        size=size,
-        event_name=event_name,
-    )
-
-    return {
-        "status": "success",
-        "message": "Callback processed successfully",
-        "details": {
-            "key": key,
-            "bucket": bucket,
-            "size": size,
-            "eventName": event_name,
-            "document_id": str(document_id) if document_id else None,
-        },
-    }

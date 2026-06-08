@@ -1,13 +1,9 @@
-import os
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 
-os.environ.setdefault("DATABASE_URL", "sqlite://")
-
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, create_engine, select
+from sqlmodel import Session, select
 
 from app.auth.models import RefreshToken
 from app.auth.service import hash_refresh_token
@@ -16,6 +12,7 @@ from app.core.security import hash_password
 from app.dependencies import get_session
 from app.main import app
 from app.users.models import User
+
 
 
 @pytest.fixture
@@ -27,18 +24,6 @@ def settings() -> Settings:
         access_token_expire_minutes=30,
         refresh_token_expire_days=30,
     )
-
-
-@pytest.fixture
-def session() -> Generator[Session, None, None]:
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    SQLModel.metadata.create_all(engine)
-    with Session(engine) as session:
-        yield session
 
 
 @pytest.fixture

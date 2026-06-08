@@ -1,11 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
+import { create } from "zustand"
 import type { ThreadMessage } from "@assistant-ui/core"
 import { apiFetch } from "@/lib/api-client"
 import {
   type Notebook,
   type NotebookApiPayload,
-  type NotebookPopulateApiPayload,
   type NotebookDocument,
   type NotebookDocumentApiPayload,
   type NotebookDocumentEvent,
@@ -13,8 +13,8 @@ import {
   type NotebookReportApiPayload,
   type MindMapContent,
   type MindMapContentApiPayload,
+  type MindMapNode,
   type MindMapNodeApiPayload,
-  type ReportContent,
   type ReportType,
 } from "./types"
 
@@ -28,28 +28,48 @@ function buildApiUrl(path: string): string {
 }
 
 function mapNotebookReport(payload: NotebookReportApiPayload): NotebookReport {
-  return {
+  const base = {
     id: payload.id,
     notebookId: payload.notebook_id,
-    reportType: payload.report_type,
-    content:
-      payload.report_type === "mindmap"
-        ? mapMindMapContent(payload.content)
-        : (payload.content as ReportContent),
     createdAt: payload.created_at,
     updatedAt: payload.updated_at,
   }
+
+  switch (payload.report_type) {
+    case "mindmap":
+      return {
+        ...base,
+        reportType: "mindmap",
+        content: mapMindMapContent(payload.content),
+      }
+    case "briefing":
+      return {
+        ...base,
+        reportType: "briefing",
+        content: payload.content,
+      }
+    case "study_guide":
+      return {
+        ...base,
+        reportType: "study_guide",
+        content: payload.content,
+      }
+    case "blog":
+      return {
+        ...base,
+        reportType: "blog",
+        content: payload.content,
+      }
+    case "custom":
+      return {
+        ...base,
+        reportType: "custom",
+        content: payload.content,
+      }
+  }
 }
 
-function mapMindMapContent(content: NotebookReportApiPayload["content"]): MindMapContent {
-  if (!isMindMapContentPayload(content)) {
-    return {
-      central_topic: "Mind map",
-      nodes: [],
-      relationships: [],
-    }
-  }
-
+function mapMindMapContent(content: MindMapContentApiPayload): MindMapContent {
   return {
     central_topic: content.central_topic,
     nodes: content.nodes.map(mapMindMapNode),
@@ -57,7 +77,7 @@ function mapMindMapContent(content: NotebookReportApiPayload["content"]): MindMa
   }
 }
 
-function mapMindMapNode(node: MindMapNodeApiPayload) {
+function mapMindMapNode(node: MindMapNodeApiPayload): MindMapNode {
   return {
     id: node.id,
     label: node.label,
@@ -65,17 +85,6 @@ function mapMindMapNode(node: MindMapNodeApiPayload) {
     parentId: node.parentId ?? node.parent_id ?? null,
     description: node.description ?? null,
   }
-}
-
-function isMindMapContentPayload(
-  content: ReportContent | NotebookReportApiPayload["content"]
-): content is MindMapContentApiPayload {
-  return Boolean(
-    content &&
-      typeof content === "object" &&
-      "nodes" in content &&
-      Array.isArray(content.nodes)
-  )
 }
 export function mapNotebook(payload: NotebookApiPayload): Notebook {
   return {
@@ -85,18 +94,6 @@ export function mapNotebook(payload: NotebookApiPayload): Notebook {
     createdAt: payload.created_at,
     lastActiveAt: payload.last_active_at,
     tags: payload.tags,
-  }
-}
-
-export async function populateNotebook(
-  notebookId: string
-): Promise<{ documentCount: number; queryCount: number }> {
-  const data = await apiFetch<NotebookPopulateApiPayload>(
-    `/api/v1/notebooks/${notebookId}/populate`
-  )
-  return {
-    documentCount: data.document_count,
-    queryCount: data.query_count,
   }
 }
 
@@ -214,11 +211,101 @@ export type NotebookDocumentEventsHealth =
   | "reconnecting"
   | "failed"
 
+let eventSource: EventSource | null = null
+let refCount = 0
+const listeners = new Set<(event: MessageEvent) => void>()
+let disconnectTimeout: ReturnType<typeof setTimeout> | null = null
+
+export const useNotebookEventsStore = create<{
+  health: NotebookDocumentEventsHealth
+}>(() => ({
+  health: "idle",
+}))
+
+function connect() {
+  if (eventSource || typeof EventSource === "undefined") {
+    return
+  }
+
+  if (disconnectTimeout) {
+    clearTimeout(disconnectTimeout)
+    disconnectTimeout = null
+  }
+
+  useNotebookEventsStore.setState({ health: "connected" })
+
+  const url = buildApiUrl("/api/v1/notebooks/events")
+  const s = new EventSource(url, { withCredentials: true })
+  eventSource = s
+
+  let hasConnected = false
+
+  s.onopen = () => {
+    hasConnected = true
+    useNotebookEventsStore.setState({ health: "connected" })
+    console.info("[notebook-events] connected to centralized event source")
+  }
+
+  s.onmessage = (event) => {
+    listeners.forEach((listener) => listener(event))
+  }
+
+  s.onerror = () => {
+    const currentHealth = hasConnected ? "reconnecting" : "failed"
+    useNotebookEventsStore.setState({ health: currentHealth })
+    console.warn(
+      `[notebook-events] centralized event source error: ${currentHealth}`
+    )
+  }
+}
+
+function disconnect() {
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
+    useNotebookEventsStore.setState({ health: "idle" })
+    console.info("[notebook-events] disconnected centralized event source")
+  }
+}
+
+export function subscribeToNotebookEvents(
+  listener: (event: MessageEvent) => void
+): () => void {
+  listeners.add(listener)
+  refCount++
+
+  if (refCount === 1) {
+    connect()
+  }
+
+  return () => {
+    listeners.delete(listener)
+    refCount--
+
+    if (refCount === 0) {
+      if (disconnectTimeout) {
+        clearTimeout(disconnectTimeout)
+      }
+      if (typeof window !== "undefined") {
+        disconnectTimeout = setTimeout(() => {
+          if (refCount === 0) {
+            disconnect()
+          }
+        }, 2000)
+      } else {
+        disconnect()
+      }
+    }
+  }
+}
+
 export function useNotebookDocumentEvents(notebookId: string | undefined) {
   const queryClient = useQueryClient()
-  const [health, setHealth] = useState<NotebookDocumentEventsHealth>("idle")
+  const health = useNotebookEventsStore((state) => state.health)
   const [isVisible, setIsVisible] = useState(
-    typeof document === "undefined" ? true : document.visibilityState === "visible"
+    typeof document === "undefined"
+      ? true
+      : document.visibilityState === "visible"
   )
 
   useEffect(() => {
@@ -236,46 +323,36 @@ export function useNotebookDocumentEvents(notebookId: string | undefined) {
       return
     }
 
-    let hasConnected = false
-    const source = new EventSource(
-      buildApiUrl(`/api/v1/notebooks/${notebookId}/documents/events`),
-      { withCredentials: true }
-    )
-
-    source.onopen = () => {
-      hasConnected = true
-      setHealth("connected")
-      console.info(
-        `[notebook-doc-events] connected notebook=${notebookId}`
-      )
-    }
-
-    source.onmessage = (event) => {
+    const handleMessage = (event: MessageEvent) => {
       try {
-        const payload = JSON.parse(event.data) as NotebookDocumentEvent
+        const payload: NotebookDocumentEvent = JSON.parse(event.data)
         if (payload.type === "snapshot") {
-          queryClient.setQueryData(
-            ["notebooks", notebookId, "documents"],
-            payload.documents.map(mapNotebookDocument)
-          )
+          if (payload.notebook_id === notebookId) {
+            queryClient.setQueryData(
+              ["notebooks", notebookId, "documents"],
+              payload.documents.map(mapNotebookDocument)
+            )
+          }
           return
         }
         if (payload.type === "document_update") {
-          queryClient.setQueryData<NotebookDocument[]>(
-            ["notebooks", notebookId, "documents"],
-            (current = []) => {
-              const nextDocument = mapNotebookDocument(payload.document)
-              const existingIndex = current.findIndex(
-                (document) => document.id === nextDocument.id
-              )
-              if (existingIndex === -1) {
-                return [nextDocument, ...current]
+          if (payload.notebook_id === notebookId) {
+            queryClient.setQueryData<NotebookDocument[]>(
+              ["notebooks", notebookId, "documents"],
+              (current = []) => {
+                const nextDocument = mapNotebookDocument(payload.document)
+                const existingIndex = current.findIndex(
+                  (document) => document.id === nextDocument.id
+                )
+                if (existingIndex === -1) {
+                  return [nextDocument, ...current]
+                }
+                const next = [...current]
+                next[existingIndex] = nextDocument
+                return next
               }
-              const next = [...current]
-              next[existingIndex] = nextDocument
-              return next
-            }
-          )
+            )
+          }
         }
       } catch (error) {
         console.warn(
@@ -285,18 +362,9 @@ export function useNotebookDocumentEvents(notebookId: string | undefined) {
       }
     }
 
-    source.onerror = () => {
-      setHealth(hasConnected ? "reconnecting" : "failed")
-      console.warn(
-        `[notebook-doc-events] ${hasConnected ? "reconnecting" : "failed"} notebook=${notebookId}`
-      )
-    }
-
+    const unsubscribe = subscribeToNotebookEvents(handleMessage)
     return () => {
-      source.close()
-      console.info(
-        `[notebook-doc-events] disconnected notebook=${notebookId}`
-      )
+      unsubscribe()
     }
   }, [isVisible, notebookId, queryClient])
 
@@ -416,7 +484,11 @@ export function useGenerateNotebookReportMutation(notebookId: string) {
   return useMutation<
     NotebookReport,
     Error,
-    { reportType: ReportType; additionalInstructions?: string; detailLevel?: string }
+    {
+      reportType: ReportType
+      additionalInstructions?: string
+      detailLevel?: string
+    }
   >({
     mutationFn: async ({ reportType, additionalInstructions, detailLevel }) => {
       const data = await apiFetch<NotebookReportApiPayload>(
@@ -477,7 +549,7 @@ export async function fetchNotebookChatHistory(
                 }
               })(),
               result: part.result,
-              status: { type: "complete" as const }
+              status: { type: "complete" as const },
             }
           }
           return { type: "text" as const, text: part.content ?? "" }

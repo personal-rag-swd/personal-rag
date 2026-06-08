@@ -1,9 +1,10 @@
-import * as React from "react";
+import * as React from "react"
 
-import { NavMain } from "./nav-main";
-import { NavNotebooks } from "./nav-notebooks";
-import { NavSecondary } from "./nav-secondary";
-import { NavUser } from "./nav-user";
+import { AviaryLogo } from "@/components/branding/aviary-logo"
+import { NavMain } from "./nav-main"
+import { NavNotebooks } from "./nav-notebooks"
+import { NavSecondary } from "./nav-secondary"
+import { NavUser } from "./nav-user"
 import {
   Sidebar,
   SidebarContent,
@@ -12,15 +13,14 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-} from "@/components/ui/sidebar";
+} from "@/components/ui/sidebar"
 import {
   LayoutDashboardIcon,
   ChartBarIcon,
   Settings2Icon,
   CircleHelpIcon,
   SearchIcon,
-  CommandIcon,
-} from "lucide-react";
+} from "lucide-react"
 
 const data = {
   user: {
@@ -57,7 +57,7 @@ const data = {
       icon: <SearchIcon />,
     },
   ],
-};
+}
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   return (
@@ -69,8 +69,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               className="data-[slot=sidebar-menu-button]:p-1.5!"
               render={<a href="#" />}
             >
-              <CommandIcon className="size-5!" />
-              <span className="text-base font-semibold">Personal RAG</span>
+              <AviaryLogo className="h-14 w-14 shrink-0 object-contain" />
+              <span className="text-base font-semibold">Aviary</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -84,5 +84,5 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <NavUser user={data.user} />
       </SidebarFooter>
     </Sidebar>
-  );
+  )
 }

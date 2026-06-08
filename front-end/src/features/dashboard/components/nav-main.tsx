@@ -1,21 +1,21 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/ui/button"
 import {
   SidebarGroup,
   SidebarGroupContent,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-} from "@/components/ui/sidebar";
-import { CirclePlusIcon, MailIcon } from "lucide-react";
+} from "@/components/ui/sidebar"
+import { CirclePlusIcon, MailIcon } from "lucide-react"
 
 export function NavMain({
   items,
 }: {
   items: {
-    title: string;
-    url: string;
-    icon?: React.ReactNode;
-  }[];
+    title: string
+    url: string
+    icon?: React.ReactNode
+  }[]
 }) {
   return (
     <SidebarGroup>
@@ -51,5 +51,5 @@ export function NavMain({
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>
-  );
+  )
 }

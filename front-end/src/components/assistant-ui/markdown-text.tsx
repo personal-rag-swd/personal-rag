@@ -6,10 +6,10 @@ import {
   StreamdownTextPrimitive,
   useIsStreamdownCodeBlock,
 } from "@assistant-ui/react-streamdown"
-import { code } from "@streamdown/code";
-import { math } from "@streamdown/math";
-import { mermaid } from "@streamdown/mermaid";
-import { cjk } from "@streamdown/cjk";
+import { code } from "@streamdown/code"
+import { math } from "@streamdown/math"
+import { mermaid } from "@streamdown/mermaid"
+import { cjk } from "@streamdown/cjk"
 import {
   type FC,
   type ReactNode,
@@ -254,8 +254,8 @@ function CitationPopover({
     (s) =>
       (
         (s.message.metadata as Record<string, unknown> | undefined)?.custom as
-        | Record<string, unknown>
-        | undefined
+          | Record<string, unknown>
+          | undefined
       )?.sources as ChunkType[] | undefined
   )
   const sources = sourcesRaw ?? []
@@ -263,8 +263,8 @@ function CitationPopover({
     (s) =>
       (
         (s.message.metadata as Record<string, unknown> | undefined)?.custom as
-        | Record<string, unknown>
-        | undefined
+          | Record<string, unknown>
+          | undefined
       )?.references as ReferenceType[] | undefined
   )
   const references = referencesRaw ?? []
@@ -309,17 +309,17 @@ function CitationPopover({
 
     const fetchPromise = finalDocumentId
       ? apiFetch<ChunkType>(
-        `/api/v1/notebooks/${notebookId}/documents/${finalDocumentId}/chunks/${resolvedChunkIndex}`
-      )
+          `/api/v1/notebooks/${notebookId}/documents/${finalDocumentId}/chunks/${resolvedChunkIndex}`
+        )
       : finalFilename
         ? apiFetch<{ content: string; filename: string; chunk_index: number }>(
-          `/api/v1/notebooks/${notebookId}/chunks?filename=${encodeURIComponent(finalFilename)}&chunk_index=${resolvedChunkIndex}`
-        ).then((data) => ({
-          filename: data.filename,
-          document_id: "",
-          chunk_index: data.chunk_index,
-          content: data.content,
-        }))
+            `/api/v1/notebooks/${notebookId}/chunks?filename=${encodeURIComponent(finalFilename)}&chunk_index=${resolvedChunkIndex}`
+          ).then((data) => ({
+            filename: data.filename,
+            document_id: "",
+            chunk_index: data.chunk_index,
+            content: data.content,
+          }))
         : Promise.reject(new Error("Missing source lookup metadata"))
 
     fetchPromise
@@ -485,7 +485,7 @@ const useCopyToClipboard = ({
         setIsCopied(true)
         setTimeout(() => setIsCopied(false), copiedDuration)
       },
-      () => { }
+      () => {}
     )
   }
 
@@ -703,7 +703,7 @@ const defaultComponents = {
       <code
         className={cn(
           !isCodeBlock &&
-          "aui-md-inline-code rounded-md border border-border/50 bg-muted/50 px-1.5 py-0.5 font-mono text-[0.85em]",
+            "aui-md-inline-code rounded-md border border-border/50 bg-muted/50 px-1.5 py-0.5 font-mono text-[0.85em]",
           className
         )}
         {...props}

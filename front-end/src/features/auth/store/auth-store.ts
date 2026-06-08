@@ -1,29 +1,32 @@
-import { create } from "zustand";
+import { create } from "zustand"
 
-import { apiClient, apiFetch } from "@/lib/api-client";
+import { apiClient, apiFetch } from "@/lib/api-client"
 
 interface User {
-  id: string;
-  email: string;
-  role: string;
-  is_active: boolean;
+  id: string
+  email: string
+  role: string
+  is_active: boolean
 }
 
 interface AuthStore {
-  user: User | null;
-  isAuthenticated: boolean;
-  isLoading: boolean;
-  clearSession: () => void;
-  setIsLoading: (isLoading: boolean) => void;
-  initializeSession: () => Promise<void>;
-  login: (email: string, password: string) => Promise<void>;
-  startRegistration: (email: string, password: string) => Promise<{ step: "otp" | "details" }>;
-  verifyRegistration: (email: string, otp: string) => Promise<void>;
-  logout: () => Promise<void>;
+  user: User | null
+  isAuthenticated: boolean
+  isLoading: boolean
+  clearSession: () => void
+  setIsLoading: (isLoading: boolean) => void
+  initializeSession: () => Promise<void>
+  login: (email: string, password: string) => Promise<void>
+  startRegistration: (
+    email: string,
+    password: string
+  ) => Promise<{ step: "otp" | "details" }>
+  verifyRegistration: (email: string, otp: string) => Promise<void>
+  logout: () => Promise<void>
 }
 
 async function fetchCurrentUser() {
-  return apiFetch<User>("/api/v1/users/me");
+  return apiFetch<User>("/api/v1/users/me")
 }
 
 export const useAuthStore = create<AuthStore>((set, get) => ({
@@ -35,74 +38,74 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       user: null,
       isAuthenticated: false,
       isLoading: false,
-    });
+    })
   },
   setIsLoading: (isLoading) => set({ isLoading }),
   initializeSession: async () => {
-    set({ isLoading: true });
+    set({ isLoading: true })
 
     try {
-      const user = await fetchCurrentUser();
+      const user = await fetchCurrentUser()
       set({
         user,
         isAuthenticated: true,
-      });
+      })
     } catch {
-      get().clearSession();
+      get().clearSession()
     } finally {
-      set({ isLoading: false });
+      set({ isLoading: false })
     }
   },
   login: async (email, password) => {
     const body = new URLSearchParams({
       username: email,
       password,
-    });
+    })
 
     await apiClient.post("/api/v1/auth/sessions", body, {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
       },
-    });
+    })
 
     try {
-      const user = await fetchCurrentUser();
+      const user = await fetchCurrentUser()
       set({
         user,
         isAuthenticated: true,
-      });
+      })
     } catch (error) {
-      get().clearSession();
-      throw error;
+      get().clearSession()
+      throw error
     }
   },
   startRegistration: async (email, password) => {
     await apiClient.post("/api/v1/auth/registrations", {
       email,
       password,
-    });
+    })
 
-    return { step: "otp" as const };
+    return { step: "otp" as const }
   },
   verifyRegistration: async (email, otp) => {
     await apiClient.post("/api/v1/auth/email-verifications", {
       email,
       otp,
-    });
+    })
   },
   logout: async () => {
     try {
       await apiFetch<void>("/api/v1/auth/sessions/current", {
         method: "DELETE",
-      });
+      })
     } catch {
       // The client still clears its session even if the server-side logout fails.
     }
 
-    get().clearSession();
+    get().clearSession()
   },
-}));
+}))
 
 export function useAuth() {
-  return useAuthStore();
+  return useAuthStore()
 }

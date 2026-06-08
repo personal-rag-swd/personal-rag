@@ -97,6 +97,73 @@ def create_notebook_route(
     return create_notebook(session, payload, current_user)
 
 
+@router.get("/events")
+async def read_notebook_events(
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    async def event_generator():
+        last_state = {}
+        first_tick = True
+
+        try:
+            while True:
+                # Query all documents for this user
+                docs = session.exec(
+                    select(NotebookDocument)
+                    .where(NotebookDocument.user_id == current_user.id)
+                ).all()
+
+                if first_tick:
+                    by_notebook = {}
+                    for doc in docs:
+                        by_notebook.setdefault(doc.notebook_id, []).append(doc)
+                    
+                    for notebook_id, notebook_docs in by_notebook.items():
+                        serialized_docs = [
+                            NotebookDocumentRead.model_validate(doc).model_dump(mode="json")
+                            for doc in notebook_docs
+                        ]
+                        yield f"data: {json.dumps({'type': 'snapshot', 'notebook_id': str(notebook_id), 'documents': serialized_docs, 'timestamp': datetime.now(UTC).isoformat()})}\n\n"
+                    
+                    last_state = {
+                        doc.id: (doc.status, doc.updated_at, doc.notebook_id)
+                        for doc in docs
+                    }
+                    first_tick = False
+                else:
+                    current_ids = set()
+                    for doc in docs:
+                        current_ids.add(doc.id)
+                        prev = last_state.get(doc.id)
+                        if prev is None or prev[:2] != (doc.status, doc.updated_at):
+                            serialized_doc = NotebookDocumentRead.model_validate(doc).model_dump(mode="json")
+                            yield f"data: {json.dumps({'type': 'document_update', 'notebook_id': str(doc.notebook_id), 'document': serialized_doc, 'timestamp': datetime.now(UTC).isoformat()})}\n\n"
+                            last_state[doc.id] = (doc.status, doc.updated_at, doc.notebook_id)
+
+                    # Clean up removed documents from tracking
+                    removed_ids = set(last_state.keys()) - current_ids
+                    for rid in removed_ids:
+                        del last_state[rid]
+
+                # Expire the SQLAlchemy session identity map cache to ensure consecutive ticks
+                # fetch fresh document records directly from the database rather than from memory.
+                session.expire_all()
+
+                await asyncio.sleep(1.0)
+        except asyncio.CancelledError:
+            pass
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
+
+
 @router.get("/{notebook_id}", response_model=NotebookRead)
 def read_notebook(
     notebook_id: UUID,
@@ -143,66 +210,7 @@ def read_notebook_documents(
     return list_notebook_documents(session, notebook_id, current_user)
 
 
-@router.get("/{notebook_id}/documents/events")
-async def read_notebook_document_events(
-    notebook_id: UUID,
-    current_user: Annotated[User, Depends(get_current_user)],
-    session: Annotated[Session, Depends(get_session)],
-):
-    # Verify notebook existence and owner scoping immediately
-    get_notebook(session, notebook_id, current_user)
 
-    async def event_generator():
-        last_state = {}
-        first_tick = True
-
-        try:
-            while True:
-                # Query all documents for this notebook using the service layer
-                docs = list_notebook_documents(session, notebook_id, current_user)
-
-                if first_tick:
-                    serialized_docs = [
-                        NotebookDocumentRead.model_validate(doc).model_dump(mode="json")
-                        for doc in docs
-                    ]
-                    yield f"data: {json.dumps({'type': 'snapshot', 'documents': serialized_docs})}\n\n"
-                    last_state = {
-                        doc.id: (doc.status, doc.updated_at)
-                        for doc in docs
-                    }
-                    first_tick = False
-                else:
-                    current_ids = set()
-                    for doc in docs:
-                        current_ids.add(doc.id)
-                        prev = last_state.get(doc.id)
-                        if prev is None or prev != (doc.status, doc.updated_at):
-                            serialized_doc = NotebookDocumentRead.model_validate(doc).model_dump(mode="json")
-                            yield f"data: {json.dumps({'type': 'document_update', 'document': serialized_doc})}\n\n"
-                            last_state[doc.id] = (doc.status, doc.updated_at)
-
-                    # Clean up removed documents from tracking
-                    removed_ids = set(last_state.keys()) - current_ids
-                    for rid in removed_ids:
-                        del last_state[rid]
-
-                # Expire the SQLAlchemy session identity map cache to ensure consecutive ticks
-                # fetch fresh document records directly from the database rather than from memory.
-                session.expire_all()
-
-                await asyncio.sleep(1.0)
-        except asyncio.CancelledError:
-            pass
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        }
-    )
 
 
 @router.delete(
@@ -346,8 +354,6 @@ def read_document_chunks_by_id(
     chunks = session.exec(
         select(NotebookDocumentChunk)
         .where(NotebookDocumentChunk.document_id == document.id)
-        .where(NotebookDocumentChunk.notebook_id == notebook.id)
-        .where(NotebookDocumentChunk.user_id == current_user.id)
         .order_by(NotebookDocumentChunk.chunk_index.asc())
     ).all()
 
@@ -377,8 +383,8 @@ def read_notebook_chunk(
         .join(NotebookDocument, NotebookDocument.id == NotebookDocumentChunk.document_id)
         .where(NotebookDocument.filename == filename)
         .where(NotebookDocumentChunk.chunk_index == chunk_index)
-        .where(NotebookDocumentChunk.notebook_id == notebook.id)
-        .where(NotebookDocumentChunk.user_id == current_user.id)
+        .where(NotebookDocument.notebook_id == notebook.id)
+        .where(NotebookDocument.user_id == current_user.id)
     ).first()
     if not chunk:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chunk not found")
@@ -401,10 +407,11 @@ def read_notebook_chunk_by_document_id(
     notebook = get_notebook(session, notebook_id, current_user)
     chunk = session.exec(
         select(NotebookDocumentChunk)
+        .join(NotebookDocument, NotebookDocument.id == NotebookDocumentChunk.document_id)
         .where(NotebookDocumentChunk.document_id == document_id)
         .where(NotebookDocumentChunk.chunk_index == chunk_index)
-        .where(NotebookDocumentChunk.notebook_id == notebook.id)
-        .where(NotebookDocumentChunk.user_id == current_user.id)
+        .where(NotebookDocument.notebook_id == notebook.id)
+        .where(NotebookDocument.user_id == current_user.id)
     ).first()
     if not chunk:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chunk not found")
@@ -448,8 +455,8 @@ def _build_report_context(session: Session, notebook: Notebook, current_user: Us
     chunks = session.exec(
         select(NotebookDocumentChunk, NotebookDocument.filename)
         .join(NotebookDocument, NotebookDocument.id == NotebookDocumentChunk.document_id)
-        .where(NotebookDocumentChunk.notebook_id == notebook.id)
-        .where(NotebookDocumentChunk.user_id == current_user.id)
+        .where(NotebookDocument.notebook_id == notebook.id)
+        .where(NotebookDocument.user_id == current_user.id)
         .where(NotebookDocument.status == "indexed")
         .order_by(NotebookDocument.filename, NotebookDocumentChunk.chunk_index)
     ).all()

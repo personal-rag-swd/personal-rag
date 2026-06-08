@@ -12,6 +12,9 @@ from app.notebooks.prompt import (
     CUSTOM_SYSTEM_BASE,
     STUDY_GUIDE_SYSTEM,
     MINDMAP_SYSTEM,
+    build_report_user_message,
+    build_custom_report_user_message,
+    build_mindmap_user_message,
 )
 from app.notebooks.schemas import (
     BlogPostReport,
@@ -20,13 +23,6 @@ from app.notebooks.schemas import (
     StudyGuideReport,
     MindMapReport,
 )
-
-
-def _build_user_message(context: str, additional_instructions: str | None) -> str:
-    parts = [f"SOURCE MATERIAL:\n\n{context}"]
-    if additional_instructions and additional_instructions.strip():
-        parts.append(f"Additional User Requirements: {additional_instructions.strip()}")
-    return "\n\n".join(parts)
 
 
 async def _run_agent_with_retry(
@@ -62,7 +58,7 @@ async def generate_briefing_doc(
         output_type=BriefingDocReport,
         instructions=BRIEFING_SYSTEM,
     )
-    result = await _run_agent_with_retry(agent, _build_user_message(context, additional_instructions))
+    result = await _run_agent_with_retry(agent, build_report_user_message(context, additional_instructions))
     return result.output
 
 
@@ -75,7 +71,7 @@ async def generate_study_guide(
         output_type=StudyGuideReport,
         instructions=STUDY_GUIDE_SYSTEM,
     )
-    result = await _run_agent_with_retry(agent, _build_user_message(context, additional_instructions))
+    result = await _run_agent_with_retry(agent, build_report_user_message(context, additional_instructions))
     return result.output
 
 
@@ -88,7 +84,7 @@ async def generate_blog_post(
         output_type=BlogPostReport,
         instructions=BLOG_SYSTEM,
     )
-    result = await _run_agent_with_retry(agent, _build_user_message(context, additional_instructions))
+    result = await _run_agent_with_retry(agent, build_report_user_message(context, additional_instructions))
     return result.output
 
 
@@ -102,10 +98,7 @@ async def generate_custom_report(
         output_type=CustomReport,
         instructions=CUSTOM_SYSTEM_BASE,
     )
-    user_message = (
-        f"USER REQUEST: {additional_instructions.strip()}\n\n"
-        f"SOURCE MATERIAL:\n\n{context}"
-    )
+    user_message = build_custom_report_user_message(context, additional_instructions)
     result = await _run_agent_with_retry(agent, user_message)
     return result.output
 
@@ -120,16 +113,8 @@ async def generate_mindmap(
         output_type=MindMapReport,
         instructions=MINDMAP_SYSTEM,
     )
-    user_msg_parts = [f"SOURCE MATERIAL:\n\n{context}"]
-    
-    level = (detail_level or "intermediate").strip().lower()
-    if level not in ("simple", "intermediate", "detailed"):
-        level = "intermediate"
-        
-    user_msg_parts.append(f"Target Detail Level: {level.upper()}")
-    
-    if additional_instructions and additional_instructions.strip():
-        user_msg_parts.append(f"Additional User Requirements: {additional_instructions.strip()}")
-        
-    result = await _run_agent_with_retry(agent, "\n\n".join(user_msg_parts))
+    user_message = build_mindmap_user_message(context, detail_level, additional_instructions)
+    result = await _run_agent_with_retry(agent, user_message)
     return result.output
+
+

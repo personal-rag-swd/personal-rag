@@ -50,6 +50,8 @@ Go to the **Environment** tab of the Compose service and add the following requi
 | `MINIO_BROWSER_REDIRECT_URL` | `https://s3-console.quanphungg.me` | MinIO browser console redirection URL |
 | `MINIO_SERVER_URL` | `https://s3.quanphungg.me` | Public API endpoint for MinIO storage |
 | `S3_BUCKET` | `personal-rag-bucket` | S3 bucket name |
+| `RABBITMQ_DEFAULT_USER` | `rag_rabbitmq` | RabbitMQ username |
+| `RABBITMQ_DEFAULT_PASS` | *Strong Random String (e.g., 32+ chars)* | RabbitMQ password |
 
 ### Step 4: Expose Services via Domains
 Dokploy integrates seamlessly with Traefik to handle Let's Encrypt SSL certificates automatically. To expose the Frontend, Backend, and MinIO publicly, go to the **Domains** tab in each respective service configuration or configure it via the Dokploy UI:
@@ -79,11 +81,9 @@ If you want to manage backups, scale services, and monitor resource metrics sepa
 3. Set the image to `minio/minio:latest`.
 4. Under **General/Command**, set the command to `server /data --console-address ":9001"`.
 5. Set up a persistent volume mount `/data` -> `minio-data-volume`.
-7. Add environment variables for admin access and to pre-configure the event webhook on startup:
+7. Add environment variables for admin access:
    - `MINIO_ROOT_USER`: *Your Root User*
    - `MINIO_ROOT_PASSWORD`: *Your Root Password*
-   - `MINIO_NOTIFY_WEBHOOK_ENABLE_backend`: `on`
-   - `MINIO_NOTIFY_WEBHOOK_ENDPOINT_backend`: `http://backend:8000/api/v1/file/callback` (Use `http://backend:8000` if on same network, otherwise use public `https://api.quanphungg.me/api/v1/file/callback`)
 8. Bind two domains:
    - API domain: `https://s3.quanphungg.me` -> Port `9000`.
    - Console domain: `https://s3-console.quanphungg.me` -> Port `9001`.
@@ -105,14 +105,13 @@ If you want to manage backups, scale services, and monitor resource metrics sepa
 4. Bind a domain: `https://rag.quanphungg.me` (or `https://quanphungg.me`) -> Port `80` (since Nginx serves it on port 80).
 5. Enable automatic deployments under the **Triggers** tab.
 
-### 5. MinIO Event Webhook Setup (Required for Document Uploads)
-Because MinIO and Backend are standalone, you must ensure MinIO triggers callbacks to the Backend whenever a file is uploaded.
+### 5. RabbitMQ + MinIO Event Setup (Required for Document Uploads)
+Because MinIO and Backend are standalone, you must ensure MinIO publishes `ObjectCreated` events to RabbitMQ and that the backend can consume that queue.
 
 > [!TIP]
-> **Preferred Method (Zero Restarts)**: 
-> Define the environment variables `MINIO_NOTIFY_WEBHOOK_ENABLE_backend="on"` and `MINIO_NOTIFY_WEBHOOK_ENDPOINT_backend="http://backend:8000/api/v1/file/callback"` directly on your MinIO container configuration. This avoids the need for interactive terminal access or manual service restarts.
+> Provision a RabbitMQ service in the same Dokploy project first, then set the backend `RABBITMQ_*` environment variables so the app can consume the durable queue.
 
-If you choose to configure the webhook manually via the `mc` CLI:
+If you choose to configure the AMQP notification manually via the `mc` CLI:
 1. Access your Dokploy server via SSH or run a temporary helper container in the network.
 2. Authenticate the CLI with MinIO:
    ```bash
@@ -122,13 +121,16 @@ If you choose to configure the webhook manually via the `mc` CLI:
    ```bash
    mc mb --ignore-existing local/personal-rag-bucket
    ```
-4. Register the webhook event (requires restarting the MinIO service):
+4. Register the AMQP target and bucket notification (requires restarting the MinIO service after the config change):
    ```bash
-   mc admin config set local notify_webhook:backend endpoint=https://api.quanphungg.me/api/v1/file/callback
-   # If running interactively, restart the service to apply changes:
+   mc admin config set local notify_amqp:backend \
+     url="amqp://your_rabbitmq_user:your_rabbitmq_password@rabbitmq:5672" \
+     exchange="minio-events" \
+     exchange_type="direct" \
+     routing_key="minio.object.created" \
+     durable="on"
    mc admin service restart local
-   # Once restarted, register the bucket event notification:
-   mc event add local/personal-rag-bucket arn:minio:sqs::backend:webhook --event put
+   mc event add local/personal-rag-bucket arn:minio:sqs::backend:amqp --event put
    ```
 
 ---

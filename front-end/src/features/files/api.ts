@@ -1,8 +1,8 @@
-import { apiFetch } from "@/lib/api-client";
+import { apiFetch } from "@/lib/api-client"
 
 interface PresignedUploadUrl {
-  url: string;
-  key: string;
+  url: string
+  key: string
 }
 
 export async function getPresignedUploadUrl(
@@ -19,7 +19,7 @@ export async function getPresignedUploadUrl(
       notebook_id: notebookId,
       expires_in: 3600,
     },
-  });
+  })
 }
 
 export async function reportUploadFailed(
@@ -27,12 +27,15 @@ export async function reportUploadFailed(
   notebookId?: string,
   errorMessage?: string
 ): Promise<{ status: string; updated: boolean }> {
-  return apiFetch<{ status: string; updated: boolean }>("/api/v1/file/upload-failed", {
-    method: "POST",
-    data: {
-      key,
-      notebook_id: notebookId,
-      error_message: errorMessage,
-    },
-  });
+  return apiFetch<{ status: string; updated: boolean }>(
+    "/api/v1/file/upload-failed",
+    {
+      method: "POST",
+      data: {
+        key,
+        notebook_id: notebookId,
+        error_message: errorMessage,
+      },
+    }
+  )
 }

@@ -1,60 +1,62 @@
-import { useForm } from "@tanstack/react-form";
-import { GalleryVerticalEnd, Eye, EyeOff } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
-import * as React from "react";
+import { useForm } from "@tanstack/react-form"
+import { Eye, EyeOff } from "lucide-react"
+import { Link, useNavigate } from "react-router-dom"
+import * as React from "react"
 
-import { Button } from "@/components/ui/button";
+import { AviaryLogo } from "@/components/branding/aviary-logo"
+import { Button } from "@/components/ui/button"
 import {
   Field,
   FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
-} from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+} from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
   InputGroupInput,
-} from "@/components/ui/input-group";
+} from "@/components/ui/input-group"
 import {
   InputOTP,
   InputOTPGroup,
   InputOTPSlot,
-} from "@/components/ui/input-otp";
-import { useAuth } from "@/features/auth/store/auth-store";
+} from "@/components/ui/input-otp"
+import { useAuth } from "@/features/auth/store/auth-store"
 import {
   registrationSchema,
   verificationSchema,
   type AuthActionState,
-} from "@/features/auth/types";
-import { cn } from "@/lib/utils";
+} from "@/features/auth/types"
+import { cn } from "@/lib/utils"
 
 const initialAuthActionState: AuthActionState = {
   step: "details",
-};
+}
 
 export function RegisterForm({
   className,
   ...props
 }: React.ComponentProps<"div">) {
   const [registrationState, setRegistrationState] =
-    React.useState<AuthActionState>(initialAuthActionState);
-  const [verificationState, setVerificationState] = React.useState<AuthActionState>({
-    step: "otp",
-    email: registrationState.email,
-  });
+    React.useState<AuthActionState>(initialAuthActionState)
+  const [verificationState, setVerificationState] =
+    React.useState<AuthActionState>({
+      step: "otp",
+      email: registrationState.email,
+    })
 
-  const otpEmail = verificationState.email || registrationState.email || "";
-  const isOtpStep = registrationState.step === "otp";
+  const otpEmail = verificationState.email || registrationState.email || ""
+  const isOtpStep = registrationState.step === "otp"
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <div className="flex flex-col items-center gap-2 text-center">
         <Link to="/" className="flex flex-col items-center gap-2 font-medium">
-          <div className="flex size-8 items-center justify-center rounded-md">
-            <GalleryVerticalEnd className="size-6" />
+          <div className="flex items-center justify-center">
+            <AviaryLogo className="h-20 w-20 object-contain" />
           </div>
           <span className="sr-only">Personal RAG</span>
         </Link>
@@ -99,18 +101,24 @@ export function RegisterForm({
       {!isOtpStep && (
         <FieldDescription className="px-6 text-center">
           By clicking continue, you agree to our{" "}
-          <Link to="#" className="underline underline-offset-4 hover:text-primary">
+          <Link
+            to="#"
+            className="underline underline-offset-4 hover:text-primary"
+          >
             Terms of Service
           </Link>{" "}
           and{" "}
-          <Link to="#" className="underline underline-offset-4 hover:text-primary">
+          <Link
+            to="#"
+            className="underline underline-offset-4 hover:text-primary"
+          >
             Privacy Policy
           </Link>
           .
         </FieldDescription>
       )}
     </div>
-  );
+  )
 }
 
 function RegistrationDetailsForm({
@@ -118,14 +126,14 @@ function RegistrationDetailsForm({
   setState,
   setVerificationState,
 }: {
-  state: AuthActionState;
-  setState: (state: AuthActionState) => void;
-  setVerificationState: (state: AuthActionState) => void;
+  state: AuthActionState
+  setState: (state: AuthActionState) => void
+  setVerificationState: (state: AuthActionState) => void
 }) {
-  const { startRegistration } = useAuth();
-  const [showPassword, setShowPassword] = React.useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = React.useState(false);
-  
+  const { startRegistration } = useAuth()
+  const [showPassword, setShowPassword] = React.useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = React.useState(false)
+
   const form = useForm({
     defaultValues: {
       email: state.email ?? "",
@@ -136,35 +144,36 @@ function RegistrationDetailsForm({
       onSubmit: registrationSchema,
     },
     onSubmit: async ({ value }) => {
-      setState(initialAuthActionState);
+      setState(initialAuthActionState)
       try {
-        const result = await startRegistration(value.email, value.password);
-        
-        setState({ step: result.step, email: value.email });
+        const result = await startRegistration(value.email, value.password)
+
+        setState({ step: result.step, email: value.email })
         if (result.step === "otp") {
-          setVerificationState({ step: "otp", email: value.email });
+          setVerificationState({ step: "otp", email: value.email })
         }
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : "Failed to start registration.";
+        const message =
+          err instanceof Error ? err.message : "Failed to start registration."
         setState({
           step: "details",
           email: value.email,
           formError: message,
-        });
+        })
       }
     },
-  });
+  })
 
   return (
     <form
       onInvalidCapture={(event) => {
-        event.preventDefault();
-        void form.validate("submit");
+        event.preventDefault()
+        void form.validate("submit")
       }}
       onSubmit={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        void form.handleSubmit();
+        event.preventDefault()
+        event.stopPropagation()
+        void form.handleSubmit()
       }}
     >
       <FieldGroup>
@@ -172,7 +181,7 @@ function RegistrationDetailsForm({
           {(field) => {
             const isInvalid = Boolean(
               field.state.meta.errors.length || state.fieldErrors?.email
-            );
+            )
 
             return (
               <Field data-invalid={isInvalid}>
@@ -192,7 +201,7 @@ function RegistrationDetailsForm({
                 <FieldError errors={field.state.meta.errors} />
                 <FieldError>{state.fieldErrors?.email}</FieldError>
               </Field>
-            );
+            )
           }}
         </form.Field>
 
@@ -200,7 +209,7 @@ function RegistrationDetailsForm({
           {(field) => {
             const isInvalid = Boolean(
               field.state.meta.errors.length || state.fieldErrors?.password
-            );
+            )
 
             return (
               <Field data-invalid={isInvalid}>
@@ -221,7 +230,9 @@ function RegistrationDetailsForm({
                   <InputGroupAddon align="inline-end">
                     <InputGroupButton
                       onClick={() => setShowPassword(!showPassword)}
-                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      aria-label={
+                        showPassword ? "Hide password" : "Show password"
+                      }
                     >
                       {showPassword ? (
                         <EyeOff className="size-4" />
@@ -234,7 +245,7 @@ function RegistrationDetailsForm({
                 <FieldError errors={field.state.meta.errors} />
                 <FieldError>{state.fieldErrors?.password}</FieldError>
               </Field>
-            );
+            )
           }}
         </form.Field>
 
@@ -243,19 +254,19 @@ function RegistrationDetailsForm({
           validators={{
             onChangeListenTo: ["password"],
             onChange: ({ value, fieldApi }) => {
-              const password = fieldApi.form.getFieldValue("password");
-              if (value && value !== password) return "Passwords do not match.";
-              return undefined;
+              const password = fieldApi.form.getFieldValue("password")
+              if (value && value !== password) return "Passwords do not match."
+              return undefined
             },
           }}
         >
           {(field) => {
-            const error = field.state.meta.errors[0];
+            const error = field.state.meta.errors[0]
             const errorMessage =
               typeof error === "string"
                 ? error
-                : (error as { message?: string } | undefined)?.message;
-            const isInvalid = Boolean(errorMessage);
+                : (error as { message?: string } | undefined)?.message
+            const isInvalid = Boolean(errorMessage)
 
             return (
               <Field data-invalid={isInvalid}>
@@ -274,9 +285,13 @@ function RegistrationDetailsForm({
                   />
                   <InputGroupAddon align="inline-end">
                     <InputGroupButton
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      onClick={() =>
+                        setShowConfirmPassword(!showConfirmPassword)
+                      }
                       aria-label={
-                        showConfirmPassword ? "Hide confirm password" : "Show confirm password"
+                        showConfirmPassword
+                          ? "Hide confirm password"
+                          : "Show confirm password"
                       }
                     >
                       {showConfirmPassword ? (
@@ -289,7 +304,7 @@ function RegistrationDetailsForm({
                 </InputGroup>
                 {errorMessage && <FieldError>{errorMessage}</FieldError>}
               </Field>
-            );
+            )
           }}
         </form.Field>
 
@@ -306,7 +321,7 @@ function RegistrationDetailsForm({
         </form.Subscribe>
       </FieldGroup>
     </form>
-  );
+  )
 }
 
 function VerificationForm({
@@ -314,13 +329,13 @@ function VerificationForm({
   state,
   setState,
 }: {
-  email: string;
-  state: AuthActionState;
-  setState: (state: AuthActionState) => void;
+  email: string
+  state: AuthActionState
+  setState: (state: AuthActionState) => void
 }) {
-  const { verifyRegistration } = useAuth();
-  const navigate = useNavigate();
-  
+  const { verifyRegistration } = useAuth()
+  const navigate = useNavigate()
+
   const form = useForm({
     defaultValues: {
       email,
@@ -330,31 +345,34 @@ function VerificationForm({
       onSubmit: verificationSchema,
     },
     onSubmit: async ({ value }) => {
-      setState({ step: "otp", email });
+      setState({ step: "otp", email })
       try {
-        await verifyRegistration(email, value.otp);
-        navigate("/login");
+        await verifyRegistration(email, value.otp)
+        navigate("/login")
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : "Failed to verify registration code.";
+        const message =
+          err instanceof Error
+            ? err.message
+            : "Failed to verify registration code."
         setState({
           step: "otp",
           email,
           formError: message,
-        });
+        })
       }
     },
-  });
+  })
 
   return (
     <form
       onInvalidCapture={(event) => {
-        event.preventDefault();
-        void form.validate("submit");
+        event.preventDefault()
+        void form.validate("submit")
       }}
       onSubmit={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        void form.handleSubmit();
+        event.preventDefault()
+        event.stopPropagation()
+        void form.handleSubmit()
       }}
     >
       <FieldGroup>
@@ -363,7 +381,7 @@ function VerificationForm({
           {(field) => {
             const isInvalid = Boolean(
               field.state.meta.errors.length || state.fieldErrors?.otp
-            );
+            )
 
             return (
               <Field data-invalid={isInvalid}>
@@ -391,7 +409,7 @@ function VerificationForm({
                 <FieldError errors={field.state.meta.errors} />
                 <FieldError>{state.fieldErrors?.otp}</FieldError>
               </Field>
-            );
+            )
           }}
         </form.Field>
         {state.formError ? <FieldError>{state.formError}</FieldError> : null}
@@ -406,5 +424,5 @@ function VerificationForm({
         </form.Subscribe>
       </FieldGroup>
     </form>
-  );
+  )
 }

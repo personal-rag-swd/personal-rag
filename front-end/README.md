@@ -42,4 +42,4 @@ import { Button } from "@/components/ui/button"
 The frontend uses Vite environment variables. Only `VITE_*` keys are exposed to the browser.
 
 - `VITE_API_URL`: Browser-facing API base URL (runtime).
-- `VITE_PROXY_TARGET`: Optional dev server proxy target override.
+- `VITE_PROXY_TARGET`: Optional dev server proxy target override (automatically configured inside docker-compose for Docker environments).

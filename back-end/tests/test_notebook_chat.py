@@ -4,7 +4,6 @@ from typing import Any
 from uuid import UUID
 from uuid import uuid4
 
-os.environ.setdefault("DATABASE_URL", "sqlite://")
 os.environ["CHAT_API_KEY"] = "test-key"
 
 import pytest
@@ -20,6 +19,7 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 from pydantic_ai.ui.ag_ui import AGUIAdapter
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, Session, create_engine, select
 from starlette.responses import Response
@@ -28,7 +28,7 @@ from app.core.config import Settings, get_settings
 from app.core.security import create_access_token
 from app.dependencies import get_session
 from app.main import app
-from app.notebooks.models import Notebook, NotebookMessage
+from app.notebooks.models import Notebook, NotebookDocument, NotebookDocumentChunk, NotebookMessage
 from app.users.models import User
 
 
@@ -41,7 +41,7 @@ def settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
         chat_api_key="test-key",
     )
     from app.core import config
-    from app.notebooks.agent.providers import OpenRouterChatProvider, OpenAICompatibleChatProvider, GeminiChatProvider
+    from app.notebooks.agent.factory import OpenRouterChatProvider, OpenAICompatibleChatProvider, GeminiChatProvider
     OpenRouterChatProvider.build_model.cache_clear()
     OpenAICompatibleChatProvider.build_model.cache_clear()
     GeminiChatProvider.build_model.cache_clear()
@@ -447,8 +447,6 @@ def test_chunks_endpoints_scope(
     chunk = NotebookDocumentChunk(
         id=uuid4(),
         document_id=doc.id,
-        notebook_id=UUID(nb_id),
-        user_id=user.id,
         chunk_index=0,
         content="Grounding content",
         embedding=[0.0] * 1536,
@@ -547,6 +545,26 @@ def test_append_notebook_chat_history_does_not_delete_old_messages(session: Sess
     assert stored_2[2].message["parts"][0]["content"] == "How are you?"
     assert stored_2[3].seq == 4
     assert stored_2[3].message["parts"][0]["content"] == "I am doing great"
+
+
+def test_notebook_message_enforces_unique_seq_per_notebook(session: Session) -> None:
+    notebook = Notebook(
+        id=uuid4(),
+        user_id=uuid4(),
+        name="Sequence Notebook",
+        description="",
+        tags=[],
+    )
+    session.add(notebook)
+    session.commit()
+
+    session.add(NotebookMessage(notebook_id=notebook.id, seq=1, message={"role": "user"}))
+    session.commit()
+
+    session.add(NotebookMessage(notebook_id=notebook.id, seq=1, message={"role": "assistant"}))
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
 
 
 def test_keep_recent_retains_system_prompts_and_more_history(
@@ -718,4 +736,3 @@ def test_chat_history_includes_tool_calls(
     assert len(second_assistant["parts"]) == 1
     assert second_assistant["parts"][0]["type"] == "text"
     assert second_assistant["parts"][0]["content"] == "ML stands for Machine Learning."
-

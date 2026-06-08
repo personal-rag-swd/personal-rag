@@ -3,7 +3,7 @@ import { useTheme } from "@/components/theme-store"
 
 export function ThemeClassEffect() {
   const { theme } = useTheme()
- 
+
   useEffect(() => {
     const root = window.document.documentElement
 

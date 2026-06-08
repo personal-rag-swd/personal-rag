@@ -1,42 +1,42 @@
-import { useForm } from "@tanstack/react-form";
-import { GalleryVerticalEnd, Eye, EyeOff } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
-import * as React from "react";
+import { useForm } from "@tanstack/react-form"
+import { Eye, EyeOff } from "lucide-react"
+import { Link, useNavigate } from "react-router-dom"
+import * as React from "react"
 
-import { Button } from "@/components/ui/button";
+import { AviaryLogo } from "@/components/branding/aviary-logo"
+import { Button } from "@/components/ui/button"
 import {
   Field,
   FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
-} from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+} from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
   InputGroupInput,
-} from "@/components/ui/input-group";
-import { useAuth } from "@/features/auth/store/auth-store";
-import {
-  loginSchema,
-  type AuthActionState,
-} from "@/features/auth/types";
-import { cn } from "@/lib/utils";
+} from "@/components/ui/input-group"
+import { useAuth } from "@/features/auth/store/auth-store"
+import { loginSchema, type AuthActionState } from "@/features/auth/types"
+import { cn } from "@/lib/utils"
 
 const initialAuthActionState: AuthActionState = {
   step: "details",
-};
+}
 
 export function LoginForm({
   className,
   ...props
 }: React.ComponentProps<"div">) {
-  const { login } = useAuth();
-  const navigate = useNavigate();
-  const [state, setState] = React.useState<AuthActionState>(initialAuthActionState);
-  const [showPassword, setShowPassword] = React.useState(false);
+  const { login } = useAuth()
+  const navigate = useNavigate()
+  const [state, setState] = React.useState<AuthActionState>(
+    initialAuthActionState
+  )
+  const [showPassword, setShowPassword] = React.useState(false)
 
   const form = useForm({
     defaultValues: {
@@ -47,31 +47,32 @@ export function LoginForm({
       onSubmit: loginSchema,
     },
     onSubmit: async ({ value }) => {
-      setState(initialAuthActionState);
+      setState(initialAuthActionState)
       try {
-        await login(value.email, value.password);
-        navigate("/dashboard");
+        await login(value.email, value.password)
+        navigate("/dashboard")
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : "Incorrect email or password.";
+        const message =
+          err instanceof Error ? err.message : "Incorrect email or password."
         setState({
           email: value.email,
           formError: message,
-        });
+        })
       }
     },
-  });
+  })
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <form
         onInvalidCapture={(event) => {
-          event.preventDefault();
-          void form.validate("submit");
+          event.preventDefault()
+          void form.validate("submit")
         }}
         onSubmit={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          void form.handleSubmit();
+          event.preventDefault()
+          event.stopPropagation()
+          void form.handleSubmit()
         }}
       >
         <FieldGroup>
@@ -80,8 +81,8 @@ export function LoginForm({
               to="/"
               className="flex flex-col items-center gap-2 font-medium"
             >
-              <div className="flex size-8 items-center justify-center rounded-md">
-                <GalleryVerticalEnd className="size-6" />
+              <div className="flex items-center justify-center">
+                <AviaryLogo className="h-20 w-20 object-contain" />
               </div>
               <span className="sr-only">Personal RAG</span>
             </Link>
@@ -101,7 +102,7 @@ export function LoginForm({
             {(field) => {
               const isInvalid = Boolean(
                 field.state.meta.errors.length || state.fieldErrors?.email
-              );
+              )
 
               return (
                 <Field data-invalid={isInvalid}>
@@ -121,7 +122,7 @@ export function LoginForm({
                   <FieldError errors={field.state.meta.errors} />
                   <FieldError>{state.fieldErrors?.email}</FieldError>
                 </Field>
-              );
+              )
             }}
           </form.Field>
 
@@ -129,7 +130,7 @@ export function LoginForm({
             {(field) => {
               const isInvalid = Boolean(
                 field.state.meta.errors.length || state.fieldErrors?.password
-              );
+              )
 
               return (
                 <Field data-invalid={isInvalid}>
@@ -144,14 +145,18 @@ export function LoginForm({
                       autoComplete="current-password"
                       value={field.state.value}
                       onBlur={field.handleBlur}
-                      onChange={(event) => field.handleChange(event.target.value)}
+                      onChange={(event) =>
+                        field.handleChange(event.target.value)
+                      }
                       aria-invalid={isInvalid}
                       required
                     />
                     <InputGroupAddon align="inline-end">
                       <InputGroupButton
                         onClick={() => setShowPassword(!showPassword)}
-                        aria-label={showPassword ? "Hide password" : "Show password"}
+                        aria-label={
+                          showPassword ? "Hide password" : "Show password"
+                        }
                       >
                         {showPassword ? (
                           <EyeOff className="size-4" />
@@ -164,7 +169,7 @@ export function LoginForm({
                   <FieldError errors={field.state.meta.errors} />
                   <FieldError>{state.fieldErrors?.password}</FieldError>
                 </Field>
-              );
+              )
             }}
           </form.Field>
 
@@ -173,7 +178,11 @@ export function LoginForm({
           <form.Subscribe selector={(formState) => formState.isSubmitting}>
             {(isSubmitting) => (
               <Field>
-                <Button type="submit" className="w-full" disabled={isSubmitting}>
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={isSubmitting}
+                >
                   {isSubmitting ? "Signing in..." : "Sign in"}
                 </Button>
               </Field>
@@ -183,15 +192,21 @@ export function LoginForm({
       </form>
       <FieldDescription className="px-6 text-center">
         By clicking continue, you agree to our{" "}
-        <Link to="#" className="underline underline-offset-4 hover:text-primary">
+        <Link
+          to="#"
+          className="underline underline-offset-4 hover:text-primary"
+        >
           Terms of Service
         </Link>{" "}
         and{" "}
-        <Link to="#" className="underline underline-offset-4 hover:text-primary">
+        <Link
+          to="#"
+          className="underline underline-offset-4 hover:text-primary"
+        >
           Privacy Policy
         </Link>
         .
       </FieldDescription>
     </div>
-  );
+  )
 }
