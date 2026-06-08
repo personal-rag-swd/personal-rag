@@ -63,8 +63,9 @@ export function NotebookPage() {
       });
       setSelectedMindMap(data);
       toast.success("Mind map generated successfully!");
-    } catch (err: any) {
-      toast.error(`Failed to generate mind map: ${err.message || "Unknown error"}`);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      toast.error(`Failed to generate mind map: ${errorMessage}`);
     }
   };
 

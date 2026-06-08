@@ -127,11 +127,16 @@ export function MindMapDialog({
     return null;
   }, [selectedMap, mindMaps]);
 
-  // Reset expansion states when activeMap changes
-  useEffect(() => {
+  const [prevActiveMapId, setPrevActiveMapId] = useState<string | null>(() => activeMap?.id || null);
+
+  if (activeMap?.id !== prevActiveMapId) {
+    setPrevActiveMapId(activeMap?.id || null);
     setIsRootExpanded(false);
     setExpandedMainNodeIds(new Set());
     setPendingFocusNodeIds(null);
+  }
+
+  useEffect(() => {
     lastFitMapIdRef.current = null;
   }, [activeMap?.id]);
 
@@ -211,7 +216,7 @@ export function MindMapDialog({
       setIsDragging(false);
       try {
         e.currentTarget.releasePointerCapture(e.pointerId);
-      } catch (err) {
+      } catch {
         // ignore
       }
     }
@@ -480,7 +485,7 @@ export function MindMapDialog({
     if (!node) return;
 
     const isMobile = dimensions.width < 640;
-    let focusIds: string[] = [selectedNodeId];
+    const focusIds: string[] = [selectedNodeId];
     if (isMobile) {
       if (node.type === "sub" && node.parentId) {
         focusIds.push(node.parentId);
@@ -496,7 +501,10 @@ export function MindMapDialog({
       }
     }
 
-    focusOnNodes(focusIds);
+    const timer = setTimeout(() => {
+      focusOnNodes(focusIds);
+    }, 50);
+    return () => clearTimeout(timer);
   }, [selectedNodeId, focusOnNodes, graphData, layout, pendingFocusNodeIds, dimensions.width]);
 
   // Fit to screen helper: computes bounding box of layout and centers it
@@ -569,7 +577,7 @@ export function MindMapDialog({
       }, 120);
       return () => clearTimeout(timer);
     }
-  }, [layout, open, dimensions.width, dimensions.height, activeMap?.id, fitToView]);
+  }, [layout, open, dimensions, activeMap?.id, fitToView]);
 
   // Export as JSON
   const handleExportJSON = () => {
