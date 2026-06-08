@@ -127,18 +127,23 @@ export function MindMapDialog({
     return null;
   }, [selectedMap, mindMaps]);
 
-  const [prevActiveMapId, setPrevActiveMapId] = useState<string | null>(() => activeMap?.id || null);
+  const activeMapId = activeMap?.id ?? null;
+  const prevActiveMapIdRef = useRef<string | null>(activeMapId);
 
-  if (activeMap?.id !== prevActiveMapId) {
-    setPrevActiveMapId(activeMap?.id || null);
+  useEffect(() => {
+    if (activeMapId === prevActiveMapIdRef.current) {
+      return;
+    }
+
+    prevActiveMapIdRef.current = activeMapId;
     setIsRootExpanded(false);
     setExpandedMainNodeIds(new Set());
     setPendingFocusNodeIds(null);
-  }
+  }, [activeMapId]);
 
   useEffect(() => {
     lastFitMapIdRef.current = null;
-  }, [activeMap?.id]);
+  }, [activeMapId]);
 
   // Derived state: isGeneratingNew is true if user requested it, or if there are no existing maps
   const isGeneratingNew = useMemo(() => {

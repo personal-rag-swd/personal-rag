@@ -40,7 +40,7 @@ export function NavUser({
   const { logout, user: authUser } = useAuth();
 
   const displayUser = {
-    name: authUser?.email.split("@")[0] || user.name,
+    name: authUser?.email?.split("@")[0] || user.name,
     email: authUser?.email || user.email,
     avatar: user.avatar,
   };
