@@ -31,7 +31,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
 import {
-  useGenerateNotebookReportMutation,
   useNotebookReportsQuery,
 } from "@/features/notebooks/api";
 import type {
@@ -48,12 +47,16 @@ export function MindMapDialog({
   open,
   onOpenChange,
   initialMap,
+  isGenerating,
+  onGenerate,
 }: {
   notebookId: string;
   notebookName: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialMap?: NotebookReport | null;
+  isGenerating: boolean;
+  onGenerate: (detailLevel: "simple" | "intermediate" | "detailed", instructions: string) => void;
 }) {
   const [detailLevel, setDetailLevel] = useState<"simple" | "intermediate" | "detailed">("intermediate");
   const [instructions, setInstructions] = useState("");
@@ -66,6 +69,10 @@ export function MindMapDialog({
     initialMap?.reportType === "mindmap" ? false : null
   );
 
+  const [isRootExpanded, setIsRootExpanded] = useState(false);
+  const [expandedMainNodeIds, setExpandedMainNodeIds] = useState<Set<string>>(new Set());
+  const [pendingFocusNodeIds, setPendingFocusNodeIds] = useState<string[] | null>(null);
+
   // Graph canvas dimension and pan/zoom state
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [zoom, setZoom] = useState(1);
@@ -73,14 +80,39 @@ export function MindMapDialog({
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
-  const containerRef = useRef<HTMLDivElement>(null);
+  const containerElementRef = useRef<HTMLDivElement | null>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+
+  const containerRef = useCallback((node: HTMLDivElement | null) => {
+    containerElementRef.current = node;
+
+    if (resizeObserverRef.current) {
+      resizeObserverRef.current.disconnect();
+      resizeObserverRef.current = null;
+    }
+
+    if (node) {
+      const resizeObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const w = entry.contentRect.width;
+          const h = entry.contentRect.height;
+          if (w > 0 && h > 0) {
+            setDimensions({ width: w, height: h });
+          }
+        }
+      });
+      resizeObserver.observe(node);
+      resizeObserverRef.current = resizeObserver;
+    }
+  }, []);
   const svgRef = useRef<SVGSVGElement>(null);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const panStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const activePointerIdRef = useRef<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
   const { data: reports } = useNotebookReportsQuery(notebookId);
-  const generateMutation = useGenerateNotebookReportMutation(notebookId);
+  const lastFitMapIdRef = useRef<string | null>(null);
 
   // Filter mindmap reports
   const mindMaps = useMemo(() => {
@@ -95,31 +127,22 @@ export function MindMapDialog({
     return null;
   }, [selectedMap, mindMaps]);
 
+  // Reset expansion states when activeMap changes
+  useEffect(() => {
+    setIsRootExpanded(false);
+    setExpandedMainNodeIds(new Set());
+    setPendingFocusNodeIds(null);
+    lastFitMapIdRef.current = null;
+  }, [activeMap?.id]);
+
   // Derived state: isGeneratingNew is true if user requested it, or if there are no existing maps
   const isGeneratingNew = useMemo(() => {
+    if (isGenerating) return true;
     if (userIsGeneratingNew !== null) return userIsGeneratingNew;
     return mindMaps.length === 0;
-  }, [userIsGeneratingNew, mindMaps]);
+  }, [userIsGeneratingNew, mindMaps, isGenerating]);
 
-  // Handle ResizeObserver to track container sizes reactively without ref accesses in render
-  useEffect(() => {
-    if (!open) return;
-    const container = containerRef.current;
-    if (!container) return;
-
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setDimensions({
-          width: entry.contentRect.width || 800,
-          height: entry.contentRect.height || 600,
-        });
-      }
-    });
-
-    resizeObserver.observe(container);
-
-    return () => resizeObserver.disconnect();
-  }, [open]);
+  // Dimensions are tracked reactively via the containerRef callback ref
 
   // Handle SVG Zooming on mouse wheel
   useEffect(() => {
@@ -142,47 +165,56 @@ export function MindMapDialog({
   }, [activeMap]);
 
   const handleGenerate = () => {
-    generateMutation.mutate(
-      {
-        reportType: "mindmap",
-        additionalInstructions: instructions.trim() || undefined,
-        detailLevel,
-      },
-      {
-        onSuccess: (report) => {
-          toast.success("Mind map generated successfully!");
-          setSelectedMap(report);
-          setUserIsGeneratingNew(false);
-          setInstructions("");
-        },
-        onError: (error) => {
-          toast.error(`Failed to generate mind map: ${error.message}`);
-        },
-      }
-    );
+    onGenerate(detailLevel, instructions);
   };
 
-  // Drag to Pan logic
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return; // Only left click drag
-    setIsDragging(true);
+  // Drag to Pan logic using PointerEvents for seamless mouse and touch support
+  const handlePointerDown = (e: React.PointerEvent) => {
+    // For pointer events, left click for mouse; touch/stylus have e.button === 0 or -1 (no buttons)
+    if (e.button !== 0 && e.pointerType === "mouse") return;
     dragStartRef.current = { x: e.clientX, y: e.clientY };
     panStartRef.current = { ...pan };
+    activePointerIdRef.current = e.pointerId;
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging || !dragStartRef.current) return;
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!dragStartRef.current) return;
     const dx = e.clientX - dragStartRef.current.x;
     const dy = e.clientY - dragStartRef.current.y;
+
+    if (!isDragging) {
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      if (distance > 5) {
+        setIsDragging(true);
+        if (activePointerIdRef.current !== null) {
+          try {
+            e.currentTarget.setPointerCapture(activePointerIdRef.current);
+          } catch (err) {
+            console.warn("Failed to capture pointer:", err);
+          }
+        }
+      } else {
+        return; // Don't drag yet
+      }
+    }
+
     setPan({
       x: panStartRef.current.x + dx,
       y: panStartRef.current.y + dy,
     });
   };
 
-  const handleMouseUpOrLeave = () => {
-    setIsDragging(false);
+  const handlePointerUpOrLeave = (e: React.PointerEvent) => {
     dragStartRef.current = null;
+    activePointerIdRef.current = null;
+    if (isDragging) {
+      setIsDragging(false);
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch (err) {
+        // ignore
+      }
+    }
   };
 
   const resetView = () => {
@@ -207,11 +239,15 @@ export function MindMapDialog({
     const rootNode = nodes.find((n) => n.type === "root") || nodes[0];
     if (!rootNode) return null;
 
-    const mainNodes = nodes.filter((n) => n.type === "main" && n.id !== rootNode.id);
-    const subNodes = nodes.filter((n) => n.type === "sub");
+    const mainNodes = isRootExpanded
+      ? nodes.filter((n) => n.type === "main" && n.id !== rootNode.id)
+      : [];
+    const subNodes = isRootExpanded
+      ? nodes.filter((n) => n.type === "sub" && expandedMainNodeIds.has(n.parentId || ""))
+      : [];
 
-    const rightMain = mainNodes.filter((_, idx) => idx % 2 === 0);
-    const leftMain = mainNodes.filter((_, idx) => idx % 2 === 1);
+    const rightMain = mainNodes;
+    const leftMain: MindMapNode[] = [];
 
     const positions: Record<string, Position> = {};
 
@@ -300,7 +336,7 @@ export function MindMapDialog({
       rightMain,
       leftMain,
     };
-  }, [graphData]);
+  }, [graphData, isRootExpanded, expandedMainNodeIds]);
 
   // Selected node info
   const selectedNode = useMemo(() => {
@@ -316,9 +352,156 @@ export function MindMapDialog({
     );
   }, [graphData, selectedNodeId]);
 
+  const focusOnNodes = useCallback((nodeIds: string[]) => {
+    if (!layout || !containerElementRef.current) return;
+    const coords = nodeIds
+      .map((id) => layout.positions[id])
+      .filter(Boolean);
+
+    if (coords.length === 0) return;
+
+    let minX = Infinity,
+      maxX = -Infinity,
+      minY = Infinity,
+      maxY = -Infinity;
+
+    coords.forEach((pos) => {
+      minX = Math.min(minX, pos.x);
+      maxX = Math.max(maxX, pos.x + pos.width);
+      minY = Math.min(minY, pos.y);
+      maxY = Math.max(maxY, pos.y + pos.height);
+    });
+
+    const graphWidth = maxX - minX;
+    const graphHeight = maxY - minY;
+
+    const containerWidth = dimensions.width;
+    const containerHeight = dimensions.height;
+
+    const isMobileSize = containerWidth < 640;
+    const padding = isMobileSize ? 30 : 120;
+    const scaleX = (containerWidth - padding) / graphWidth;
+    const scaleY = (containerHeight - padding) / graphHeight;
+    let nextScale = Math.min(Math.min(scaleX, scaleY), 1.25);
+
+    // Enforce readable scale for mobile path focus (at least 0.55x)
+    if (isMobileSize) {
+      nextScale = Math.max(nextScale, 0.55);
+    }
+
+    const graphCenterX = minX + graphWidth / 2;
+    const graphCenterY = minY + graphHeight / 2;
+
+    setZoom(nextScale);
+    setPan({
+      x: -graphCenterX * nextScale,
+      y: -graphCenterY * nextScale,
+    });
+  }, [layout, dimensions]);
+
+  const expandRoot = () => {
+    setIsRootExpanded(true);
+    if (graphData?.nodes) {
+      const rootNode = graphData.nodes.find((n) => n.type === "root") || graphData.nodes[0];
+      const mainNodes = graphData.nodes.filter((n) => n.type === "main" && n.id !== rootNode.id);
+      if (rootNode) {
+        setPendingFocusNodeIds([rootNode.id, ...mainNodes.map((m) => m.id)]);
+      }
+    }
+  };
+
+  const collapseRoot = () => {
+    if (graphData?.nodes) {
+      const rootNode = graphData.nodes.find((n) => n.type === "root") || graphData.nodes[0];
+      if (rootNode) {
+        setIsRootExpanded(false);
+        setExpandedMainNodeIds(new Set());
+        setPendingFocusNodeIds([rootNode.id]);
+      }
+    }
+  };
+
+  const expandMainNode = (mId: string) => {
+    setExpandedMainNodeIds((prev) => {
+      const next = new Set(prev);
+      next.add(mId);
+      return next;
+    });
+    if (graphData?.nodes) {
+      const isMobile = dimensions.width < 640;
+      if (isMobile) {
+        const childIds = graphData.nodes.filter((n) => n.parentId === mId).map((n) => n.id);
+        setPendingFocusNodeIds([mId, ...childIds]);
+      } else {
+        const rootNode = graphData.nodes.find((n) => n.type === "root") || graphData.nodes[0];
+        if (rootNode) {
+          setPendingFocusNodeIds([mId, rootNode.id]);
+        }
+      }
+    }
+  };
+
+  const collapseMainNode = (mId: string) => {
+    setExpandedMainNodeIds((prev) => {
+      const next = new Set(prev);
+      next.delete(mId);
+      return next;
+    });
+    if (graphData?.nodes) {
+      const isMobile = dimensions.width < 640;
+      if (isMobile) {
+        setPendingFocusNodeIds([mId]);
+      } else {
+        const rootNode = graphData.nodes.find((n) => n.type === "root") || graphData.nodes[0];
+        if (rootNode) {
+          setPendingFocusNodeIds([mId, rootNode.id]);
+        }
+      }
+    }
+  };
+
+  // Trigger focus transition when layout updates and pendingFocusNodeIds is present
+  useEffect(() => {
+    if (layout && pendingFocusNodeIds) {
+      const timer = setTimeout(() => {
+        focusOnNodes(pendingFocusNodeIds);
+        setPendingFocusNodeIds(null);
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [layout, pendingFocusNodeIds, focusOnNodes]);
+
+  // Trigger focus when selectedNodeId changes (only if layout doesn't need to update first)
+  useEffect(() => {
+    if (!selectedNodeId || !graphData || !layout) return;
+    if (pendingFocusNodeIds) return;
+
+    const node = graphData.nodes.find((n) => n.id === selectedNodeId);
+    if (!node) return;
+
+    const isMobile = dimensions.width < 640;
+    let focusIds: string[] = [selectedNodeId];
+    if (isMobile) {
+      if (node.type === "sub" && node.parentId) {
+        focusIds.push(node.parentId);
+      }
+    } else {
+      if (node.type === "sub" && node.parentId) {
+        focusIds.push(node.parentId);
+      } else if (node.type === "main") {
+        const rootNode = graphData.nodes.find((n) => n.type === "root") || graphData.nodes[0];
+        if (rootNode) {
+          focusIds.push(rootNode.id);
+        }
+      }
+    }
+
+    focusOnNodes(focusIds);
+  }, [selectedNodeId, focusOnNodes, graphData, layout, pendingFocusNodeIds, dimensions.width]);
+
   // Fit to screen helper: computes bounding box of layout and centers it
   const fitToView = useCallback(() => {
-    if (!layout || !containerRef.current) return;
+    if (!layout || !containerElementRef.current) return;
     const p = layout.positions;
     const coords = Object.values(p);
     if (coords.length === 0) return;
@@ -338,30 +521,55 @@ export function MindMapDialog({
     const graphWidth = maxX - minX;
     const graphHeight = maxY - minY;
 
-    const containerWidth = containerRef.current.clientWidth || 800;
-    const containerHeight = containerRef.current.clientHeight || 600;
+    const containerWidth = dimensions.width;
+    const containerHeight = dimensions.height;
 
-    const scaleX = (containerWidth - 80) / graphWidth;
-    const scaleY = (containerHeight - 80) / graphHeight;
-    const nextScale = Math.min(Math.min(scaleX, scaleY), 1.2);
+    const isMobileSize = containerWidth < 640;
+    const padding = isMobileSize ? 30 : 80;
+    const scaleX = (containerWidth - padding) / graphWidth;
+    const scaleY = (containerHeight - padding) / graphHeight;
+    let nextScale = Math.min(Math.min(scaleX, scaleY), 1.2);
+
+    // Enforce readable scale on mobile initial render (at least 0.55x)
+    if (isMobileSize) {
+      nextScale = Math.max(nextScale, 0.55);
+    }
 
     const graphCenterX = minX + graphWidth / 2;
     const graphCenterY = minY + graphHeight / 2;
 
     setZoom(nextScale);
     setPan({
-      x: containerWidth / 2 - graphCenterX * nextScale,
-      y: containerHeight / 2 - graphCenterY * nextScale,
+      x: -graphCenterX * nextScale,
+      y: -graphCenterY * nextScale,
     });
-  }, [layout]);
+  }, [layout, dimensions]);
 
-  // Fit view when layout changes
+  // Track last measured dimensions to trigger fitToView if the viewport updates from default
+  const lastDimensionsRef = useRef({ width: 800, height: 600 });
+
+  // Fit view when layout changes or dimensions initialize/change (only once per map session)
   useEffect(() => {
-    if (layout) {
-      const timer = setTimeout(fitToView, 50);
+    if (!open) {
+      lastFitMapIdRef.current = null;
+      return;
+    }
+    const dimensionsChangedFromDefault =
+      lastDimensionsRef.current.width === 800 && dimensions.width !== 800;
+
+    if (
+      layout &&
+      dimensions.width > 0 &&
+      (lastFitMapIdRef.current !== (activeMap?.id || "new") || dimensionsChangedFromDefault)
+    ) {
+      const timer = setTimeout(() => {
+        fitToView();
+        lastFitMapIdRef.current = activeMap?.id || "new";
+        lastDimensionsRef.current = { ...dimensions };
+      }, 120);
       return () => clearTimeout(timer);
     }
-  }, [layout, fitToView]);
+  }, [layout, open, dimensions.width, dimensions.height, activeMap?.id, fitToView]);
 
   // Export as JSON
   const handleExportJSON = () => {
@@ -462,37 +670,37 @@ export function MindMapDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="flex flex-col p-0 gap-0 max-w-[min(100%-2rem,1400px)] sm:max-w-[min(100%-2rem,1400px)] h-[min(100%-4rem,90vh)] overflow-hidden bg-background border-border text-foreground rounded-xl"
+        className="flex flex-col p-0 gap-0 fixed top-0 left-0 translate-x-0 translate-y-0 sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 w-full max-w-none sm:max-w-[min(100%-2rem,1400px)] h-dvh sm:h-[min(100%-4rem,90vh)] overflow-hidden bg-background border-none sm:border border-border text-foreground sm:rounded-xl"
       >
         {/* Header */}
-        <div className="flex items-center gap-3 px-5 py-3.5 border-b border-border shrink-0 bg-muted/40">
+        <div className="flex items-center gap-3 px-3 pt-[calc(env(safe-area-inset-top,0px)+0.875rem)] pb-3.5 sm:px-5 sm:py-3.5 border-b border-border shrink-0 bg-muted/40">
           <div className="min-w-0 flex-1">
-            <DialogTitle className="text-base font-semibold text-foreground flex items-center gap-2">
-              <span className="bg-primary/20 text-primary px-2 py-0.5 rounded text-xs border border-primary/30">
+            <DialogTitle className="text-sm sm:text-base font-semibold text-foreground flex items-center gap-2 min-w-0">
+              <span className="bg-primary/20 text-primary px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-xs border border-primary/30 shrink-0">
                 Mind Map
               </span>
-              <span>{notebookName}</span>
+              <span className="truncate">{notebookName}</span>
             </DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground mt-0.5 truncate">
+            <DialogDescription className="text-xs text-muted-foreground mt-0.5 truncate hidden sm:block">
               {activeMap
                 ? `Active: Generated ${formatDistanceToNow(new Date(activeMap.createdAt), { addSuffix: true })}`
                 : "Generate a concept network from your notebook materials."}
             </DialogDescription>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {mindMaps.length > 0 && !isGeneratingNew && (
-              <select
-                value={activeMap?.id || ""}
-                onChange={(e) => {
-                  const map = mindMaps.find((m) => m.id === e.target.value);
-                  if (map) setSelectedMap(map);
-                }}
-                className="bg-background border border-border text-xs rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary text-foreground"
-              >
+               <select
+                 value={activeMap?.id || ""}
+                 onChange={(e) => {
+                   const map = mindMaps.find((m) => m.id === e.target.value);
+                   if (map) setSelectedMap(map);
+                 }}
+                 className="max-w-[85px] sm:max-w-none bg-background border border-border text-xs rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary text-foreground truncate"
+               >
                 {mindMaps.map((m, idx) => (
                   <option key={m.id} value={m.id}>
-                    Version {mindMaps.length - idx} ({formatDistanceToNow(new Date(m.createdAt), { addSuffix: true })})
+                    V{mindMaps.length - idx} ({formatDistanceToNow(new Date(m.createdAt), { addSuffix: true })})
                   </option>
                 ))}
               </select>
@@ -503,16 +711,16 @@ export function MindMapDialog({
                 variant="outline"
                 size="sm"
                 onClick={() => setUserIsGeneratingNew(true)}
-                className="h-8 text-xs border-border hover:bg-muted text-foreground gap-1.5"
+                className="h-8 text-xs border-border hover:bg-muted text-foreground gap-1 px-2 sm:px-3 shrink-0"
               >
                 <PlusIcon className="size-3.5" />
-                Generate New
+                <span className="hidden sm:inline">Generate New</span>
               </Button>
             )}
 
             <button
               onClick={() => onOpenChange(false)}
-              className="flex size-8 items-center justify-center rounded bg-muted border border-border hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              className="flex size-8 items-center justify-center rounded bg-muted border border-border hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
               aria-label="Close dialog"
             >
               <XIcon className="size-4" />
@@ -537,6 +745,7 @@ export function MindMapDialog({
                     Depth / Level of Detail
                   </label>
                   <ToggleGroup
+                    disabled={isGenerating}
                     value={[detailLevel]}
                     onValueChange={(val: string[]) => {
                       if (val[0] === "simple" || val[0] === "intermediate" || val[0] === "detailed") {
@@ -578,6 +787,7 @@ export function MindMapDialog({
                     Focus Instructions (Optional)
                   </label>
                   <Textarea
+                    disabled={isGenerating}
                     value={instructions}
                     onChange={(e) => setInstructions(e.target.value)}
                     placeholder="Focus on specific topics (e.g. 'Concentrate on deployment procedures and MinIO configs')"
@@ -591,10 +801,10 @@ export function MindMapDialog({
               <div className="pt-4 border-t border-border space-y-2">
                 <Button
                   onClick={handleGenerate}
-                  disabled={generateMutation.isPending}
+                  disabled={isGenerating}
                   className="w-full gap-2 text-xs py-5 rounded-lg"
                 >
-                  {generateMutation.isPending ? (
+                  {isGenerating ? (
                     <>
                       <Loader2Icon className="size-4 animate-spin" />
                       Generating Knowledge Graph...
@@ -610,6 +820,7 @@ export function MindMapDialog({
                 {mindMaps.length > 0 && (
                   <Button
                     variant="ghost"
+                    disabled={isGenerating}
                     onClick={() => setUserIsGeneratingNew(false)}
                     className="w-full text-xs text-muted-foreground hover:text-foreground"
                   >
@@ -621,15 +832,31 @@ export function MindMapDialog({
 
             {/* Explanatory Panel / Graphic mock */}
             <div className="flex-1 bg-muted/20 p-8 flex flex-col items-center justify-center text-center">
-              <div className="size-16 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary mb-4 animate-pulse">
-                <SparklesIcon className="size-8" />
-              </div>
-              <h3 className="text-sm font-semibold text-foreground">
-                Visualize Document Relationships
-              </h3>
-              <p className="text-xs text-muted-foreground max-w-sm mt-1.5 leading-relaxed">
-                Personal RAG automatically scans files parsed into your notebook, extracts core subjects, organizes sub-branches, and drafts relationships.
-              </p>
+              {isGenerating ? (
+                <>
+                  <div className="size-16 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary mb-4 animate-pulse">
+                    <Loader2Icon className="size-8 animate-spin" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-foreground">
+                    Generating Mind Map...
+                  </h3>
+                  <p className="text-xs text-muted-foreground max-w-sm mt-1.5 leading-relaxed">
+                    Please wait while we scan your documents and build the knowledge network. You can close this dialog; the process will continue in the background.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="size-16 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary mb-4 animate-pulse">
+                    <SparklesIcon className="size-8" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-foreground">
+                    Visualize Document Relationships
+                  </h3>
+                  <p className="text-xs text-muted-foreground max-w-sm mt-1.5 leading-relaxed">
+                    Personal RAG automatically scans files parsed into your notebook, extracts core subjects, organizes sub-branches, and drafts relationships.
+                  </p>
+                </>
+              )}
             </div>
           </div>
         ) : (
@@ -637,11 +864,11 @@ export function MindMapDialog({
             {/* Interactive Graph Canvas */}
             <div
               ref={containerRef}
-              className="flex-1 min-h-0 relative select-none cursor-grab active:cursor-grabbing bg-background"
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUpOrLeave}
-              onMouseLeave={handleMouseUpOrLeave}
+              className="flex-1 min-h-0 relative select-none cursor-grab active:cursor-grabbing bg-background touch-none"
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUpOrLeave}
+              onPointerCancel={handlePointerUpOrLeave}
             >
               {/* Grid dots pattern background */}
               <svg className="absolute inset-0 size-full pointer-events-none">
@@ -691,39 +918,155 @@ export function MindMapDialog({
 
                   <g
                     transform={`translate(${dimensions.width / 2 + pan.x}, ${dimensions.height / 2 + pan.y}) scale(${zoom})`}
+                    className={cn(
+                      "transition-transform ease-out duration-300",
+                      isDragging ? "transition-none" : ""
+                    )}
                   >
-                    {/* 1. Connection lines (Bezier links) */}
-                    {Object.entries(layout.positions).map(([nodeId, pos]) => {
-                      const node = graphData?.nodes.find((n) => n.id === nodeId);
-                      if (!node || !node.parentId || nodeId === layout.rootNode.id) return null;
+                    {/* 1. Connection lines (Bezier links converging to central junctions) */}
+                    {(() => {
+                      const rootNode = layout.rootNode;
+                      const rootPos = layout.positions[rootNode.id];
+                      if (!rootPos || !isRootExpanded) return null;
 
-                      const parentPos = layout.positions[node.parentId];
-                      if (!parentPos) return null;
-
-                      const isRight = pos.x > 0;
-
-                      // Source point (parent card edge)
-                      const startX = isRight
-                        ? parentPos.x + parentPos.width
-                        : parentPos.x;
-                      const startY = parentPos.y + parentPos.height / 2;
-
-                      // Target point (child card edge)
-                      const endX = isRight ? pos.x : pos.x + pos.width;
-                      const endY = pos.y + pos.height / 2;
-
-                      const midX = (startX + endX) / 2;
-                      const pathD = `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`;
+                      const rootStartX = rootPos.x + rootPos.width;
+                      const rootStartY = rootPos.y + rootPos.height / 2;
+                      const junctionX = rootStartX + 45;
 
                       return (
-                        <path
-                          key={`link-${nodeId}`}
-                          d={pathD}
-                          className="fill-none stroke-blue-500/35 hover:stroke-blue-500/70 transition-all duration-200"
-                          strokeWidth="2"
-                        />
+                        <>
+                          {/* Horizontal line from root to junction */}
+                          <path
+                            d={`M ${rootStartX} ${rootStartY} L ${junctionX} ${rootStartY}`}
+                            className="fill-none stroke-blue-500/35"
+                            strokeWidth="2"
+                          />
+
+                          {/* Junction Circle with '<' for root */}
+                          <g
+                            transform={`translate(${junctionX}, ${rootStartY})`}
+                            className="group cursor-pointer"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              collapseRoot();
+                            }}
+                          >
+                            <circle
+                              r="20"
+                              className="fill-transparent stroke-none"
+                            />
+                            <circle
+                              r="10"
+                              className="fill-background stroke-blue-500/60 group-hover:stroke-blue-500 group-hover:fill-blue-500/10 transition-colors"
+                              strokeWidth="1.5"
+                            />
+                            <text
+                              y="3.5"
+                              className="text-[11px] font-bold fill-blue-500 select-none pointer-events-none group-hover:fill-blue-600"
+                              textAnchor="middle"
+                            >
+                              &lt;
+                            </text>
+                          </g>
+
+                          {/* Render horizontal lines and circles for each expanded main node */}
+                          {layout.mainNodes
+                            .filter((m) => expandedMainNodeIds.has(m.id))
+                            .map((m) => {
+                              const mPos = layout.positions[m.id];
+                              if (!mPos) return null;
+
+                              const startX = mPos.x + mPos.width;
+                              const startY = mPos.y + mPos.height / 2;
+                              const mainJunctionX = startX + 35;
+
+                              return (
+                                <g key={`junction-${m.id}`}>
+                                  {/* Line from main node to its junction */}
+                                  <path
+                                    d={`M ${startX} ${startY} L ${mainJunctionX} ${startY}`}
+                                    className="fill-none stroke-blue-500/35"
+                                    strokeWidth="2"
+                                  />
+                                  {/* Junction Circle with '<' for main node */}
+                                  <g
+                                    transform={`translate(${mainJunctionX}, ${startY})`}
+                                    className="group cursor-pointer"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      collapseMainNode(m.id);
+                                    }}
+                                  >
+                                    <circle
+                                      r="20"
+                                      className="fill-transparent stroke-none"
+                                    />
+                                    <circle
+                                      r="10"
+                                      className="fill-background stroke-emerald-500/60 group-hover:stroke-emerald-500 group-hover:fill-emerald-500/10 transition-colors"
+                                      strokeWidth="1.5"
+                                    />
+                                    <text
+                                      y="3.5"
+                                      className="text-[11px] font-bold fill-emerald-500 select-none pointer-events-none group-hover:fill-emerald-600"
+                                      textAnchor="middle"
+                                    >
+                                      &lt;
+                                    </text>
+                                  </g>
+                                </g>
+                              );
+                            })}
+
+                          {/* Render curves between nodes */}
+                          {Object.entries(layout.positions).map(([nodeId, pos]) => {
+                            const node = graphData?.nodes.find((n) => n.id === nodeId);
+                            if (!node || !node.parentId || nodeId === layout.rootNode.id) return null;
+
+                            const isMainNode = node.parentId === layout.rootNode.id;
+
+                            if (isMainNode) {
+                              // Curves from root junction to main nodes
+                              const endX = pos.x;
+                              const endY = pos.y + pos.height / 2;
+                              const midX = (junctionX + endX) / 2;
+                              const pathD = `M ${junctionX} ${rootStartY} C ${midX} ${rootStartY}, ${midX} ${endY}, ${endX} ${endY}`;
+
+                              return (
+                                <path
+                                  key={`link-${nodeId}`}
+                                  d={pathD}
+                                  className="fill-none stroke-blue-500/35 hover:stroke-blue-500/70 transition-all duration-200"
+                                  strokeWidth="2"
+                                />
+                              );
+                            } else {
+                              // Curves from main junction to sub nodes
+                              const parentPos = layout.positions[node.parentId];
+                              if (!parentPos) return null;
+
+                              const startX = parentPos.x + parentPos.width;
+                              const startY = parentPos.y + parentPos.height / 2;
+                              const mainJunctionX = startX + 35;
+
+                              const endX = pos.x;
+                              const endY = pos.y + pos.height / 2;
+                              const midX = (mainJunctionX + endX) / 2;
+                              const pathD = `M ${mainJunctionX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`;
+
+                              return (
+                                <path
+                                  key={`link-${nodeId}`}
+                                  d={pathD}
+                                  className="fill-none stroke-blue-500/35 hover:stroke-blue-500/70 transition-all duration-200"
+                                  strokeWidth="2"
+                                />
+                              );
+                            }
+                          })}
+                        </>
                       );
-                    })}
+                    })()}
 
                     {/* 2. Cross-branch relationships */}
                     {(graphData?.relationships || []).map((rel, idx) => {
@@ -768,7 +1111,7 @@ export function MindMapDialog({
                       );
                     })}
 
-                    {/* 3. Symmetrical layout concept nodes */}
+                    {/* 3. Horizontal layout concept nodes */}
                     {Object.entries(layout.positions).map(([nodeId, pos]) => {
                       const node = graphData?.nodes.find((n) => n.id === nodeId);
                       if (!node) return null;
@@ -789,19 +1132,24 @@ export function MindMapDialog({
                             onClick={(e) => {
                               e.stopPropagation();
                               setSelectedNodeId(nodeId);
+                              if (node.type === "root" && !isRootExpanded) {
+                                expandRoot();
+                              } else if (node.type === "main" && !expandedMainNodeIds.has(nodeId)) {
+                                expandMainNode(nodeId);
+                              }
                             }}
                             title={node.label}
                             className={cn(
                               "w-full h-full p-2.5 rounded-lg border flex flex-col justify-center transition-all duration-200 cursor-pointer shadow-md select-none",
                               // Root node styles
                               node.type === "root" &&
-                                "bg-primary/10 dark:bg-primary/25 border-primary ring-2 ring-primary/20 hover:scale-105",
+                                "bg-violet-100 dark:bg-violet-950/60 border-violet-300 dark:border-violet-800 text-violet-900 dark:text-violet-100 font-bold",
                               // Main nodes styles
                               node.type === "main" &&
-                                "bg-card border-border hover:border-primary/80 hover:scale-[1.03]",
+                                "bg-blue-100 dark:bg-blue-950/60 border-blue-300 dark:border-blue-800 text-blue-900 dark:text-blue-100",
                               // Sub nodes styles
                               node.type === "sub" &&
-                                "bg-muted/40 dark:bg-muted/20 border-border/80 hover:border-muted-foreground/50 hover:scale-[1.03]",
+                                "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900/60 text-emerald-900 dark:text-emerald-100",
                               // Highlights
                               isSelected && "border-primary ring-2 ring-primary/30",
                               highlightState === "highlighted" &&
@@ -809,29 +1157,80 @@ export function MindMapDialog({
                               highlightState === "dimmed" && "opacity-20 hover:opacity-100"
                             )}
                           >
-                            {/* Node labels */}
-                            <div
-                              className={cn(
-                                "font-medium leading-snug select-none",
-                                node.type === "root"
-                                  ? "text-[12px] font-bold text-primary line-clamp-2"
-                                  : node.type === "sub"
-                                    ? "text-[11px] text-foreground line-clamp-3"
-                                    : "text-[11px] text-foreground line-clamp-2"
-                              )}
-                            >
-                              {node.label}
-                            </div>
-                            {/* Branch type badge & short excerpt */}
-                            {node.description && node.type !== "sub" && (
-                              <div className="text-[9px] text-muted-foreground mt-0.5 line-clamp-1 select-none">
-                                {node.description}
+                            <div className="flex items-center justify-between gap-2.5 w-full h-full">
+                              <div className="flex-1 min-w-0">
+                                {/* Node labels */}
+                                <div
+                                  className={cn(
+                                    "font-medium leading-snug select-none",
+                                    node.type === "root"
+                                      ? "text-violet-900 dark:text-violet-100 text-[13px] font-bold line-clamp-2"
+                                      : node.type === "sub"
+                                        ? "text-emerald-900 dark:text-emerald-100 text-[11px] font-medium line-clamp-3"
+                                        : "text-blue-900 dark:text-blue-100 text-[12px] font-semibold line-clamp-2"
+                                  )}
+                                >
+                                  {node.label}
+                                </div>
+                                {/* Branch type badge & short excerpt */}
+                                {node.description && node.type !== "sub" && (
+                                  <div className="text-[9px] text-muted-foreground mt-0.5 line-clamp-1 select-none">
+                                    {node.description}
+                                  </div>
+                                )}
                               </div>
-                            )}
+                              {node.type === "main" && !expandedMainNodeIds.has(node.id) && (
+                                <div
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    expandMainNode(node.id);
+                                  }}
+                                  className="size-5 rounded-full bg-blue-500/10 dark:bg-blue-500/20 border border-blue-500/30 flex items-center justify-center text-blue-500 hover:bg-blue-500 hover:text-white transition-all text-[10px] font-bold shrink-0 cursor-pointer"
+                                >
+                                  &gt;
+                                </div>
+                              )}
+                              {node.type === "sub" && (
+                                <div
+                                  className="size-5 rounded-full bg-emerald-500/10 dark:bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-500 text-[10px] font-bold shrink-0"
+                                >
+                                  &gt;
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </foreignObject>
                       );
                     })}
+
+                    {/* Root Node Expand button (only when collapsed) */}
+                    {!isRootExpanded && layout && (
+                      <g
+                        transform={`translate(${layout.positions[layout.rootNode.id].x + layout.positions[layout.rootNode.id].width + 15}, 0)`}
+                        className="group cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          expandRoot();
+                        }}
+                      >
+                        <circle
+                          r="22"
+                          className="fill-transparent stroke-none"
+                        />
+                        <circle
+                          r="12"
+                          className="fill-primary stroke-primary/30 group-hover:stroke-primary group-hover:brightness-110 transition-all"
+                          strokeWidth="2"
+                        />
+                        <text
+                          y="4"
+                          className="text-[13px] font-bold fill-primary-foreground select-none pointer-events-none"
+                          textAnchor="middle"
+                        >
+                          &gt;
+                        </text>
+                      </g>
+                    )}
                   </g>
                 </svg>
               )}
@@ -870,13 +1269,13 @@ export function MindMapDialog({
               )}
 
               {/* Search Control Overlay */}
-              <div className="absolute left-4 top-4 pointer-events-auto w-64">
+              <div className="absolute left-4 top-4 pointer-events-auto w-36 sm:w-64">
                 <div className="relative">
                   <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
                   <Input
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search concepts..."
+                    placeholder={dimensions.width < 640 ? "Search..." : "Search concepts..."}
                     className="bg-background/95 backdrop-blur border-border text-xs pl-9 pr-8 h-9 shadow-lg focus-visible:ring-primary w-full text-foreground"
                   />
                   {searchQuery && (
@@ -891,31 +1290,39 @@ export function MindMapDialog({
               </div>
 
               {/* Export Panel Overlay */}
-              <div className="absolute right-4 top-4 pointer-events-auto flex items-center gap-2">
+              <div className="absolute right-4 top-4 pointer-events-auto flex items-center gap-1.5 sm:gap-2">
                 <Button
                   onClick={handleExportJSON}
                   size="sm"
                   variant="outline"
-                  className="bg-background/90 border-border hover:bg-muted text-foreground text-xs gap-1.5 h-9"
+                  className="bg-background/90 border-border hover:bg-muted text-foreground text-xs gap-1.5 h-9 px-2.5 sm:px-3"
                 >
                   <FileJsonIcon className="size-3.5 text-emerald-500" />
-                  Export JSON
+                  <span className="hidden sm:inline">Export JSON</span>
                 </Button>
                 <Button
                   onClick={handleExportSVG}
                   size="sm"
                   variant="outline"
-                  className="bg-background/90 border-border hover:bg-muted text-foreground text-xs gap-1.5 h-9"
+                  className="bg-background/90 border-border hover:bg-muted text-foreground text-xs gap-1.5 h-9 px-2.5 sm:px-3"
                 >
                   <ImageIcon className="size-3.5 text-blue-500" />
-                  Export SVG
+                  <span className="hidden sm:inline">Export SVG</span>
                 </Button>
               </div>
             </div>
 
+            {/* Backdrop for mobile details drawer */}
+            {selectedNode && (
+              <div
+                className="absolute inset-0 bg-background/50 backdrop-blur-xs sm:hidden z-10 cursor-pointer"
+                onClick={() => setSelectedNodeId(null)}
+              />
+            )}
+
             {/* Concept details Drawer Panel */}
             {selectedNode && (
-              <div className="w-80 border-l border-border bg-card flex flex-col shrink-0 overflow-hidden relative animate-in slide-in-from-right duration-250 z-10">
+              <div className="absolute right-0 top-0 bottom-0 w-[85vw] max-w-sm sm:w-80 sm:relative sm:border-l border-border bg-card flex flex-col shrink-0 overflow-hidden animate-in slide-in-from-right duration-250 z-20 shadow-2xl sm:shadow-none">
                 <div className="flex items-center justify-between px-4 py-3.5 border-b border-border bg-muted/40">
                   <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     Concept Details

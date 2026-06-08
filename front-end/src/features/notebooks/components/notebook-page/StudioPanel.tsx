@@ -31,6 +31,7 @@ export function StudioPanel({
   onActivate,
   activeFeature,
   onViewReport,
+  isMindMapGenerating,
 }: {
   notebookId?: string;
   isCollapsed?: boolean;
@@ -38,11 +39,12 @@ export function StudioPanel({
   onActivate?: (actionId: string) => void;
   activeFeature?: string | null;
   onViewReport?: (report: NotebookReport) => void;
+  isMindMapGenerating?: boolean;
 }) {
   const { data: reports, isLoading: isReportsLoading } =
     useNotebookReportsQuery(notebookId);
 
-  const hasReports = reports && reports.length > 0;
+  const showSavedOutputs = (reports && reports.length > 0) || isMindMapGenerating;
 
   return (
     <div className={cn(
@@ -157,13 +159,34 @@ export function StudioPanel({
                 <div className="flex items-center justify-center py-8 text-muted-foreground">
                   <Loader2Icon className="size-4 animate-spin" />
                 </div>
-              ) : hasReports ? (
+              ) : showSavedOutputs ? (
                 <>
                   <p className="px-4 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                     Saved outputs
                   </p>
                   <div className="space-y-1.5 px-4 pb-4">
-                    {reports.map((r) => {
+                    {isMindMapGenerating && (
+                      <div
+                        className="group flex w-full items-center gap-2.5 p-2.5 rounded-lg border border-border/40 bg-background/50 opacity-70 text-left cursor-default select-none"
+                      >
+                        <div
+                          className={cn(
+                            "flex size-7 shrink-0 items-center justify-center rounded-md border border-primary/20 bg-primary/5 text-primary"
+                          )}
+                        >
+                          <Loader2Icon className="size-3.5 animate-spin" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-medium text-foreground truncate">
+                            Mind Map
+                          </p>
+                          <p className="text-[11px] text-primary animate-pulse font-medium">
+                            Processing…
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                    {reports && reports.map((r) => {
                       const meta = REPORT_TYPE_BY_ID[r.reportType];
                       return (
                         <button

@@ -9,7 +9,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useNotebookQuery } from "@/features/notebooks/api";
+import { useNotebookQuery, useGenerateNotebookReportMutation } from "@/features/notebooks/api";
 import type { NotebookReport } from "@/features/notebooks/types";
 
 import { ChatPanel } from "./notebook-page/ChatPanel";
@@ -45,6 +45,26 @@ export function NotebookPage() {
     } else {
       setSelectedReport(report);
       setIsReportsOpen(true);
+    }
+  };
+
+  const generateMindMapMutation = useGenerateNotebookReportMutation(id || "");
+
+  const handleGenerateMindMap = async (
+    detailLevel: "simple" | "intermediate" | "detailed",
+    instructions: string
+  ) => {
+    setIsMindMapOpen(false);
+    try {
+      const data = await generateMindMapMutation.mutateAsync({
+        reportType: "mindmap",
+        additionalInstructions: instructions.trim() || undefined,
+        detailLevel,
+      });
+      setSelectedMindMap(data);
+      toast.success("Mind map generated successfully!");
+    } catch (err: any) {
+      toast.error(`Failed to generate mind map: ${err.message || "Unknown error"}`);
     }
   };
 
@@ -116,6 +136,7 @@ export function NotebookPage() {
                   }
                 }}
                 onViewReport={handleViewReport}
+                isMindMapGenerating={generateMindMapMutation.isPending}
               />
             </PanelCard>
           </TabsContent>
@@ -141,6 +162,7 @@ export function NotebookPage() {
                 }
               }}
               onViewReport={handleViewReport}
+              isMindMapGenerating={generateMindMapMutation.isPending}
             />
           </PanelCard>
         </div>
@@ -166,6 +188,8 @@ export function NotebookPage() {
           if (!open) setSelectedMindMap(null);
         }}
         initialMap={selectedMindMap}
+        isGenerating={generateMindMapMutation.isPending}
+        onGenerate={handleGenerateMindMap}
       />
 
       {/* Edit & Delete Dialog Modals */}

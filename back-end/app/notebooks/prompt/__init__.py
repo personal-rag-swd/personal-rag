@@ -5,6 +5,7 @@ from app.notebooks.prompt.report import (
     STUDY_GUIDE_SYSTEM,
     BLOG_SYSTEM,
     CUSTOM_SYSTEM_BASE,
+    MINDMAP_SYSTEM,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "STUDY_GUIDE_SYSTEM",
     "BLOG_SYSTEM",
     "CUSTOM_SYSTEM_BASE",
+    "MINDMAP_SYSTEM",
 ]
