@@ -4,12 +4,16 @@ from uuid import uuid4
 
 import pytest
 from docx import Document as DocxDocument
-from sqlmodel import Session
 
-from app.core.config import Settings
-from app.notebooks.models import Notebook, NotebookDocument
 import app.notebooks.tools.chunking as chunking_module
-from app.notebooks.tools.chunking import ChunkingRequest, chunk_docx, chunk_document, chunk_pdf
+from app.core.config import Settings
+from app.notebooks.models import Notebook
+from app.notebooks.tools.chunking import (
+    ChunkingRequest,
+    chunk_document,
+    chunk_docx,
+    chunk_pdf,
+)
 from app.notebooks.tools.search import search_notebook_chunks
 from app.users.models import User
 
@@ -23,7 +27,6 @@ def settings() -> Settings:
         embedding_provider="openai_compatible",
         embedding_api_key="key",
     )
-
 
 
 def test_docx_chunking_includes_table_text() -> None:
@@ -58,7 +61,8 @@ def test_pdf_chunking_extracts_simple_text(monkeypatch: pytest.MonkeyPatch) -> N
             return "PDF text"
 
     class FakePdf:
-        pages = [FakePage()]
+        def __init__(self) -> None:
+            self.pages = [FakePage()]
 
         def __enter__(self):
             return self
@@ -66,7 +70,9 @@ def test_pdf_chunking_extracts_simple_text(monkeypatch: pytest.MonkeyPatch) -> N
         def __exit__(self, exc_type, exc, tb):
             return False
 
-    monkeypatch.setattr("app.notebooks.tools.chunking.pdfplumber.open", lambda _f: FakePdf())
+    monkeypatch.setattr(
+        "app.notebooks.tools.chunking.pdfplumber.open", lambda _f: FakePdf()
+    )
 
     chunks = chunk_pdf(
         ChunkingRequest(
@@ -85,7 +91,9 @@ def test_pdf_chunking_extracts_simple_text(monkeypatch: pytest.MonkeyPatch) -> N
 def test_chunk_document_uses_settings_for_docx(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, int] = {}
 
-    def fake_chunk_docx(request: ChunkingRequest, *, chunk_size: int, chunk_overlap: int):
+    def fake_chunk_docx(
+        request: ChunkingRequest, *, chunk_size: int, chunk_overlap: int
+    ):
         captured["chunk_size"] = chunk_size
         captured["chunk_overlap"] = chunk_overlap
         return []
@@ -122,9 +130,10 @@ def test_chunk_document_rejects_unsupported_extension() -> None:
         chunk_document(request)
 
 
-def test_search_postgres_uses_vector_operator(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> None:
+def test_search_postgres_uses_vector_operator(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
     user_id = uuid4()
-    notebook_id = uuid4()
     doc_id = uuid4()
 
     class FakeResult:
@@ -143,10 +152,15 @@ def test_search_postgres_uses_vector_operator(monkeypatch: pytest.MonkeyPatch, s
             return FakeResult()
 
     fake_session = FakeSession()
-    monkeypatch.setattr("app.notebooks.tools.search.embed_texts", lambda texts, _settings: [[0.1] * 1536])
+    monkeypatch.setattr(
+        "app.notebooks.tools.search.embed_texts",
+        lambda texts, _settings: [[0.1] * 1536],
+    )
 
     notebook = Notebook(user_id=user_id, name="Notebook", description="", tags=[])
-    current_user = User(id=user_id, email="user@example.com", hashed_password="hashed-password")
+    current_user = User(
+        id=user_id, email="user@example.com", hashed_password="hashed-password"
+    )
 
     results = search_notebook_chunks(
         fake_session,

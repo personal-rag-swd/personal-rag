@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -22,8 +21,12 @@ logger = logging.getLogger(__name__)
 
 INGESTIBLE_STATUSES = {"pending", "uploaded"}
 CLAIMABLE_DOCUMENT_STATUSES = {"pending", "uploaded"}
-INGESTION_FAILED_MESSAGE = "Ingestion timed out while processing. Please retry the upload."
-UPLOAD_FAILED_MESSAGE = "Upload timed out. The file was not received by storage. Please retry the upload."
+INGESTION_FAILED_MESSAGE = (
+    "Ingestion timed out while processing. Please retry the upload."
+)
+UPLOAD_FAILED_MESSAGE = (
+    "Upload timed out. The file was not received by storage. Please retry the upload."
+)
 
 
 class TransientIngestionError(RuntimeError):
@@ -153,10 +156,9 @@ def process_unprocessed_notebook_documents(
     """Poll pending/uploaded documents and ingest every object that is available."""
     validate_rag_embedding_dimension(settings)
     stats = {"checked": 0, "uploaded": 0, "ingested": 0, "skipped": 0, "recovered": 0}
-    stats["recovered"] = (
-        fail_stale_processing_documents(session, settings)
-        + fail_stale_pending_documents(session, settings)
-    )
+    stats["recovered"] = fail_stale_processing_documents(
+        session, settings
+    ) + fail_stale_pending_documents(session, settings)
     statement = (
         select(NotebookDocument)
         .where(NotebookDocument.status.in_(INGESTIBLE_STATUSES))
@@ -238,11 +240,66 @@ def mark_document_upload_failed(
     if document.status in {"indexed", "processing", "uploaded"}:
         return True
     document.status = "failed"
-    document.error_message = (error_message or "Upload failed before object storage accepted the file.")[:4000]
+    document.error_message = (
+        error_message or "Upload failed before object storage accepted the file."
+    )[:4000]
     document.updated_at = datetime.now(UTC)
     session.add(document)
     session.commit()
     return True
+
+
+def _run_document_ingestion(
+    session: Session,
+    document: NotebookDocument,
+    settings: Settings,
+    s3_client: Any,
+) -> None:
+    obj = s3_client.get_object(Bucket=document.s3_bucket, Key=document.s3_key)
+    body = obj["Body"].read()
+    split_docs = chunk_document(
+        ChunkingRequest(
+            content=body,
+            filename=document.filename,
+            source=document.s3_key,
+            document_id=str(document.id),
+        ),
+        settings,
+    )
+    chunk_texts = [doc.page_content for doc in split_docs]
+    if not chunk_texts:
+        raise ValueError("No extractable text content in document")
+    if len("".join(chunk_texts).strip()) < 20:
+        logger.warning(
+            "Extracted unusually small text content from %s", document.filename
+        )
+
+    embeddings = embed_texts(chunk_texts, settings)
+
+    session.exec(
+        delete(NotebookDocumentChunk).where(
+            NotebookDocumentChunk.document_id == document.id
+        )
+    )
+    now = datetime.now(UTC)
+    for idx, split_doc in enumerate(split_docs):
+        session.add(
+            NotebookDocumentChunk(
+                document_id=document.id,
+                chunk_index=idx,
+                content=split_doc.page_content,
+                chunk_metadata=split_doc.metadata,
+                embedding=embeddings[idx],
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    document.status = "indexed"
+    document.error_message = None
+    document.updated_at = now
+    session.add(document)
+    session.commit()
 
 
 def ingest_document_by_id(
@@ -272,50 +329,16 @@ def ingest_document_by_id(
         session.commit()
 
     try:
-        s3_client = s3_client or get_s3_client(settings)
-        obj = s3_client.get_object(Bucket=document.s3_bucket, Key=document.s3_key)
-        body = obj["Body"].read()
-        split_docs = chunk_document(
-            ChunkingRequest(
-                content=body,
-                filename=document.filename,
-                source=document.s3_key,
-                document_id=str(document.id),
-            ),
-            settings,
-        )
-        chunk_texts = [doc.page_content for doc in split_docs]
-        if not chunk_texts:
-            raise ValueError("No extractable text content in document")
-        if len("".join(chunk_texts).strip()) < 20:
-            logger.warning("Extracted unusually small text content from %s", document.filename)
-
-        embeddings = embed_texts(chunk_texts, settings)
-
-        session.exec(delete(NotebookDocumentChunk).where(NotebookDocumentChunk.document_id == document.id))
-        now = datetime.now(UTC)
-        for idx, split_doc in enumerate(split_docs):
-            session.add(
-                NotebookDocumentChunk(
-                    document_id=document.id,
-                    chunk_index=idx,
-                    content=split_doc.page_content,
-                    chunk_metadata=split_doc.metadata,
-                    embedding=embeddings[idx],
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
-
-        document.status = "indexed"
-        document.error_message = None
-        document.updated_at = now
-        session.add(document)
-        session.commit()
-    except Exception as exc:  # pragma: no cover - error path exercised by tests via status check
+        client = s3_client or get_s3_client(settings)
+        _run_document_ingestion(session, document, settings, client)
+    except (
+        Exception
+    ) as exc:  # pragma: no cover - error path exercised by tests via status check
         session.rollback()
         if isinstance(exc, (ClientError, SQLAlchemyError)):
-            logger.exception("Notebook document ingestion hit a transient error for %s", document_id)
+            logger.exception(
+                "Notebook document ingestion hit a transient error for %s", document_id
+            )
             document = session.get(NotebookDocument, document_id)
             if document is not None:
                 document.status = "uploaded"

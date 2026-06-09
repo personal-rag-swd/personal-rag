@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from pydantic_ai.messages import ModelRequest
 from sqlalchemy.exc import SQLAlchemyError
-from sqlmodel import Session, delete, select, func
+from sqlmodel import Session, delete, func, select
 
 from app.notebooks.memory import load_notebook_chat_history
 from app.notebooks.models import Notebook, NotebookDocument, NotebookDocumentChunk
@@ -29,7 +29,9 @@ def get_notebook(session: Session, notebook_id: UUID, current_user: User) -> Not
         )
     ).first()
     if notebook is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notebook not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Notebook not found"
+        )
     return notebook
 
 
@@ -63,18 +65,28 @@ def delete_notebook_document(
         )
     ).first()
     if document is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
+        )
 
     try:
-        session.exec(delete(NotebookDocumentChunk).where(NotebookDocumentChunk.document_id == document.id))
+        session.exec(
+            delete(NotebookDocumentChunk).where(
+                NotebookDocumentChunk.document_id == document.id
+            )
+        )
         session.delete(document)
         session.commit()
     except SQLAlchemyError as exc:
         session.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from exc
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
+        ) from exc
 
 
-def create_notebook(session: Session, payload: NotebookCreate, current_user: User) -> Notebook:
+def create_notebook(
+    session: Session, payload: NotebookCreate, current_user: User
+) -> Notebook:
     notebook = Notebook(
         user_id=current_user.id,
         name=payload.name,
@@ -87,7 +99,9 @@ def create_notebook(session: Session, payload: NotebookCreate, current_user: Use
         session.refresh(notebook)
     except SQLAlchemyError as exc:
         session.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from exc
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
+        ) from exc
     return notebook
 
 
@@ -108,7 +122,9 @@ def update_notebook(
         session.refresh(notebook)
     except SQLAlchemyError as exc:
         session.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from exc
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
+        ) from exc
     return notebook
 
 
@@ -123,17 +139,24 @@ def touch_notebook(session: Session, notebook_id: UUID, current_user: User) -> N
         session.refresh(notebook)
     except SQLAlchemyError as exc:
         session.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from exc
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
+        ) from exc
     return notebook
 
 
-def populate_notebook_metrics(session: Session, notebook_id: UUID, current_user: User) -> Notebook:
+def populate_notebook_metrics(
+    session: Session, notebook_id: UUID, current_user: User
+) -> Notebook:
     notebook = get_notebook(session, notebook_id, current_user)
-    doc_count = session.exec(
-        select(func.count(NotebookDocument.id))
-        .where(NotebookDocument.notebook_id == notebook.id)
-        .where(NotebookDocument.user_id == current_user.id)
-    ).one() or 0
+    doc_count = (
+        session.exec(
+            select(func.count(NotebookDocument.id))
+            .where(NotebookDocument.notebook_id == notebook.id)
+            .where(NotebookDocument.user_id == current_user.id)
+        ).one()
+        or 0
+    )
     messages = load_notebook_chat_history(session, notebook)
     query_count = sum(1 for message in messages if isinstance(message, ModelRequest))
     notebook.__dict__["document_count"] = doc_count
@@ -148,4 +171,6 @@ def delete_notebook(session: Session, notebook_id: UUID, current_user: User) -> 
         session.commit()
     except SQLAlchemyError as exc:
         session.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from exc
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
+        ) from exc

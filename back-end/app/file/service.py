@@ -1,6 +1,6 @@
-import os
-import uuid
 import logging
+import uuid
+from pathlib import Path
 
 from botocore.exceptions import ClientError
 from fastapi import HTTPException, status
@@ -8,19 +8,18 @@ from sqlmodel import Session
 
 from app.core.config import Settings
 from app.core.s3 import get_s3_client
-from app.users.models import User
 from app.file.schemas import PresignedUrlRequest, PresignedUrlResponse
 from app.notebooks.service import get_notebook
 from app.notebooks.tools import register_pending_notebook_document
+from app.users.models import User
 
 logger = logging.getLogger(__name__)
 
 
 def sanitize_filename(filename: str) -> str:
     """Strips path traversal components and returns the clean file basename."""
-    base = os.path.basename(filename)
-    base = base.replace("/", "").replace("\\", "")
-    return base
+    base = Path(filename).name
+    return base.replace("/", "").replace("\\", "")
 
 
 def generate_presigned_url_service(
@@ -82,11 +81,11 @@ def generate_presigned_url_service(
                 HttpMethod="GET",
             )
     except ClientError as exc:
-        logger.error("Failed to generate S3 presigned URL: %s", exc, exc_info=True)
+        logger.exception("Failed to generate S3 presigned URL")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to generate presigned URL",
-        )
+        ) from exc
 
     if operation == "upload" and request.notebook_id is not None:
         notebook = get_notebook(session, request.notebook_id, current_user)

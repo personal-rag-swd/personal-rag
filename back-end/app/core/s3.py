@@ -1,15 +1,16 @@
 import boto3
+from botocore.client import BaseClient
 from botocore.config import Config
 
 from app.core.config import Settings
 
 
-def get_s3_client(settings: Settings, *, endpoint_url: str | None = None):
+def get_s3_client(settings: Settings, *, endpoint_url: str | None = None) -> BaseClient:
     s3_config = Config(
         signature_version="s3v4",
         retries={"max_attempts": 3},
     )
-    client_kwargs: dict = {
+    client_kwargs: dict[str, object] = {
         "service_name": "s3",
         "region_name": settings.s3_region,
         "config": s3_config,

@@ -18,6 +18,8 @@ Run backend commands from `back-end/`:
 - `uv sync`: install Python dependencies from `pyproject.toml` and `uv.lock`.
 - `uv run fastapi dev app/main.py`: start the local API server.
 - `uv run pytest`: run backend tests.
+- `uv run ruff check`: lint backend code.
+- `uv run ruff format`: format backend code.
 - `uv run alembic upgrade head`: apply database migrations.
 - `uv run alembic revision --autogenerate -m "add feature"`: create a migration.
 

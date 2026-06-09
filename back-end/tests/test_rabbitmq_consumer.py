@@ -4,7 +4,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
 from app.core.config import Settings
 from app.notebooks.models import Notebook, NotebookDocument
@@ -13,7 +13,7 @@ from app.users.models import User
 
 os.environ.setdefault("DATABASE_URL", "sqlite://")
 
-from app.notebooks.consumer import (  # noqa: E402
+from app.notebooks.consumer import (
     MessageOutcome,
     parse_minio_object_created_events,
     process_minio_notification_message,
@@ -43,7 +43,12 @@ def make_settings() -> Settings:
 
 
 def make_document(session: Session, *, status: str = "pending") -> NotebookDocument:
-    user = User(id=uuid4(), email=f"{status}@example.com", hashed_password="hashed-password", role="user")
+    user = User(
+        id=uuid4(),
+        email=f"{status}@example.com",
+        hashed_password="hashed-password",
+        role="user",
+    )
     notebook = Notebook(user_id=user.id, name="Notebook", description="", tags=[])
     session.add(user)
     session.add(notebook)
@@ -140,7 +145,9 @@ def test_process_minio_notification_payload_skips_unknown_key_safely() -> None:
     }
 
     with patch("app.notebooks.consumer.engine", session.get_bind()):
-        assert process_minio_notification_payload(payload, settings) is MessageOutcome.ACK
+        assert (
+            process_minio_notification_payload(payload, settings) is MessageOutcome.ACK
+        )
 
 
 def test_process_minio_notification_payload_deduplicates_duplicate_deliveries() -> None:
@@ -159,11 +166,17 @@ def test_process_minio_notification_payload_deduplicates_duplicate_deliveries() 
         ]
     }
 
-    with patch("app.notebooks.consumer.engine", session.get_bind()):
-        with patch("app.notebooks.consumer.ingest_document_by_id") as mock_ingest:
-            assert process_minio_notification_payload(payload, settings) is MessageOutcome.ACK
-            assert process_minio_notification_payload(payload, settings) is MessageOutcome.ACK
-            mock_ingest.assert_called_once()
+    with (
+        patch("app.notebooks.consumer.engine", session.get_bind()),
+        patch("app.notebooks.consumer.ingest_document_by_id") as mock_ingest,
+    ):
+        assert (
+            process_minio_notification_payload(payload, settings) is MessageOutcome.ACK
+        )
+        assert (
+            process_minio_notification_payload(payload, settings) is MessageOutcome.ACK
+        )
+        mock_ingest.assert_called_once()
 
 
 def test_process_minio_notification_payload_retries_transient_failures() -> None:
@@ -182,12 +195,17 @@ def test_process_minio_notification_payload_retries_transient_failures() -> None
         ]
     }
 
-    with patch("app.notebooks.consumer.engine", session.get_bind()):
-        with patch(
+    with (
+        patch("app.notebooks.consumer.engine", session.get_bind()),
+        patch(
             "app.notebooks.consumer.ingest_document_by_id",
             side_effect=TransientIngestionError("retry"),
-        ):
-            assert process_minio_notification_payload(payload, settings) is MessageOutcome.RETRY
+        ),
+    ):
+        assert (
+            process_minio_notification_payload(payload, settings)
+            is MessageOutcome.RETRY
+        )
 
 
 def test_process_minio_notification_message_reads_real_json_shape() -> None:
@@ -206,4 +224,7 @@ def test_process_minio_notification_message_reads_real_json_shape() -> None:
 
     body = json.dumps(payload).encode("utf-8")
     with patch("app.notebooks.consumer.engine", session.get_bind()):
-        assert process_minio_notification_message(body, make_settings()) is MessageOutcome.ACK
+        assert (
+            process_minio_notification_message(body, make_settings())
+            is MessageOutcome.ACK
+        )

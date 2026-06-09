@@ -5,18 +5,20 @@ Revises: 20260526_0001
 Create Date: 2026-05-26 23:40:00.025379
 
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+from typing import Union
+
 import sqlalchemy as sa
 import sqlmodel
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = '68a7bf496833'
-down_revision: Union[str, Sequence[str], None] = '20260526_0001'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "68a7bf496833"
+down_revision: str | Sequence[str] | None = "20260526_0001"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

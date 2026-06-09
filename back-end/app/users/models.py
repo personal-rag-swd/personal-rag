@@ -6,7 +6,7 @@ from sqlmodel import Field, SQLModel
 
 
 class User(SQLModel, table=True):
-    __tablename__ = "user" # type: ignore
+    __tablename__ = "user"  # type: ignore
     __table_args__ = (
         CheckConstraint("role IN ('user', 'admin')", name="ck_user_role_valid"),
     )

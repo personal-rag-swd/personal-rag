@@ -1,6 +1,5 @@
 from collections.abc import Generator
-from uuid import UUID
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,13 +14,12 @@ from app.notebooks.models import Notebook, NotebookDocument, NotebookDocumentChu
 from app.users.models import User
 
 
-
 @pytest.fixture
-def client(settings: Settings, session: Session) -> Generator[TestClient, None, None]:
+def client(settings: Settings, session: Session) -> Generator[TestClient]:
     def override_get_settings() -> Settings:
         return settings
 
-    def override_get_session() -> Generator[Session, None, None]:
+    def override_get_session() -> Generator[Session]:
         yield session
 
     app.dependency_overrides[get_settings] = override_get_settings
@@ -67,7 +65,9 @@ def test_create_and_list_notebooks(
     assert "document_count" not in body
     assert "query_count" not in body
 
-    list_response = client.get("/api/v1/notebooks/", headers=auth_headers(user, settings))
+    list_response = client.get(
+        "/api/v1/notebooks/", headers=auth_headers(user, settings)
+    )
     assert list_response.status_code == 200
     assert [notebook["id"] for notebook in list_response.json()] == [body["id"]]
     assert "document_count" not in list_response.json()[0]
@@ -108,7 +108,9 @@ def test_update_and_delete_notebook(
     assert update_response.json()["name"] == "Final"
     assert update_response.json()["tags"] == ["Product"]
 
-    delete_response = client.delete(f"/api/v1/notebooks/{created['id']}", headers=headers)
+    delete_response = client.delete(
+        f"/api/v1/notebooks/{created['id']}", headers=headers
+    )
     assert delete_response.status_code == 204
 
     get_response = client.get(f"/api/v1/notebooks/{created['id']}", headers=headers)
@@ -135,13 +137,26 @@ def test_notebook_access_is_scoped_to_owner(
         headers=owner_headers,
     ).json()
 
-    assert client.get(f"/api/v1/notebooks/{created['id']}", headers=other_headers).status_code == 404
-    assert client.patch(
-        f"/api/v1/notebooks/{created['id']}",
-        json={"name": "Stolen"},
-        headers=other_headers,
-    ).status_code == 404
-    assert client.delete(f"/api/v1/notebooks/{created['id']}", headers=other_headers).status_code == 404
+    assert (
+        client.get(
+            f"/api/v1/notebooks/{created['id']}", headers=other_headers
+        ).status_code
+        == 404
+    )
+    assert (
+        client.patch(
+            f"/api/v1/notebooks/{created['id']}",
+            json={"name": "Stolen"},
+            headers=other_headers,
+        ).status_code
+        == 404
+    )
+    assert (
+        client.delete(
+            f"/api/v1/notebooks/{created['id']}", headers=other_headers
+        ).status_code
+        == 404
+    )
 
 
 def test_list_notebook_documents_is_scoped_to_owner(
@@ -308,7 +323,11 @@ def test_delete_notebook_document_removes_source_and_chunks(
 
     assert response.status_code == 204
     assert session.get(NotebookDocument, document.id) is None
-    chunks = session.exec(select(NotebookDocumentChunk).where(NotebookDocumentChunk.document_id == document.id)).all()
+    chunks = session.exec(
+        select(NotebookDocumentChunk).where(
+            NotebookDocumentChunk.document_id == document.id
+        )
+    ).all()
     assert chunks == []
 
 
@@ -452,7 +471,9 @@ def test_generate_report_requires_configured_provider(
     headers = auth_headers(user, settings)
     notebook_id = _create_notebook(client, headers)
 
-    monkeypatch.setattr("app.notebooks.router.chat_provider_is_configured", lambda: False)
+    monkeypatch.setattr(
+        "app.notebooks.router.chat_provider_is_configured", lambda: False
+    )
 
     response = client.post(
         f"/api/v1/notebooks/{notebook_id}/reports",
@@ -474,7 +495,9 @@ def test_generate_report_requires_indexed_documents(
     headers = auth_headers(user, settings)
     notebook_id = _create_notebook(client, headers)
 
-    monkeypatch.setattr("app.notebooks.router.chat_provider_is_configured", lambda: True)
+    monkeypatch.setattr(
+        "app.notebooks.router.chat_provider_is_configured", lambda: True
+    )
 
     response = client.post(
         f"/api/v1/notebooks/{notebook_id}/reports",
@@ -491,6 +514,7 @@ def test_generate_report_persists_and_lists(
     session: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """POST returns immediately with status=pending; background task completes it."""
     user = make_user("rep3@example.com")
     session.add(user)
     session.commit()
@@ -498,12 +522,13 @@ def test_generate_report_persists_and_lists(
     notebook_id = _create_notebook(client, headers)
     _add_indexed_chunk(session, UUID(notebook_id), user.id)
 
-    monkeypatch.setattr("app.notebooks.router.chat_provider_is_configured", lambda: True)
+    monkeypatch.setattr(
+        "app.notebooks.router.chat_provider_is_configured", lambda: True
+    )
 
-    captured: dict[str, object] = {}
-
-    async def fake_briefing(context: str, instructions: str | None = None) -> BriefingDocReport:
-        captured["context"] = context
+    async def fake_briefing(
+        context: str, instructions: str | None = None
+    ) -> BriefingDocReport:
         return BriefingDocReport(
             executive_summary="Summary.",
             key_takeaways=["one", "two"],
@@ -520,9 +545,8 @@ def test_generate_report_persists_and_lists(
     assert response.status_code == 201
     body = response.json()
     assert body["report_type"] == "briefing"
-    assert body["content"]["key_takeaways"] == ["one", "two"]
-    # The notebook's indexed source text was fed to the generator.
-    assert "Indexed source content" in str(captured["context"])
+    assert body["status"] == "pending"
+    assert body["content"] == {}
 
     listed = client.get(
         f"/api/v1/notebooks/{notebook_id}/reports",
@@ -531,6 +555,7 @@ def test_generate_report_persists_and_lists(
     assert listed.status_code == 200
     assert len(listed.json()) == 1
     assert listed.json()[0]["id"] == body["id"]
+    assert listed.json()[0]["report_type"] == "briefing"
 
 
 def test_generate_report_custom_requires_instructions(
@@ -546,7 +571,9 @@ def test_generate_report_custom_requires_instructions(
     notebook_id = _create_notebook(client, headers)
     _add_indexed_chunk(session, UUID(notebook_id), user.id)
 
-    monkeypatch.setattr("app.notebooks.router.chat_provider_is_configured", lambda: True)
+    monkeypatch.setattr(
+        "app.notebooks.router.chat_provider_is_configured", lambda: True
+    )
 
     response = client.post(
         f"/api/v1/notebooks/{notebook_id}/reports",
@@ -563,6 +590,7 @@ def test_generate_report_maps_provider_rate_limit(
     session: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Rate limit errors are now handled in the background task."""
     user = make_user("rep5@example.com")
     session.add(user)
     session.commit()
@@ -570,9 +598,13 @@ def test_generate_report_maps_provider_rate_limit(
     notebook_id = _create_notebook(client, headers)
     _add_indexed_chunk(session, UUID(notebook_id), user.id)
 
-    monkeypatch.setattr("app.notebooks.router.chat_provider_is_configured", lambda: True)
+    monkeypatch.setattr(
+        "app.notebooks.router.chat_provider_is_configured", lambda: True
+    )
 
-    async def rate_limited(context: str, instructions: str | None = None) -> BriefingDocReport:
+    async def rate_limited(
+        context: str, instructions: str | None = None
+    ) -> BriefingDocReport:
         raise ModelHTTPError(status_code=429, model_name="gemini-2.5-flash", body={})
 
     monkeypatch.setattr("app.notebooks.router.generate_briefing_doc", rate_limited)
@@ -582,7 +614,9 @@ def test_generate_report_maps_provider_rate_limit(
         json={"report_type": "briefing"},
         headers=headers,
     )
-    assert response.status_code == 429
+    # POST returns immediately with pending; background task handles the error
+    assert response.status_code == 201
+    assert response.json()["status"] == "pending"
 
 
 def test_generate_mindmap_report_persists(
@@ -591,6 +625,7 @@ def test_generate_mindmap_report_persists(
     session: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """POST returns immediately with status=pending for mindmap reports."""
     user = make_user("rep_mm@example.com")
     session.add(user)
     session.commit()
@@ -598,23 +633,32 @@ def test_generate_mindmap_report_persists(
     notebook_id = _create_notebook(client, headers)
     _add_indexed_chunk(session, UUID(notebook_id), user.id)
 
-    monkeypatch.setattr("app.notebooks.router.chat_provider_is_configured", lambda: True)
-
-    from app.notebooks.schemas import MindMapReport, MindMapNode
-
-    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "app.notebooks.router.chat_provider_is_configured", lambda: True
+    )
 
     async def fake_mindmap(
         context: str, detail_level: str | None = None, instructions: str | None = None
-    ) -> MindMapReport:
-        captured["context"] = context
-        captured["detail_level"] = detail_level
-        captured["instructions"] = instructions
+    ):
+        from app.notebooks.schemas import MindMapNode, MindMapReport
+
         return MindMapReport(
             central_topic="AI Project",
             nodes=[
-                MindMapNode(id="root", label="AI Project", type="root", parent_id=None, description="Central topic"),
-                MindMapNode(id="main1", label="RAG", type="main", parent_id="root", description="Retrieval Augmented Generation"),
+                MindMapNode(
+                    id="root",
+                    label="AI Project",
+                    type="root",
+                    parent_id=None,
+                    description="Central topic",
+                ),
+                MindMapNode(
+                    id="main1",
+                    label="RAG",
+                    type="main",
+                    parent_id="root",
+                    description="Retrieval Augmented Generation",
+                ),
             ],
             relationships=[],
         )
@@ -623,15 +667,16 @@ def test_generate_mindmap_report_persists(
 
     response = client.post(
         f"/api/v1/notebooks/{notebook_id}/reports",
-        json={"report_type": "mindmap", "detail_level": "detailed", "additional_instructions": "add specific links"},
+        json={
+            "report_type": "mindmap",
+            "detail_level": "detailed",
+            "additional_instructions": "add specific links",
+        },
         headers=headers,
     )
 
     assert response.status_code == 201
     body = response.json()
     assert body["report_type"] == "mindmap"
-    assert body["content"]["central_topic"] == "AI Project"
-    assert len(body["content"]["nodes"]) == 2
-    assert body["content"]["nodes"][1]["label"] == "RAG"
-    assert captured["detail_level"] == "detailed"
-    assert captured["instructions"] == "add specific links"
+    assert body["status"] == "pending"
+    assert body["content"] == {}

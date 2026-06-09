@@ -9,6 +9,6 @@ engine = create_engine(get_database_url(), pool_pre_ping=True)
 setup_db_logging(engine)
 
 
-def get_session() -> Generator[Session, None, None]:
+def get_session() -> Generator[Session]:
     with Session(engine) as session:
         yield session

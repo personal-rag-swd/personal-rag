@@ -72,16 +72,16 @@ def build_mindmap_user_message(
     additional_instructions: str | None = None,
 ) -> str:
     user_msg_parts = [f"SOURCE MATERIAL:\n\n{context}"]
-    
+
     level = (detail_level or "intermediate").strip().lower()
     if level not in ("simple", "intermediate", "detailed"):
         level = "intermediate"
-        
+
     user_msg_parts.append(f"Target Detail Level: {level.upper()}")
-    
+
     if additional_instructions and additional_instructions.strip():
-        user_msg_parts.append(f"Additional User Requirements: {additional_instructions.strip()}")
-        
+        user_msg_parts.append(
+            f"Additional User Requirements: {additional_instructions.strip()}"
+        )
+
     return "\n\n".join(user_msg_parts)
-
-

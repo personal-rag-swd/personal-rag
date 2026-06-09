@@ -8,6 +8,7 @@ Create Date: 2026-06-01
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "20260601_0007"
@@ -79,12 +80,22 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_notebook_report_notebook_user_created_at", table_name="notebook_report")
-    op.drop_index("ix_notebook_document_notebook_user_filename", table_name="notebook_document")
-    op.drop_index("ix_notebook_document_notebook_user_created_at", table_name="notebook_document")
+    op.drop_index(
+        "ix_notebook_report_notebook_user_created_at", table_name="notebook_report"
+    )
+    op.drop_index(
+        "ix_notebook_document_notebook_user_filename", table_name="notebook_document"
+    )
+    op.drop_index(
+        "ix_notebook_document_notebook_user_created_at", table_name="notebook_document"
+    )
 
     op.drop_constraint("ck_user_role_valid", "user", type_="check")
-    op.drop_constraint("ck_notebook_document_status_valid", "notebook_document", type_="check")
+    op.drop_constraint(
+        "ck_notebook_document_status_valid", "notebook_document", type_="check"
+    )
 
     op.drop_index("ix_notebook_message_notebook_id_seq", table_name="notebook_message")
-    op.drop_constraint("uq_notebook_message_notebook_id_seq", "notebook_message", type_="unique")
+    op.drop_constraint(
+        "uq_notebook_message_notebook_id_seq", "notebook_message", type_="unique"
+    )

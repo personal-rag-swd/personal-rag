@@ -1,6 +1,6 @@
 from collections.abc import Generator
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
-from unittest.mock import patch, MagicMock
 
 import pytest
 from botocore.exceptions import ClientError
@@ -34,11 +34,11 @@ def settings() -> Settings:
 
 
 @pytest.fixture
-def client(settings: Settings, session: Session) -> Generator[TestClient, None, None]:
+def client(settings: Settings, session: Session) -> Generator[TestClient]:
     def override_get_settings() -> Settings:
         return settings
 
-    def override_get_session() -> Generator[Session, None, None]:
+    def override_get_session() -> Generator[Session]:
         yield session
 
     app.dependency_overrides[get_settings] = override_get_settings
@@ -62,11 +62,13 @@ def test_get_presigned_url_upload_success(
     mock_boto_client: MagicMock,
     client: TestClient,
     settings: Settings,
-    session: Session
+    session: Session,
 ) -> None:
     # Setup mocks
     mock_s3 = MagicMock()
-    mock_s3.generate_presigned_url.return_value = "https://test-bucket.s3.amazonaws.com/uploads/foo.pdf?AWSAccessKeyId=mock"
+    mock_s3.generate_presigned_url.return_value = (
+        "https://test-bucket.s3.amazonaws.com/uploads/foo.pdf?AWSAccessKeyId=mock"
+    )
     mock_boto_client.return_value = mock_s3
 
     user = make_user("user@example.com")
@@ -76,15 +78,22 @@ def test_get_presigned_url_upload_success(
     headers = auth_headers(user, settings)
     response = client.post(
         "/api/v1/file/presigned-url",
-        json={"filename": "test-file.pdf", "operation": "upload", "content_type": "application/pdf"},
-        headers=headers
+        json={
+            "filename": "test-file.pdf",
+            "operation": "upload",
+            "content_type": "application/pdf",
+        },
+        headers=headers,
     )
 
     assert response.status_code == 200
     res_data = response.json()
     assert "url" in res_data
     assert "key" in res_data
-    assert res_data["url"] == "https://test-bucket.s3.amazonaws.com/uploads/foo.pdf?AWSAccessKeyId=mock"
+    assert (
+        res_data["url"]
+        == "https://test-bucket.s3.amazonaws.com/uploads/foo.pdf?AWSAccessKeyId=mock"
+    )
     assert res_data["key"].startswith(f"users/{user.id}/")
     assert res_data["key"].endswith("/test-file.pdf")
 
@@ -102,11 +111,13 @@ def test_get_presigned_url_download_success(
     mock_boto_client: MagicMock,
     client: TestClient,
     settings: Settings,
-    session: Session
+    session: Session,
 ) -> None:
     # Setup mocks
     mock_s3 = MagicMock()
-    mock_s3.generate_presigned_url.return_value = "https://test-bucket.s3.amazonaws.com/downloads/foo.pdf?AWSAccessKeyId=mock"
+    mock_s3.generate_presigned_url.return_value = (
+        "https://test-bucket.s3.amazonaws.com/downloads/foo.pdf?AWSAccessKeyId=mock"
+    )
     mock_boto_client.return_value = mock_s3
 
     user = make_user("user@example.com")
@@ -120,12 +131,15 @@ def test_get_presigned_url_download_success(
     response = client.post(
         "/api/v1/file/presigned-url",
         json={"filename": valid_key, "operation": "download"},
-        headers=headers
+        headers=headers,
     )
 
     assert response.status_code == 200
     res_data = response.json()
-    assert res_data["url"] == "https://test-bucket.s3.amazonaws.com/downloads/foo.pdf?AWSAccessKeyId=mock"
+    assert (
+        res_data["url"]
+        == "https://test-bucket.s3.amazonaws.com/downloads/foo.pdf?AWSAccessKeyId=mock"
+    )
     assert res_data["key"] == valid_key
 
     # Verify boto3 call parameters
@@ -139,15 +153,13 @@ def test_get_presigned_url_download_success(
 def test_get_presigned_url_unauthenticated(client: TestClient) -> None:
     response = client.post(
         "/api/v1/file/presigned-url",
-        json={"filename": "test-file.pdf", "operation": "upload"}
+        json={"filename": "test-file.pdf", "operation": "upload"},
     )
     assert response.status_code == 401
 
 
 def test_get_presigned_url_download_forbidden_other_user(
-    client: TestClient,
-    settings: Settings,
-    session: Session
+    client: TestClient, settings: Settings, session: Session
 ) -> None:
     user = make_user("user@example.com")
     other_user_id = uuid4()
@@ -161,7 +173,7 @@ def test_get_presigned_url_download_forbidden_other_user(
     response = client.post(
         "/api/v1/file/presigned-url",
         json={"filename": forbidden_key, "operation": "download"},
-        headers=headers
+        headers=headers,
     )
 
     assert response.status_code == 403
@@ -169,9 +181,7 @@ def test_get_presigned_url_download_forbidden_other_user(
 
 
 def test_get_presigned_url_directory_traversal_denied(
-    client: TestClient,
-    settings: Settings,
-    session: Session
+    client: TestClient, settings: Settings, session: Session
 ) -> None:
     user = make_user("user@example.com")
     session.add(user)
@@ -181,7 +191,7 @@ def test_get_presigned_url_directory_traversal_denied(
     response = client.post(
         "/api/v1/file/presigned-url",
         json={"filename": "../etc/passwd", "operation": "upload"},
-        headers=headers
+        headers=headers,
     )
 
     assert response.status_code == 400
@@ -189,9 +199,7 @@ def test_get_presigned_url_directory_traversal_denied(
 
 
 def test_get_presigned_url_invalid_operation(
-    client: TestClient,
-    settings: Settings,
-    session: Session
+    client: TestClient, settings: Settings, session: Session
 ) -> None:
     user = make_user("user@example.com")
     session.add(user)
@@ -201,7 +209,7 @@ def test_get_presigned_url_invalid_operation(
     response = client.post(
         "/api/v1/file/presigned-url",
         json={"filename": "test.pdf", "operation": "invalid_op"},
-        headers=headers
+        headers=headers,
     )
 
     assert response.status_code == 400
@@ -215,7 +223,9 @@ def test_get_presigned_url_upload_with_notebook_creates_pending_document(
     session: Session,
 ) -> None:
     mock_s3 = MagicMock()
-    mock_s3.generate_presigned_url.return_value = "https://test-bucket.s3.amazonaws.com/uploads/foo.pdf?AWSAccessKeyId=mock"
+    mock_s3.generate_presigned_url.return_value = (
+        "https://test-bucket.s3.amazonaws.com/uploads/foo.pdf?AWSAccessKeyId=mock"
+    )
     mock_boto_client.return_value = mock_s3
 
     user = make_user("user@example.com")
@@ -240,7 +250,9 @@ def test_get_presigned_url_upload_with_notebook_creates_pending_document(
 
     assert response.status_code == 200
     key = response.json()["key"]
-    doc = session.exec(select(NotebookDocument).where(NotebookDocument.s3_key == key)).first()
+    doc = session.exec(
+        select(NotebookDocument).where(NotebookDocument.s3_key == key)
+    ).first()
     assert doc is not None
     assert doc.notebook_id == notebook.id
     assert doc.user_id == user.id
@@ -301,7 +313,9 @@ def test_get_presigned_url_uses_public_endpoint_for_signing(
     app.dependency_overrides[get_settings] = override_get_settings
 
     mock_s3 = MagicMock()
-    mock_s3.generate_presigned_url.return_value = "http://localhost:9000/test-bucket/file"
+    mock_s3.generate_presigned_url.return_value = (
+        "http://localhost:9000/test-bucket/file"
+    )
     mock_boto_client.return_value = mock_s3
 
     user = make_user("user@example.com")
@@ -391,8 +405,16 @@ def test_process_unprocessed_documents_promotes_visible_pending_upload(
 
     stats = process_unprocessed_notebook_documents(session, settings)
 
-    assert stats == {"checked": 1, "uploaded": 1, "ingested": 1, "skipped": 0, "recovered": 0}
-    mock_s3.head_object.assert_called_once_with(Bucket="test-bucket", Key=document.s3_key)
+    assert stats == {
+        "checked": 1,
+        "uploaded": 1,
+        "ingested": 1,
+        "skipped": 0,
+        "recovered": 0,
+    }
+    mock_s3.head_object.assert_called_once_with(
+        Bucket="test-bucket", Key=document.s3_key
+    )
     mock_get_s3_client.assert_called_once_with(settings)
     mock_ingest_document_by_id.assert_called_once_with(
         session,
@@ -443,7 +465,13 @@ def test_process_unprocessed_documents_skips_pending_upload_until_object_exists(
 
     stats = process_unprocessed_notebook_documents(session, settings)
 
-    assert stats == {"checked": 1, "uploaded": 0, "ingested": 0, "skipped": 1, "recovered": 0}
+    assert stats == {
+        "checked": 1,
+        "uploaded": 0,
+        "ingested": 0,
+        "skipped": 1,
+        "recovered": 0,
+    }
     mock_get_s3_client.assert_called_once_with(settings)
     mock_ingest_document_by_id.assert_not_called()
 
@@ -521,7 +549,9 @@ def test_process_unprocessed_documents_keeps_recent_processing_untouched(
     mock_ingest_document_by_id.assert_not_called()
 
 
-def test_ingest_document_rejects_non_1536_dimension(settings: Settings, session: Session) -> None:
+def test_ingest_document_rejects_non_1536_dimension(
+    settings: Settings, session: Session
+) -> None:
     user = make_user("dimension@example.com")
     session.add(user)
     session.commit()
@@ -682,7 +712,9 @@ def test_ingest_document_marks_failed_when_object_read_fails(
     ingest_document_by_id(session, document.id, settings)
 
     mock_get_s3_client.assert_called_once_with(settings)
-    mock_s3.get_object.assert_called_once_with(Bucket="test-bucket", Key=document.s3_key)
+    mock_s3.get_object.assert_called_once_with(
+        Bucket="test-bucket", Key=document.s3_key
+    )
     session.refresh(document)
     assert document.status == "failed"
     assert "storage read failed" in (document.error_message or "")
@@ -778,7 +810,9 @@ def test_ingest_document_requeues_transient_storage_failures(
     mock_get_s3_client.return_value = mock_s3
 
     with pytest.raises(TransientIngestionError):
-        ingest_document_by_id(session, document.id, settings, require_processing_status=True)
+        ingest_document_by_id(
+            session, document.id, settings, require_processing_status=True
+        )
 
     session.refresh(document)
     assert document.status == "uploaded"

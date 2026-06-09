@@ -1,11 +1,15 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, Request, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import Session
 
-from app.core.config import Settings
-from app.dependencies import get_session, get_settings
+from app.auth.schemas import (
+    EmailVerificationCreate,
+    RegistrationCreate,
+    TokenResponse,
+    VerificationResponse,
+)
 from app.auth.service import (
     create_session,
     logout_session,
@@ -13,12 +17,8 @@ from app.auth.service import (
     start_registration,
     verify_registration_otp,
 )
-from app.auth.schemas import (
-    RegistrationCreate,
-    EmailVerificationCreate,
-    TokenResponse,
-    VerificationResponse,
-)
+from app.core.config import Settings
+from app.dependencies import get_session, get_settings
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 ACCESS_TOKEN_COOKIE_NAME = "access_token"
@@ -28,9 +28,7 @@ REFRESH_TOKEN_COOKIE_NAME = "refresh_token"
 def is_cookie_secure(request: Request, settings: Settings) -> bool:
     if settings.cookie_secure is not None:
         return settings.cookie_secure
-    if request.url.hostname in ("localhost", "127.0.0.1", "testserver"):
-        return False
-    return True
+    return request.url.hostname not in ("localhost", "127.0.0.1", "testserver")
 
 
 def get_cookie_samesite(settings: Settings) -> str:
@@ -68,7 +66,9 @@ def set_session_cookies(
     )
 
 
-def clear_session_cookies(response: Response, request: Request, settings: Settings) -> None:
+def clear_session_cookies(
+    response: Response, request: Request, settings: Settings
+) -> None:
     cookie_secure = is_cookie_secure(request, settings)
     cookie_samesite = get_cookie_samesite(settings)
     response.delete_cookie(
@@ -87,7 +87,9 @@ def clear_session_cookies(response: Response, request: Request, settings: Settin
     )
 
 
-@router.post("/registrations", status_code=status.HTTP_202_ACCEPTED, response_class=Response)
+@router.post(
+    "/registrations", status_code=status.HTTP_202_ACCEPTED, response_class=Response
+)
 def create_registration(
     body: RegistrationCreate,
     session: Annotated[Session, Depends(get_session)],
@@ -138,7 +140,9 @@ def create_token_refresh(
     return tokens
 
 
-@router.delete("/sessions/current", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+@router.delete(
+    "/sessions/current", status_code=status.HTTP_204_NO_CONTENT, response_class=Response
+)
 def delete_current_session(
     request: Request,
     response: Response,

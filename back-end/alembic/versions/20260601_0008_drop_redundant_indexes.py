@@ -22,6 +22,15 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.create_index("ix_notebook_message_seq", "notebook_message", ["seq"], unique=False)
-    op.create_index("ix_notebook_report_report_type", "notebook_report", ["report_type"], unique=False)
-    op.create_index("ix_notebook_document_s3_key", "notebook_document", ["s3_key"], unique=False)
+    op.create_index(
+        "ix_notebook_message_seq", "notebook_message", ["seq"], unique=False
+    )
+    op.create_index(
+        "ix_notebook_report_report_type",
+        "notebook_report",
+        ["report_type"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_notebook_document_s3_key", "notebook_document", ["s3_key"], unique=False
+    )

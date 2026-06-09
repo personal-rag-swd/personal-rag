@@ -8,6 +8,7 @@ Create Date: 2026-05-27 00:00:00.000000
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "20260527_0001"

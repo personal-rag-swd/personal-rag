@@ -3,13 +3,17 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from sqlmodel import Session
 
-from app.core.database import get_session
 from app.core.config import Settings, get_settings
-from app.users.dependencies import get_current_user
-from app.users.models import User
-from app.file.schemas import PresignedUrlRequest, PresignedUrlResponse, UploadFailedRequest
+from app.core.database import get_session
+from app.file.schemas import (
+    PresignedUrlRequest,
+    PresignedUrlResponse,
+    UploadFailedRequest,
+)
 from app.file.service import generate_presigned_url_service
 from app.notebooks.tools import mark_document_upload_failed
+from app.users.dependencies import get_current_user
+from app.users.models import User
 
 router = APIRouter(prefix="/file", tags=["File Management"])
 

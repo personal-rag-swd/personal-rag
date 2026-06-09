@@ -15,9 +15,18 @@ os.environ.setdefault("DATABASE_URL", "sqlite://")
 
 import pytest
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
 from app.core.config import Settings
+
+# Shared in-memory engine with all tables created, used by tests that
+# need to patch the router's engine for background-task execution.
+_shared_test_engine = create_engine(
+    "sqlite://",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+SQLModel.metadata.create_all(_shared_test_engine)
 
 
 @pytest.fixture
@@ -30,7 +39,7 @@ def settings() -> Settings:
 
 
 @pytest.fixture
-def session() -> Generator[Session, None, None]:
+def session() -> Generator[Session]:
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -39,3 +48,9 @@ def session() -> Generator[Session, None, None]:
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
         yield session
+
+
+@pytest.fixture
+def shared_test_engine():
+    """Provide the shared test engine for patching router.background-task engines."""
+    return _shared_test_engine

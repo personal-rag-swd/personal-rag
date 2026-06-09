@@ -17,13 +17,13 @@ class Settings(BaseSettings):
     resend_api_key: str = ""
     resend_from_email: str = "noreply@example.com"
     log_level: str = "INFO"
-    
+
     # Centralized Chat / LLM settings
     chat_provider: str = "openrouter"
     chat_api_key: str = ""
     chat_provider_url: str = ""
     chat_model: str = "openai/gpt-4o-mini"
-    
+
     # Centralized Embedding settings
     embedding_provider: str = "auto"
     embedding_api_key: str = ""
@@ -44,11 +44,17 @@ class Settings(BaseSettings):
     rabbitmq_routing_key: str = "minio.object.created"
     rabbitmq_queue_name: str = "notebook-document-ingestion"
     rabbitmq_dead_letter_exchange_name: str | None = "minio-events-dlx"
-    rabbitmq_dead_letter_queue_name: str | None = "notebook-document-ingestion-dead-letter"
+    rabbitmq_dead_letter_queue_name: str | None = (
+        "notebook-document-ingestion-dead-letter"
+    )
     rabbitmq_dead_letter_routing_key: str = "notebook-document-ingestion.dead-letter"
     rabbitmq_prefetch_count: int = 1
     rabbitmq_reconnect_delay_seconds: float = 5.0
-    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173", "http://localhost:8000"]
+    cors_origins: list[str] = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:8000",
+    ]
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -57,20 +63,20 @@ class Settings(BaseSettings):
             v_clean = v.strip()
             if v_clean.startswith("[") and v_clean.endswith("]"):
                 v_clean = v_clean[1:-1]
-            
+
             # Split by comma
             parts = v_clean.split(",")
             origins = []
             for part in parts:
-                part = part.strip()
                 # Strip leading/trailing single and double quotes
-                part = part.strip("'\"")
-                if part:
-                    origins.append(part)
+                origin = part.strip().strip("'\"")
+                if origin:
+                    origins.append(origin)
             return origins
-        elif isinstance(v, list):
+        if isinstance(v, list):
             return [str(item).strip() for item in v]
         return v
+
     cookie_secure: bool | None = None
     cookie_samesite: str = "lax"
     s3_bucket: str = "personal-rag-users-files"

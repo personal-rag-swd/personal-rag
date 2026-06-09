@@ -9,9 +9,9 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session, select
 
+from app.auth.models import PendingRegistration, RefreshToken
 from app.core.config import Settings
 from app.core.security import create_access_token, hash_password, verify_password
-from app.auth.models import PendingRegistration, RefreshToken
 from app.users.models import User
 
 
@@ -48,11 +48,17 @@ def send_registration_otp(email: str, otp: str, settings: Settings) -> None:
     )
 
 
-def start_registration(session: Session, email: str, password: str, settings: Settings) -> None:
+def start_registration(
+    session: Session, email: str, password: str, settings: Settings
+) -> None:
     normalized_email = normalize_email(email)
-    existing_user = session.exec(select(User).where(User.email == normalized_email)).first()
+    existing_user = session.exec(
+        select(User).where(User.email == normalized_email)
+    ).first()
     if existing_user is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email is already registered")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Email is already registered"
+        )
 
     existing_pending = session.exec(
         select(PendingRegistration).where(PendingRegistration.email == normalized_email)
@@ -82,18 +88,29 @@ def start_registration(session: Session, email: str, password: str, settings: Se
         ) from exc
 
 
-def verify_registration_otp(session: Session, email: str, otp: str, settings: Settings) -> None:
+def verify_registration_otp(
+    session: Session, email: str, otp: str, settings: Settings
+) -> None:
     normalized_email = normalize_email(email)
     pending = session.exec(
         select(PendingRegistration).where(PendingRegistration.email == normalized_email)
     ).first()
     if pending is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification code")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification code",
+        )
 
-    if as_utc(pending.expires_at) <= datetime.now(UTC) or pending.otp_attempts >= settings.otp_max_attempts:
+    if (
+        as_utc(pending.expires_at) <= datetime.now(UTC)
+        or pending.otp_attempts >= settings.otp_max_attempts
+    ):
         session.delete(pending)
         session.commit()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification code")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification code",
+        )
 
     if not verify_password(otp, pending.hashed_otp):
         pending.otp_attempts += 1
@@ -101,13 +118,20 @@ def verify_registration_otp(session: Session, email: str, otp: str, settings: Se
         if pending.otp_attempts >= settings.otp_max_attempts:
             session.delete(pending)
         session.commit()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification code")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification code",
+        )
 
-    existing_user = session.exec(select(User).where(User.email == normalized_email)).first()
+    existing_user = session.exec(
+        select(User).where(User.email == normalized_email)
+    ).first()
     if existing_user is not None:
         session.delete(pending)
         session.commit()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email is already registered")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Email is already registered"
+        )
 
     user = User(email=normalized_email, hashed_password=pending.hashed_password)
     session.add(user)
@@ -118,7 +142,11 @@ def verify_registration_otp(session: Session, email: str, otp: str, settings: Se
 def authenticate_user(session: Session, email: str, password: str) -> User:
     normalized_email = normalize_email(email)
     user = session.exec(select(User).where(User.email == normalized_email)).first()
-    if user is None or not user.is_active or not verify_password(password, user.hashed_password):
+    if (
+        user is None
+        or not user.is_active
+        or not verify_password(password, user.hashed_password)
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -127,13 +155,16 @@ def authenticate_user(session: Session, email: str, password: str) -> User:
     return user
 
 
-def issue_token_pair(session: Session, user: User, settings: Settings, family_id: UUID | None = None) -> dict[str, str]:
+def issue_token_pair(
+    session: Session, user: User, settings: Settings, family_id: UUID | None = None
+) -> dict[str, str]:
     raw_refresh_token = token_urlsafe(64)
     refresh_token = RefreshToken(
         user_id=user.id,
         token_hash=hash_refresh_token(raw_refresh_token),
         family_id=family_id or UUID(int=0),
-        expires_at=datetime.now(UTC) + timedelta(days=settings.refresh_token_expire_days),
+        expires_at=datetime.now(UTC)
+        + timedelta(days=settings.refresh_token_expire_days),
     )
     if family_id is None:
         refresh_token.family_id = refresh_token.id
@@ -147,7 +178,9 @@ def issue_token_pair(session: Session, user: User, settings: Settings, family_id
     }
 
 
-def create_session(session: Session, email: str, password: str, settings: Settings) -> dict[str, str]:
+def create_session(
+    session: Session, email: str, password: str, settings: Settings
+) -> dict[str, str]:
     user = authenticate_user(session, email, password)
     tokens = issue_token_pair(session, user, settings)
     session.commit()
@@ -157,39 +190,55 @@ def create_session(session: Session, email: str, password: str, settings: Settin
 
 def revoke_token_family(session: Session, family_id: UUID) -> None:
     now = datetime.now(UTC)
-    tokens = session.exec(select(RefreshToken).where(RefreshToken.family_id == family_id)).all()
+    tokens = session.exec(
+        select(RefreshToken).where(RefreshToken.family_id == family_id)
+    ).all()
     for token in tokens:
         if token.revoked_at is None:
             token.revoked_at = now
             session.add(token)
 
 
-def refresh_session(session: Session, raw_refresh_token: str, settings: Settings) -> dict[str, str]:
+def refresh_session(
+    session: Session, raw_refresh_token: str, settings: Settings
+) -> dict[str, str]:
     token_hash = hash_refresh_token(raw_refresh_token)
-    refresh_token = session.exec(select(RefreshToken).where(RefreshToken.token_hash == token_hash)).first()
+    refresh_token = session.exec(
+        select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+    ).first()
     if refresh_token is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
+        )
 
     now = datetime.now(UTC)
     if refresh_token.revoked_at is not None:
         revoke_token_family(session, refresh_token.family_id)
         session.commit()
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
+        )
     if as_utc(refresh_token.expires_at) <= now:
         refresh_token.revoked_at = now
         session.add(refresh_token)
         session.commit()
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
+        )
 
     user = session.get(User, refresh_token.user_id)
     if user is None or not user.is_active:
         revoke_token_family(session, refresh_token.family_id)
         session.commit()
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
+        )
 
     refresh_token.revoked_at = now
     session.add(refresh_token)
-    tokens = issue_token_pair(session, user, settings, family_id=refresh_token.family_id)
+    tokens = issue_token_pair(
+        session, user, settings, family_id=refresh_token.family_id
+    )
     refresh_token.replaced_by_token_id = UUID(tokens["_refresh_token_id"])
     session.add(refresh_token)
     session.commit()
@@ -199,13 +248,19 @@ def refresh_session(session: Session, raw_refresh_token: str, settings: Settings
 
 def logout_session(session: Session, raw_refresh_token: str) -> None:
     token_hash = hash_refresh_token(raw_refresh_token)
-    refresh_token = session.exec(select(RefreshToken).where(RefreshToken.token_hash == token_hash)).first()
+    refresh_token = session.exec(
+        select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+    ).first()
     if refresh_token is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
+        )
 
     try:
         revoke_token_family(session, refresh_token.family_id)
         session.commit()
     except SQLAlchemyError as exc:
         session.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from exc
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
+        ) from exc

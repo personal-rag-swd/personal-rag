@@ -24,13 +24,95 @@ dependencies = [
     "sqlmodel>=0.0.27",
     "google-genai>=2.7.0",
     "logfire[sqlalchemy]>=4.34.0",
+    "pytest-asyncio>=1.4.0",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+asyncio_mode = "auto"
 
 [dependency-groups]
 dev = [
     "ruff>=0.15.14",
 ]
+
+[tool.ruff]
+line-length = 88
+target-version = "py314"
+extend-exclude = [
+    "alembic",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort (import sorting)
+    "N",      # pep8-naming (naming conventions)
+    "ANN",    # flake8-annotations (typed public interfaces)
+    "UP",     # pyupgrade (syntax upgrade)
+    "B",      # flake8-bugbear (bug prevention)
+    "A",      # flake8-builtins (builtin shadowing)
+    "ARG",    # flake8-unused-arguments
+    "C4",     # flake8-comprehensions (better comprehensions)
+    "DTZ",    # flake8-datetimez (timezone-aware datetimes)
+    "EM",     # flake8-errmsg (exception message hygiene)
+    "ERA",    # eradicate (commented-out code)
+    "G",      # flake8-logging-format
+    "LOG",    # flake8-logging
+    "PERF",   # Perflint
+    "PIE",    # flake8-pie
+    "PL",     # Pylint
+    "PT",     # flake8-pytest-style
+    "RET",    # flake8-return
+    "SIM",    # flake8-simplify (simpler code structure)
+    "PTH",    # flake8-use-pathlib (use pathlib over os.path)
+    "S",      # flake8-bandit (security checks)
+    "ASYNC",  # flake8-async (concurrency check)
+    "T20",    # flake8-print (prevent prints in production)
+    "TRY",    # tryceratops (exception handling hygiene)
+    "RUF",    # Ruff-specific rules
+    "C90",    # McCabe complexity check
+]
+ignore = [
+    "E501",    # Line length checks are managed by formatter
+    "ANN401",  # Dynamic SDK/framework integrations legitimately use Any
+    "C901",    # Keep complexity checks advisory for existing business workflows
+    "E402",    # Allow import ordering exceptions for startup side-effect control
+    "TRY003",  # Keep user-facing exception messages local to handlers/services
+    "EM101",   # Allow literal exception messages for concise API errors
+    "EM102",   # Allow formatted exception messages for contextual API errors
+    "N815",    # Pydantic schemas mirror external camelCase wire contracts
+    "PLC0415", # Allow local imports for startup/provider side-effect control
+    "PLR0912", # Allow route/service orchestration with several branches
+    "PLR0913", # FastAPI dependencies commonly require several parameters
+    "PLR0915", # Allow larger business workflow functions
+    "PLR0917", # FastAPI dependencies commonly require several parameters
+    "PLR2004", # HTTP status checks and domain thresholds are clearer inline
+    "S105",    # Secret-looking defaults are placeholders/config fields
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/*" = [
+    "ANN",
+    "ARG",
+    "E402",
+    "PLC0415",
+    "PLR2004",
+    "PLW0108",
+    "PT011",
+    "S101",
+    "S105",
+    "S106",
+    "S107",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

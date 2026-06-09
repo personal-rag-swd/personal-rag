@@ -14,7 +14,6 @@ from app.main import app
 from app.users.models import User
 
 
-
 @pytest.fixture
 def settings() -> Settings:
     return Settings(
@@ -27,11 +26,11 @@ def settings() -> Settings:
 
 
 @pytest.fixture
-def client(settings: Settings, session: Session) -> Generator[TestClient, None, None]:
+def client(settings: Settings, session: Session) -> Generator[TestClient]:
     def override_get_settings() -> Settings:
         return settings
 
-    def override_get_session() -> Generator[Session, None, None]:
+    def override_get_session() -> Generator[Session]:
         yield session
 
     app.dependency_overrides[get_settings] = override_get_settings
@@ -43,7 +42,9 @@ def client(settings: Settings, session: Session) -> Generator[TestClient, None, 
 
 @pytest.fixture
 def user(session: Session) -> User:
-    user = User(email="auth@example.com", hashed_password=hash_password("correct-password"))
+    user = User(
+        email="auth@example.com", hashed_password=hash_password("correct-password")
+    )
     session.add(user)
     session.commit()
     session.refresh(user)
@@ -74,10 +75,12 @@ def login(client: TestClient) -> dict[str, str]:
     }
 
 
-def refresh(client: TestClient, refresh_token: str = None):
+def refresh(client: TestClient, refresh_token: str | None = None):
     if refresh_token is not None:
         client.cookies.clear()
-        client.cookies.set("refresh_token", refresh_token, domain="testserver.local", path="/")
+        client.cookies.set(
+            "refresh_token", refresh_token, domain="testserver.local", path="/"
+        )
     return client.post(
         "/api/v1/auth/token-refreshes",
     )
@@ -85,8 +88,9 @@ def refresh(client: TestClient, refresh_token: str = None):
 
 def get_refresh_token(session: Session, raw_refresh_token: str) -> RefreshToken:
     token_hash = hash_refresh_token(raw_refresh_token)
-    token = session.exec(select(RefreshToken).where(RefreshToken.token_hash == token_hash)).one()
-    return token
+    return session.exec(
+        select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+    ).one()
 
 
 def test_refresh_rotates_token_and_rejects_reuse(
@@ -98,7 +102,10 @@ def test_refresh_rotates_token_and_rejects_reuse(
     rotate_response = refresh(client, first_rt)
 
     assert rotate_response.status_code == 200
-    assert get_cookie_value(client, "access_token") == rotate_response.json()["access_token"]
+    assert (
+        get_cookie_value(client, "access_token")
+        == rotate_response.json()["access_token"]
+    )
     second_rt = get_cookie_value(client, "refresh_token")
     assert second_rt != first_rt
 
@@ -111,7 +118,9 @@ def test_refresh_rotates_token_and_rejects_reuse(
     assert second_response.status_code == 401
 
     family_id = get_refresh_token(session, first_rt).family_id
-    family_tokens = session.exec(select(RefreshToken).where(RefreshToken.family_id == family_id)).all()
+    family_tokens = session.exec(
+        select(RefreshToken).where(RefreshToken.family_id == family_id)
+    ).all()
     assert len(family_tokens) == 2
     assert all(token.revoked_at is not None for token in family_tokens)
 
@@ -155,6 +164,8 @@ def test_logout_revokes_refresh_token_family(
     assert refresh(client, second_rt).status_code == 401
 
     family_id = get_refresh_token(session, first_rt).family_id
-    family_tokens = session.exec(select(RefreshToken).where(RefreshToken.family_id == family_id)).all()
+    family_tokens = session.exec(
+        select(RefreshToken).where(RefreshToken.family_id == family_id)
+    ).all()
     assert len(family_tokens) == 2
     assert all(token.revoked_at is not None for token in family_tokens)

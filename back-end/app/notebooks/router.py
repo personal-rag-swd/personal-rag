@@ -1,37 +1,45 @@
-from datetime import UTC, datetime
-from functools import cached_property
 import asyncio
 import json
-from pydantic_ai.capabilities.process_history import ProcessHistory
-from pydantic_ai.messages import ModelMessage, ModelRequest, SystemPromptPart
+import logging
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
 from fastapi.responses import StreamingResponse
+from pydantic_ai.capabilities.process_history import ProcessHistory
 from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.messages import ModelMessage, ModelRequest
 from pydantic_ai.run import AgentRunResult
 from pydantic_ai.ui.ag_ui import AGUIAdapter
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session, select
 
 from app.core.config import get_settings
-from app.core.database import engine, get_session
+from app.core.database import get_session
 from app.notebooks.agent import (
     NotebookChatDeps,
     chat_provider_is_configured,
     generate_blog_post,
     generate_briefing_doc,
     generate_custom_report,
+    generate_mindmap,
     generate_study_guide,
     get_notebook_chat_agent,
-    generate_mindmap,
 )
 from app.notebooks.memory import (
     append_notebook_chat_history,
     extract_notebook_chat_transcript,
     load_notebook_chat_history,
-    save_notebook_chat_history,
 )
 from app.notebooks.models import (
     Notebook,
@@ -39,21 +47,20 @@ from app.notebooks.models import (
     NotebookDocumentChunk,
     NotebookReport,
 )
-
 from app.notebooks.schemas import (
     BlogPostReport,
     BriefingDocReport,
     CustomReport,
+    MindMapReport,
     NotebookChatHistoryMessage,
     NotebookCreate,
     NotebookDocumentRead,
     NotebookPopulateRead,
     NotebookRead,
     NotebookReportRead,
+    NotebookUpdate,
     ReportGenerateRequest,
     StudyGuideReport,
-    NotebookUpdate,
-    MindMapReport,
 )
 from app.notebooks.service import (
     create_notebook,
@@ -66,19 +73,18 @@ from app.notebooks.service import (
     touch_notebook,
     update_notebook,
 )
-
 from app.users.dependencies import get_current_user
 from app.users.models import User
+
+logger = logging.getLogger(__name__)
 
 # Maximum characters of source text fed to the LLM for report generation.
 # ~120 k chars ≈ 30 k tokens, safely within most context windows.
 _REPORT_CONTEXT_CHAR_LIMIT = 120_000
 
 
-
-
-
 router = APIRouter(prefix="/notebooks", tags=["Notebooks"])
+
 
 @router.get("/", response_model=list[NotebookRead])
 def read_notebooks(
@@ -101,53 +107,121 @@ def create_notebook_route(
 async def read_notebook_events(
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
-):
-    async def event_generator():
-        last_state = {}
+) -> StreamingResponse:
+    async def event_generator() -> AsyncIterator[str]:
+        last_doc_state: dict[UUID, tuple[str, datetime, UUID]] = {}
+        last_report_state: dict[UUID, tuple[str, datetime, str, UUID]] = {}
         first_tick = True
 
         try:
             while True:
-                # Query all documents for this user
+                # ── Documents ──────────────────────────────────────────
                 docs = session.exec(
-                    select(NotebookDocument)
-                    .where(NotebookDocument.user_id == current_user.id)
+                    select(NotebookDocument).where(
+                        NotebookDocument.user_id == current_user.id
+                    )
+                ).all()
+
+                # ── Reports ────────────────────────────────────────────
+                reports = session.exec(
+                    select(NotebookReport).where(
+                        NotebookReport.user_id == current_user.id
+                    )
                 ).all()
 
                 if first_tick:
-                    by_notebook = {}
+                    # Snapshot: documents grouped by notebook
+                    by_notebook: dict[UUID, list] = {}
                     for doc in docs:
                         by_notebook.setdefault(doc.notebook_id, []).append(doc)
-                    
+
                     for notebook_id, notebook_docs in by_notebook.items():
                         serialized_docs = [
-                            NotebookDocumentRead.model_validate(doc).model_dump(mode="json")
+                            NotebookDocumentRead.model_validate(doc).model_dump(
+                                mode="json"
+                            )
                             for doc in notebook_docs
                         ]
                         yield f"data: {json.dumps({'type': 'snapshot', 'notebook_id': str(notebook_id), 'documents': serialized_docs, 'timestamp': datetime.now(UTC).isoformat()})}\n\n"
-                    
-                    last_state = {
+
+                    last_doc_state = {
                         doc.id: (doc.status, doc.updated_at, doc.notebook_id)
                         for doc in docs
                     }
+
+                    # Snapshot: reports grouped by notebook
+                    reports_by_notebook: dict[UUID, list] = {}
+                    for report in reports:
+                        reports_by_notebook.setdefault(report.notebook_id, []).append(
+                            report
+                        )
+
+                    for notebook_id, notebook_reports in reports_by_notebook.items():
+                        serialized_reports = [
+                            NotebookReportRead.model_validate(r).model_dump(mode="json")
+                            for r in notebook_reports
+                        ]
+                        yield f"data: {json.dumps({'type': 'report_snapshot', 'notebook_id': str(notebook_id), 'reports': serialized_reports, 'timestamp': datetime.now(UTC).isoformat()})}\n\n"
+
+                    last_report_state = {
+                        report.id: (
+                            report.status,
+                            report.updated_at,
+                            report.report_type,
+                            report.notebook_id,
+                        )
+                        for report in reports
+                    }
                     first_tick = False
                 else:
-                    current_ids = set()
+                    # Document updates
+                    current_doc_ids: set[UUID] = set()
                     for doc in docs:
-                        current_ids.add(doc.id)
-                        prev = last_state.get(doc.id)
+                        current_doc_ids.add(doc.id)
+                        prev = last_doc_state.get(doc.id)
                         if prev is None or prev[:2] != (doc.status, doc.updated_at):
-                            serialized_doc = NotebookDocumentRead.model_validate(doc).model_dump(mode="json")
+                            serialized_doc = NotebookDocumentRead.model_validate(
+                                doc
+                            ).model_dump(mode="json")
                             yield f"data: {json.dumps({'type': 'document_update', 'notebook_id': str(doc.notebook_id), 'document': serialized_doc, 'timestamp': datetime.now(UTC).isoformat()})}\n\n"
-                            last_state[doc.id] = (doc.status, doc.updated_at, doc.notebook_id)
+                            last_doc_state[doc.id] = (
+                                doc.status,
+                                doc.updated_at,
+                                doc.notebook_id,
+                            )
 
-                    # Clean up removed documents from tracking
-                    removed_ids = set(last_state.keys()) - current_ids
-                    for rid in removed_ids:
-                        del last_state[rid]
+                    removed_doc_ids = set(last_doc_state.keys()) - current_doc_ids
+                    for rid in removed_doc_ids:
+                        del last_doc_state[rid]
+
+                    # Report updates
+                    current_report_ids: set[UUID] = set()
+                    for report in reports:
+                        current_report_ids.add(report.id)
+                        prev = last_report_state.get(report.id)
+                        if prev is None or prev[:2] != (
+                            report.status,
+                            report.updated_at,
+                        ):
+                            serialized_report = NotebookReportRead.model_validate(
+                                report
+                            ).model_dump(mode="json")
+                            yield f"data: {json.dumps({'type': 'report_update', 'notebook_id': str(report.notebook_id), 'report': serialized_report, 'timestamp': datetime.now(UTC).isoformat()})}\n\n"
+                            last_report_state[report.id] = (
+                                report.status,
+                                report.updated_at,
+                                report.report_type,
+                                report.notebook_id,
+                            )
+
+                    removed_report_ids = (
+                        set(last_report_state.keys()) - current_report_ids
+                    )
+                    for rid in removed_report_ids:
+                        del last_report_state[rid]
 
                 # Expire the SQLAlchemy session identity map cache to ensure consecutive ticks
-                # fetch fresh document records directly from the database rather than from memory.
+                # fetch fresh records directly from the database rather than from memory.
                 session.expire_all()
 
                 await asyncio.sleep(1.0)
@@ -160,7 +234,7 @@ async def read_notebook_events(
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-        }
+        },
     )
 
 
@@ -210,9 +284,6 @@ def read_notebook_documents(
     return list_notebook_documents(session, notebook_id, current_user)
 
 
-
-
-
 @router.delete(
     "/{notebook_id}/documents/{document_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -255,9 +326,13 @@ async def chat_notebook_route(
             is_system = False
             if isinstance(msg, ModelRequest):
                 part_names = {type(part).__name__ for part in msg.parts}
-                if "SystemPromptPart" in part_names:
-                    is_system = True
-                elif msg.instructions and not (part_names & {"UserPromptPart", "ToolReturnPart", "RetryPromptPart"}):
+                if "SystemPromptPart" in part_names or (
+                    msg.instructions
+                    and not (
+                        part_names
+                        & {"UserPromptPart", "ToolReturnPart", "RetryPromptPart"}
+                    )
+                ):
                     is_system = True
 
             if is_system:
@@ -268,11 +343,15 @@ async def chat_notebook_route(
         # Keep the last 15 other messages
         recent_limit = 15
         recent_others = (
-            other_messages[-recent_limit:] if len(other_messages) > recent_limit else other_messages
+            other_messages[-recent_limit:]
+            if len(other_messages) > recent_limit
+            else other_messages
         )
 
         # Combine system prompts and recent others while maintaining their original relative chronological order
-        keep_set = {id(msg) for msg in system_prompts} | {id(msg) for msg in recent_others}
+        keep_set = {id(msg) for msg in system_prompts} | {
+            id(msg) for msg in recent_others
+        }
         return [msg for msg in messages if id(msg) in keep_set]
 
     return await AGUIAdapter.dispatch_request(
@@ -282,11 +361,13 @@ async def chat_notebook_route(
         message_history=message_history,
         conversation_id=str(notebook.id),
         on_complete=persist_chat_history,
-        capabilities=[ProcessHistory(keep_recent)]
+        capabilities=[ProcessHistory(keep_recent)],
     )
 
 
-@router.get("/{notebook_id}/chat/history", response_model=list[NotebookChatHistoryMessage])
+@router.get(
+    "/{notebook_id}/chat/history", response_model=list[NotebookChatHistoryMessage]
+)
 def read_notebook_chat_history(
     notebook_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
@@ -294,7 +375,9 @@ def read_notebook_chat_history(
     include_reasoning: bool = False,
 ) -> list[dict[str, object]]:
     notebook = get_notebook(session, notebook_id, current_user)
-    return extract_notebook_chat_transcript(session, notebook, include_reasoning=include_reasoning)
+    return extract_notebook_chat_transcript(
+        session, notebook, include_reasoning=include_reasoning
+    )
 
 
 @router.get("/{notebook_id}/documents/chunks", response_model=list[dict[str, object]])
@@ -313,7 +396,9 @@ def read_document_chunks(
         )
     ).first()
     if not document:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
+        )
 
     chunks = session.exec(
         select(NotebookDocumentChunk)
@@ -333,7 +418,10 @@ def read_document_chunks(
     ]
 
 
-@router.get("/{notebook_id}/documents/{document_id}/chunks", response_model=list[dict[str, object]])
+@router.get(
+    "/{notebook_id}/documents/{document_id}/chunks",
+    response_model=list[dict[str, object]],
+)
 def read_document_chunks_by_id(
     notebook_id: UUID,
     document_id: UUID,
@@ -349,7 +437,9 @@ def read_document_chunks_by_id(
         )
     ).first()
     if not document:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
+        )
 
     chunks = session.exec(
         select(NotebookDocumentChunk)
@@ -380,14 +470,18 @@ def read_notebook_chunk(
     notebook = get_notebook(session, notebook_id, current_user)
     chunk = session.exec(
         select(NotebookDocumentChunk)
-        .join(NotebookDocument, NotebookDocument.id == NotebookDocumentChunk.document_id)
+        .join(
+            NotebookDocument, NotebookDocument.id == NotebookDocumentChunk.document_id
+        )
         .where(NotebookDocument.filename == filename)
         .where(NotebookDocumentChunk.chunk_index == chunk_index)
         .where(NotebookDocument.notebook_id == notebook.id)
         .where(NotebookDocument.user_id == current_user.id)
     ).first()
     if not chunk:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chunk not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Chunk not found"
+        )
 
     return {
         "content": chunk.content,
@@ -396,7 +490,10 @@ def read_notebook_chunk(
     }
 
 
-@router.get("/{notebook_id}/documents/{document_id}/chunks/{chunk_index}", response_model=dict[str, object])
+@router.get(
+    "/{notebook_id}/documents/{document_id}/chunks/{chunk_index}",
+    response_model=dict[str, object],
+)
 def read_notebook_chunk_by_document_id(
     notebook_id: UUID,
     document_id: UUID,
@@ -407,14 +504,18 @@ def read_notebook_chunk_by_document_id(
     notebook = get_notebook(session, notebook_id, current_user)
     chunk = session.exec(
         select(NotebookDocumentChunk)
-        .join(NotebookDocument, NotebookDocument.id == NotebookDocumentChunk.document_id)
+        .join(
+            NotebookDocument, NotebookDocument.id == NotebookDocumentChunk.document_id
+        )
         .where(NotebookDocumentChunk.document_id == document_id)
         .where(NotebookDocumentChunk.chunk_index == chunk_index)
         .where(NotebookDocument.notebook_id == notebook.id)
         .where(NotebookDocument.user_id == current_user.id)
     ).first()
     if not chunk:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chunk not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Chunk not found"
+        )
 
     document = session.exec(
         select(NotebookDocument).where(
@@ -424,7 +525,9 @@ def read_notebook_chunk_by_document_id(
         )
     ).first()
     if not document:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
+        )
 
     return {
         "id": str(chunk.id),
@@ -447,14 +550,19 @@ def delete_notebook_route(
 
 
 # ---------------------------------------------------------------------------
-# Report generation
+# Report generation (background)
 # ---------------------------------------------------------------------------
 
-def _build_report_context(session: Session, notebook: Notebook, current_user: User) -> str:
+
+def _build_report_context(
+    session: Session, notebook: Notebook, current_user: User
+) -> str:
     """Return all indexed chunk text for a notebook, up to the char limit."""
     chunks = session.exec(
         select(NotebookDocumentChunk, NotebookDocument.filename)
-        .join(NotebookDocument, NotebookDocument.id == NotebookDocumentChunk.document_id)
+        .join(
+            NotebookDocument, NotebookDocument.id == NotebookDocumentChunk.document_id
+        )
         .where(NotebookDocument.notebook_id == notebook.id)
         .where(NotebookDocument.user_id == current_user.id)
         .where(NotebookDocument.status == "indexed")
@@ -477,6 +585,107 @@ def _build_report_context(session: Session, notebook: Notebook, current_user: Us
     return "\n\n".join(parts)
 
 
+async def _run_report_generation(
+    report_id: UUID,
+    report_type: str,
+    context: str,
+    instructions: str | None,
+    detail_level: str | None,
+    _engine: object | None = None,
+) -> None:
+    """Background task that runs the LLM call and persists the result."""
+    from app.core.database import engine as _default_engine
+
+    db_engine = _engine or _default_engine
+    with Session(db_engine) as session:
+        report = session.get(NotebookReport, report_id)
+        if report is None or report.status == "cancelled":
+            return
+
+        # Mark as generating
+        report.status = "generating"
+        report.updated_at = datetime.now(UTC)
+        session.add(report)
+        session.commit()
+
+        # Re-check cancellation after status update
+        session.expire_all()
+        report = session.get(NotebookReport, report_id)
+        if report is None or report.status == "cancelled":
+            return
+
+        report_content: (
+            BriefingDocReport
+            | StudyGuideReport
+            | BlogPostReport
+            | CustomReport
+            | MindMapReport
+        )
+        try:
+            match report_type:
+                case "briefing":
+                    report_content = await generate_briefing_doc(context, instructions)
+                case "study_guide":
+                    report_content = await generate_study_guide(context, instructions)
+                case "blog":
+                    report_content = await generate_blog_post(context, instructions)
+                case "custom":
+                    report_content = await generate_custom_report(
+                        context, instructions or ""
+                    )
+                case "mindmap":
+                    report_content = await generate_mindmap(
+                        context, detail_level, instructions
+                    )
+                case _:
+                    logger.error("Unknown report type: %s", report_type)
+                    report.status = "failed"
+                    report.error_message = f"Unknown report type: {report_type}"
+                    report.updated_at = datetime.now(UTC)
+                    session.add(report)
+                    session.commit()
+                    return
+        except ModelHTTPError as exc:
+            session.expire_all()
+            report = session.get(NotebookReport, report_id)
+            if report is not None and report.status != "cancelled":
+                report.status = "failed"
+                if exc.status_code == 429:
+                    report.error_message = "The AI provider rate limit was exceeded. Please wait a moment and try again."
+                else:
+                    report.error_message = "The AI provider failed to generate the report. Please try again."
+                report.updated_at = datetime.now(UTC)
+                session.add(report)
+                session.commit()
+            return
+        except Exception:
+            logger.exception("Unexpected error during report generation")
+            session.expire_all()
+            report = session.get(NotebookReport, report_id)
+            if report is not None and report.status != "cancelled":
+                report.status = "failed"
+                report.error_message = (
+                    "An unexpected error occurred during report generation."
+                )
+                report.updated_at = datetime.now(UTC)
+                session.add(report)
+                session.commit()
+            return
+
+        # Re-check cancellation before writing content
+        session.expire_all()
+        report = session.get(NotebookReport, report_id)
+        if report is None or report.status == "cancelled":
+            return
+
+        # Success
+        report.status = "completed"
+        report.content = report_content.model_dump()
+        report.updated_at = datetime.now(UTC)
+        session.add(report)
+        session.commit()
+
+
 @router.post(
     "/{notebook_id}/reports",
     response_model=NotebookReportRead,
@@ -485,6 +694,7 @@ def _build_report_context(session: Session, notebook: Notebook, current_user: Us
 async def generate_notebook_report(
     notebook_id: UUID,
     payload: ReportGenerateRequest,
+    background_tasks: BackgroundTasks,
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ) -> object:
@@ -511,39 +721,15 @@ async def generate_notebook_report(
             detail="additional_instructions is required for report_type 'custom'.",
         )
 
-    report_content: BriefingDocReport | StudyGuideReport | BlogPostReport | CustomReport | MindMapReport
-    try:
-        match payload.report_type:
-            case "briefing":
-                report_content = await generate_briefing_doc(context, instructions)
-            case "study_guide":
-                report_content = await generate_study_guide(context, instructions)
-            case "blog":
-                report_content = await generate_blog_post(context, instructions)
-            case "custom":
-                report_content = await generate_custom_report(context, instructions)
-            case "mindmap":
-                report_content = await generate_mindmap(context, payload.detail_level, instructions)
-    except ModelHTTPError as exc:
-        # Surface provider failures (rate limits, upstream errors) cleanly instead
-        # of an opaque 500. Free-tier Gemini in particular returns 429 when the
-        # daily request quota is exhausted.
-        if exc.status_code == 429:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="The AI provider rate limit was exceeded. Please wait a moment and try again.",
-            ) from exc
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="The AI provider failed to generate the report. Please try again.",
-        ) from exc
-
     now = datetime.now(UTC)
     report = NotebookReport(
         notebook_id=notebook.id,
         user_id=current_user.id,
         report_type=payload.report_type,
-        content=report_content.model_dump(),
+        status="pending",
+        additional_instructions=instructions,
+        detail_level=payload.detail_level,
+        content={},
         created_at=now,
         updated_at=now,
     )
@@ -553,9 +739,102 @@ async def generate_notebook_report(
         session.refresh(report)
     except SQLAlchemyError as exc:
         session.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from exc
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
+        ) from exc
+
+    # Capture the engine from the request session so the background task uses
+    # the same database (critical for tests where the session engine differs
+    # from the module-level engine import).
+    session_engine = session.get_bind()
+
+    background_tasks.add_task(
+        _run_report_generation,
+        report_id=report.id,
+        report_type=payload.report_type,
+        context=context,
+        instructions=instructions,
+        detail_level=payload.detail_level,
+        _engine=session_engine,
+    )
 
     return report
+
+
+@router.post(
+    "/{notebook_id}/reports/{report_id}/cancel",
+    response_model=NotebookReportRead,
+)
+def cancel_notebook_report(
+    notebook_id: UUID,
+    report_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> object:
+    notebook = get_notebook(session, notebook_id, current_user)
+    report = session.exec(
+        select(NotebookReport).where(
+            NotebookReport.id == report_id,
+            NotebookReport.notebook_id == notebook.id,
+            NotebookReport.user_id == current_user.id,
+        )
+    ).first()
+    if report is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Report not found"
+        )
+
+    if report.status not in ("pending", "generating"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot cancel report with status '{report.status}'.",
+        )
+
+    report.status = "cancelled"
+    report.updated_at = datetime.now(UTC)
+    try:
+        session.add(report)
+        session.commit()
+        session.refresh(report)
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
+        ) from exc
+
+    return report
+
+
+@router.delete(
+    "/{notebook_id}/reports/{report_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+def delete_notebook_report(
+    notebook_id: UUID,
+    report_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> None:
+    notebook = get_notebook(session, notebook_id, current_user)
+    report = session.exec(
+        select(NotebookReport).where(
+            NotebookReport.id == report_id,
+            NotebookReport.notebook_id == notebook.id,
+            NotebookReport.user_id == current_user.id,
+        )
+    ).first()
+    if report is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Report not found"
+        )
+
+    try:
+        session.delete(report)
+        session.commit()
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
+        ) from exc
 
 
 @router.get("/{notebook_id}/reports", response_model=list[NotebookReportRead])
@@ -591,5 +870,7 @@ def get_notebook_report(
         )
     ).first()
     if report is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Report not found"
+        )
     return report

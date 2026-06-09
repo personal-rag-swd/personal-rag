@@ -8,6 +8,7 @@ Create Date: 2026-06-01
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "20260601_0010"
@@ -65,10 +66,25 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.alter_column("notebook", "updated_at", type_=sa.DateTime(timezone=False), postgresql_using="updated_at AT TIME ZONE 'UTC'")
-    op.alter_column("notebook", "created_at", type_=sa.DateTime(timezone=False), postgresql_using="created_at AT TIME ZONE 'UTC'")
+    op.alter_column(
+        "notebook",
+        "updated_at",
+        type_=sa.DateTime(timezone=False),
+        postgresql_using="updated_at AT TIME ZONE 'UTC'",
+    )
+    op.alter_column(
+        "notebook",
+        "created_at",
+        type_=sa.DateTime(timezone=False),
+        postgresql_using="created_at AT TIME ZONE 'UTC'",
+    )
 
-    op.alter_column("refresh_token", "created_at", type_=sa.DateTime(timezone=False), postgresql_using="created_at AT TIME ZONE 'UTC'")
+    op.alter_column(
+        "refresh_token",
+        "created_at",
+        type_=sa.DateTime(timezone=False),
+        postgresql_using="created_at AT TIME ZONE 'UTC'",
+    )
 
     op.alter_column(
         "pending_registration",
@@ -83,5 +99,15 @@ def downgrade() -> None:
         postgresql_using="created_at AT TIME ZONE 'UTC'",
     )
 
-    op.alter_column("user", "updated_at", type_=sa.DateTime(timezone=False), postgresql_using="updated_at AT TIME ZONE 'UTC'")
-    op.alter_column("user", "created_at", type_=sa.DateTime(timezone=False), postgresql_using="created_at AT TIME ZONE 'UTC'")
+    op.alter_column(
+        "user",
+        "updated_at",
+        type_=sa.DateTime(timezone=False),
+        postgresql_using="updated_at AT TIME ZONE 'UTC'",
+    )
+    op.alter_column(
+        "user",
+        "created_at",
+        type_=sa.DateTime(timezone=False),
+        postgresql_using="created_at AT TIME ZONE 'UTC'",
+    )

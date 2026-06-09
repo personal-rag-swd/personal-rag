@@ -1,8 +1,7 @@
 import pytest
 from pydantic_ai.exceptions import ModelHTTPError
 
-from app.core.config import Settings
-from app.core.config import validate_rag_embedding_dimension
+from app.core.config import Settings, validate_rag_embedding_dimension
 from app.notebooks.tools import embeddings
 from app.notebooks.tools.embeddings import (
     GeminiEmbeddingAdapter,
@@ -32,7 +31,9 @@ def test_auto_provider_uses_openai_compatible_without_key() -> None:
         get_embedding_adapter(settings)
 
 
-def test_openai_compatible_embedding_uses_provider_url(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_openai_compatible_embedding_uses_provider_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: dict[str, str | None] = {}
 
     class DummyAdapter:
@@ -77,7 +78,9 @@ def test_embed_texts_dimension_mismatch_raises(monkeypatch: pytest.MonkeyPatch) 
         def embed_texts(self, texts: list[str]) -> list[list[float]]:
             return [[0.0, 1.0] for _ in texts]
 
-    monkeypatch.setattr(embeddings, "get_embedding_adapter", lambda _settings: WrongShapeAdapter())
+    monkeypatch.setattr(
+        embeddings, "get_embedding_adapter", lambda _settings: WrongShapeAdapter()
+    )
     with pytest.raises(RuntimeError, match="Embedding vector size mismatch"):
         embed_texts(["one"], settings)
 
@@ -93,7 +96,9 @@ def test_embed_texts_count_mismatch_raises(monkeypatch: pytest.MonkeyPatch) -> N
         def embed_texts(self, texts: list[str]) -> list[list[float]]:
             return [[0.0, 1.0]]
 
-    monkeypatch.setattr(embeddings, "get_embedding_adapter", lambda _settings: MissingOneAdapter())
+    monkeypatch.setattr(
+        embeddings, "get_embedding_adapter", lambda _settings: MissingOneAdapter()
+    )
     with pytest.raises(RuntimeError, match="Embedding response count mismatch"):
         embed_texts(["one", "two"], settings)
 
@@ -101,6 +106,7 @@ def test_embed_texts_count_mismatch_raises(monkeypatch: pytest.MonkeyPatch) -> N
 def test_pydantic_ai_embedding_adapter_embeds_texts_correctly() -> None:
     from pydantic_ai import Embedder
     from pydantic_ai.embeddings.test import TestEmbeddingModel
+
     from app.notebooks.tools.embeddings import PydanticAIEmbeddingAdapter
 
     embedder = Embedder(TestEmbeddingModel(dimensions=4))
@@ -110,7 +116,9 @@ def test_pydantic_ai_embedding_adapter_embeds_texts_correctly() -> None:
     assert result == [[1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0]]
 
 
-def test_pydantic_ai_embedding_adapter_logs_model_http_error(caplog: pytest.LogCaptureFixture) -> None:
+def test_pydantic_ai_embedding_adapter_logs_model_http_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     from app.notebooks.tools.embeddings import PydanticAIEmbeddingAdapter
 
     class FailingEmbedder:
@@ -130,13 +138,16 @@ def test_pydantic_ai_embedding_adapter_logs_model_http_error(caplog: pytest.LogC
 
 
 def test_openai_compatible_adapter_openrouter_settings() -> None:
-    from app.notebooks.tools.embeddings import OpenAICompatibleEmbeddingAdapter, OpenRouterEmbeddingModel
+    from app.notebooks.tools.embeddings import (
+        OpenAICompatibleEmbeddingAdapter,
+        OpenRouterEmbeddingModel,
+    )
 
     adapter = OpenAICompatibleEmbeddingAdapter(
         api_key="test-key",
         model="test-model",
         base_url="https://openrouter.ai/api/v1",
-        output_dimensionality=256
+        output_dimensionality=256,
     )
 
     # Assert custom OpenRouter model was instantiated and configured

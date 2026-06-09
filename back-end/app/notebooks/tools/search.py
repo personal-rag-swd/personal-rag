@@ -6,12 +6,10 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlmodel import Session
 
-from app.core.config import Settings
-from app.core.config import validate_rag_embedding_dimension
-from app.notebooks.models import Notebook, NotebookDocument
+from app.core.config import Settings, validate_rag_embedding_dimension
+from app.notebooks.models import Notebook
 from app.notebooks.tools.embeddings import embed_texts
 from app.users.models import User
-
 
 
 class RetrievedChunk(BaseModel):

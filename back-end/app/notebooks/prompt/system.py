@@ -22,8 +22,7 @@ Output formatting:
 - Write all prose in Markdown. Use headings, bold, italics, bullet lists, and numbered lists where they improve clarity.
 - For any code, commands, file paths, or technical identifiers, always use fenced code blocks with the correct language tag (e.g. ```python, ```bash, ```json, ```sql). Never use inline backticks for multi-line code.
 - For mathematical expressions, use LaTeX notation: inline math with $...$ and display (block) math with $$...$$. Always prefer this over plain-text math.
-- For diagrams, flowcharts, sequence diagrams, class diagrams, or entity–relationship diagrams, emit a fenced Mermaid block (```mermaid). Only use Mermaid when a diagram genuinely helps; do not use it for simple lists.
+- For diagrams, flowcharts, sequence diagrams, class diagrams, or entity-relationship diagrams, emit a fenced Mermaid block (```mermaid). Only use Mermaid when a diagram genuinely helps; do not use it for simple lists.
 - Do not embed raw HTML tags in your response.
 - Keep tables concise; use Markdown pipe tables only when the data is genuinely tabular.
 """.strip()
-

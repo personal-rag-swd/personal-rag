@@ -11,8 +11,9 @@ from datetime import datetime
 from uuid import uuid4
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision: str = "20260527_0004"
 down_revision: str | Sequence[str] | None = "20260527_0003"
@@ -35,8 +36,15 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["notebook_id"], ["notebook.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_notebook_message_notebook_id", "notebook_message", ["notebook_id"], unique=False)
-    op.create_index("ix_notebook_message_seq", "notebook_message", ["seq"], unique=False)
+    op.create_index(
+        "ix_notebook_message_notebook_id",
+        "notebook_message",
+        ["notebook_id"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_notebook_message_seq", "notebook_message", ["seq"], unique=False
+    )
 
     bind = op.get_bind()
     notebook_rows = bind.execute(
@@ -79,7 +87,9 @@ def downgrade() -> None:
     )
 
     bind = op.get_bind()
-    notebook_ids = [row.id for row in bind.execute(sa.text("SELECT id FROM notebook")).fetchall()]
+    notebook_ids = [
+        row.id for row in bind.execute(sa.text("SELECT id FROM notebook")).fetchall()
+    ]
     for notebook_id in notebook_ids:
         rows = bind.execute(
             sa.text(
@@ -93,7 +103,9 @@ def downgrade() -> None:
             {"notebook_id": str(notebook_id)},
         ).fetchall()
         bind.execute(
-            sa.text("UPDATE notebook SET chat_history = :chat_history WHERE id = :notebook_id"),
+            sa.text(
+                "UPDATE notebook SET chat_history = :chat_history WHERE id = :notebook_id"
+            ),
             {
                 "chat_history": json.dumps([row.message for row in rows]),
                 "notebook_id": str(notebook_id),

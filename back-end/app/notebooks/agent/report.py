@@ -1,27 +1,30 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
+
 import logfire
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.run import AgentRunResult
 
 from app.notebooks.agent.factory import resolve_chat_provider
 from app.notebooks.prompt import (
     BLOG_SYSTEM,
     BRIEFING_SYSTEM,
     CUSTOM_SYSTEM_BASE,
-    STUDY_GUIDE_SYSTEM,
     MINDMAP_SYSTEM,
-    build_report_user_message,
+    STUDY_GUIDE_SYSTEM,
     build_custom_report_user_message,
     build_mindmap_user_message,
+    build_report_user_message,
 )
 from app.notebooks.schemas import (
     BlogPostReport,
     BriefingDocReport,
     CustomReport,
-    StudyGuideReport,
     MindMapReport,
+    StudyGuideReport,
 )
 
 
@@ -30,7 +33,7 @@ async def _run_agent_with_retry(
     user_msg: str,
     max_retries: int = 4,
     initial_delay: float = 2.0,
-) -> any:
+) -> AgentRunResult[Any]:
     delay = initial_delay
     for attempt in range(max_retries):
         try:
@@ -46,7 +49,8 @@ async def _run_agent_with_retry(
                 await asyncio.sleep(delay)
                 delay *= 2
             else:
-                raise exc
+                raise
+    raise RuntimeError("Model retry loop exited without a result")
 
 
 async def generate_briefing_doc(
@@ -58,7 +62,9 @@ async def generate_briefing_doc(
         output_type=BriefingDocReport,
         instructions=BRIEFING_SYSTEM,
     )
-    result = await _run_agent_with_retry(agent, build_report_user_message(context, additional_instructions))
+    result = await _run_agent_with_retry(
+        agent, build_report_user_message(context, additional_instructions)
+    )
     return result.output
 
 
@@ -71,7 +77,9 @@ async def generate_study_guide(
         output_type=StudyGuideReport,
         instructions=STUDY_GUIDE_SYSTEM,
     )
-    result = await _run_agent_with_retry(agent, build_report_user_message(context, additional_instructions))
+    result = await _run_agent_with_retry(
+        agent, build_report_user_message(context, additional_instructions)
+    )
     return result.output
 
 
@@ -84,7 +92,9 @@ async def generate_blog_post(
         output_type=BlogPostReport,
         instructions=BLOG_SYSTEM,
     )
-    result = await _run_agent_with_retry(agent, build_report_user_message(context, additional_instructions))
+    result = await _run_agent_with_retry(
+        agent, build_report_user_message(context, additional_instructions)
+    )
     return result.output
 
 
@@ -113,8 +123,8 @@ async def generate_mindmap(
         output_type=MindMapReport,
         instructions=MINDMAP_SYSTEM,
     )
-    user_message = build_mindmap_user_message(context, detail_level, additional_instructions)
+    user_message = build_mindmap_user_message(
+        context, detail_level, additional_instructions
+    )
     result = await _run_agent_with_retry(agent, user_message)
     return result.output
-
-

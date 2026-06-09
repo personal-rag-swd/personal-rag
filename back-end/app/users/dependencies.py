@@ -53,7 +53,9 @@ def get_current_user(
     try:
         user = session.exec(select(User).where(User.id == user_id)).first()
     except SQLAlchemyError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from exc
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
+        ) from exc
 
     if user is None or not user.is_active:
         raise HTTPException(
@@ -78,6 +80,8 @@ def require_role(required_role: str) -> Callable[..., None]:
             )
         payload = decode_access_token(token, settings)
         if payload.get("role") != required_role:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden"
+            )
 
     return dependency

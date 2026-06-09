@@ -1,8 +1,7 @@
 import os
 from collections.abc import Generator
 from typing import Any
-from uuid import UUID
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 os.environ["CHAT_API_KEY"] = "test-key"
 
@@ -21,14 +20,19 @@ from pydantic_ai.messages import (
 from pydantic_ai.ui.ag_ui import AGUIAdapter
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, create_engine, select
+from sqlmodel import Session, SQLModel, create_engine, select
 from starlette.responses import Response
 
 from app.core.config import Settings, get_settings
 from app.core.security import create_access_token
 from app.dependencies import get_session
 from app.main import app
-from app.notebooks.models import Notebook, NotebookDocument, NotebookDocumentChunk, NotebookMessage
+from app.notebooks.models import (
+    Notebook,
+    NotebookDocument,
+    NotebookDocumentChunk,
+    NotebookMessage,
+)
 from app.users.models import User
 
 
@@ -41,10 +45,15 @@ def settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
         chat_api_key="test-key",
     )
     from app.core import config
-    from app.notebooks.agent.factory import OpenRouterChatProvider, OpenAICompatibleChatProvider, GeminiChatProvider
-    OpenRouterChatProvider.build_model.cache_clear()
-    OpenAICompatibleChatProvider.build_model.cache_clear()
-    GeminiChatProvider.build_model.cache_clear()
+    from app.notebooks.agent.factory import (
+        _get_gemini_model,
+        _get_openai_compatible_model,
+        _get_openrouter_model,
+    )
+
+    _get_openrouter_model.cache_clear()
+    _get_openai_compatible_model.cache_clear()
+    _get_gemini_model.cache_clear()
     config.get_settings.cache_clear()
 
     monkeypatch.setattr(config, "get_settings", lambda: s)
@@ -52,7 +61,7 @@ def settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
 
 
 @pytest.fixture
-def session() -> Generator[Session, None, None]:
+def session() -> Generator[Session]:
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -64,11 +73,11 @@ def session() -> Generator[Session, None, None]:
 
 
 @pytest.fixture
-def client(settings: Settings, session: Session) -> Generator[TestClient, None, None]:
+def client(settings: Settings, session: Session) -> Generator[TestClient]:
     def override_get_settings() -> Settings:
         return settings
 
-    def override_get_session() -> Generator[Session, None, None]:
+    def override_get_session() -> Generator[Session]:
         yield session
 
     app.dependency_overrides[get_settings] = override_get_settings
@@ -115,7 +124,9 @@ def test_notebook_chat_endpoint_streams_response(
         headers=headers,
     ).json()
 
-    async def fake_dispatch_request(request: object, agent: object, **kwargs: Any) -> Response:
+    async def fake_dispatch_request(
+        request: object, agent: object, **kwargs: Any
+    ) -> Response:
         return Response(content="ok", media_type="text/plain")
 
     monkeypatch.setattr(AGUIAdapter, "dispatch_request", fake_dispatch_request)
@@ -152,7 +163,9 @@ def test_notebook_chat_endpoint_persists_message_history(
     ]
     captured: dict[str, Any] = {}
 
-    async def fake_dispatch_request(request: object, agent: object, **kwargs: Any) -> Response:
+    async def fake_dispatch_request(
+        request: object, agent: object, **kwargs: Any
+    ) -> Response:
         captured["message_history"] = kwargs["message_history"]
         captured["conversation_id"] = kwargs["conversation_id"]
         await kwargs["on_complete"](FakeRunResult(messages))
@@ -214,7 +227,9 @@ def test_notebook_chat_endpoint_loads_existing_message_history(
     session.commit()
     captured: dict[str, Any] = {}
 
-    async def fake_dispatch_request(request: object, agent: object, **kwargs: Any) -> Response:
+    async def fake_dispatch_request(
+        request: object, agent: object, **kwargs: Any
+    ) -> Response:
         captured["message_history"] = kwargs["message_history"]
         return Response(content="ok", media_type="text/plain")
 
@@ -253,7 +268,9 @@ def test_notebook_chat_endpoint_is_scoped_to_owner(
 
     called = {"value": False}
 
-    async def fake_dispatch_request(request: object, agent: object, **kwargs: Any) -> Response:
+    async def fake_dispatch_request(
+        request: object, agent: object, **kwargs: Any
+    ) -> Response:
         called["value"] = True
         return Response(content="ok", media_type="text/plain")
 
@@ -270,7 +287,6 @@ def test_notebook_chat_endpoint_is_scoped_to_owner(
 
 
 from app.notebooks.memory.history import parse_chunks_from_context_block
-from app.notebooks.models import NotebookDocument, NotebookDocumentChunk
 
 
 def test_parse_chunks_from_context_block() -> None:
@@ -286,7 +302,9 @@ def test_parse_chunks_from_context_block() -> None:
     assert chunks[0]["filename"] == "UDL.pdf"
     assert chunks[0]["document_id"] == "5f3e9c42-5ba3-4c91-9e7f-1d8975bb42f1"
     assert chunks[0]["chunk_index"] == 0
-    assert chunks[0]["content"] == "1.1 Supervised learning\nSupervised learning is nice."
+    assert (
+        chunks[0]["content"] == "1.1 Supervised learning\nSupervised learning is nice."
+    )
 
     assert chunks[1]["filename"] == "UDL2.pdf"
     assert chunks[1]["document_id"] == "6f3e9c42-5ba3-4c91-9e7f-1d8975bb42f2"
@@ -318,7 +336,13 @@ def test_chat_history_emits_ordered_references(
     )
     messages = [
         ModelRequest(parts=[UserPromptPart(content="Question?")]),
-        ModelRequest(parts=[ToolReturnPart(tool_name="search_notebook_context", content=context_block)]),
+        ModelRequest(
+            parts=[
+                ToolReturnPart(
+                    tool_name="search_notebook_context", content=context_block
+                )
+            ]
+        ),
         ModelResponse(
             parts=[
                 TextPart(
@@ -386,10 +410,18 @@ def test_chat_history_reference_ids_reset_per_assistant_message(
     )
     messages = [
         ModelRequest(parts=[UserPromptPart(content="Q1")]),
-        ModelRequest(parts=[ToolReturnPart(tool_name="search_notebook_context", content=block_one)]),
+        ModelRequest(
+            parts=[
+                ToolReturnPart(tool_name="search_notebook_context", content=block_one)
+            ]
+        ),
         ModelResponse(parts=[TextPart(content="A1 [one.pdf, chunk 0].")]),
         ModelRequest(parts=[UserPromptPart(content="Q2")]),
-        ModelRequest(parts=[ToolReturnPart(tool_name="search_notebook_context", content=block_two)]),
+        ModelRequest(
+            parts=[
+                ToolReturnPart(tool_name="search_notebook_context", content=block_two)
+            ]
+        ),
         ModelResponse(parts=[TextPart(content="A2 [two.pdf, chunk 1].")]),
     ]
     notebook = session.get(Notebook, UUID(created["id"]))
@@ -409,7 +441,9 @@ def test_chat_history_reference_ids_reset_per_assistant_message(
     )
     assert response.status_code == 200
     payload = response.json()
-    assistant_messages = [message for message in payload if message["role"] == "assistant"]
+    assistant_messages = [
+        message for message in payload if message["role"] == "assistant"
+    ]
     assert assistant_messages[0]["references"][0]["ref_id"] == "1:1"
     assert assistant_messages[1]["references"][0]["ref_id"] == "2:1"
 
@@ -495,10 +529,13 @@ def test_chunks_endpoints_scope(
     assert resp_single_by_id.json()["document_id"] == str(doc.id)
 
 
-def test_append_notebook_chat_history_does_not_delete_old_messages(session: Session) -> None:
+def test_append_notebook_chat_history_does_not_delete_old_messages(
+    session: Session,
+) -> None:
+    import uuid
+
     from app.notebooks.memory.history import append_notebook_chat_history
     from app.notebooks.models import Notebook, NotebookMessage
-    import uuid
 
     notebook = Notebook(
         id=uuid.uuid4(),
@@ -558,10 +595,14 @@ def test_notebook_message_enforces_unique_seq_per_notebook(session: Session) -> 
     session.add(notebook)
     session.commit()
 
-    session.add(NotebookMessage(notebook_id=notebook.id, seq=1, message={"role": "user"}))
+    session.add(
+        NotebookMessage(notebook_id=notebook.id, seq=1, message={"role": "user"})
+    )
     session.commit()
 
-    session.add(NotebookMessage(notebook_id=notebook.id, seq=1, message={"role": "assistant"}))
+    session.add(
+        NotebookMessage(notebook_id=notebook.id, seq=1, message={"role": "assistant"})
+    )
     with pytest.raises(IntegrityError):
         session.commit()
     session.rollback()
@@ -598,8 +639,12 @@ def test_keep_recent_retains_system_prompts_and_more_history(
 
     # 3. 20 alternating turns (10 user, 10 assistant)
     for i in range(1, 11):
-        messages.append(ModelRequest(parts=[UserPromptPart(content=f"User question {i}")]))
-        messages.append(ModelResponse(parts=[TextPart(content=f"Assistant answer {i}")]))
+        messages.append(
+            ModelRequest(parts=[UserPromptPart(content=f"User question {i}")])
+        )
+        messages.append(
+            ModelResponse(parts=[TextPart(content=f"Assistant answer {i}")])
+        )
 
     notebook = session.get(Notebook, UUID(created["id"]))
     assert notebook is not None
@@ -614,7 +659,9 @@ def test_keep_recent_retains_system_prompts_and_more_history(
 
     captured: dict[str, Any] = {}
 
-    async def fake_dispatch_request(request: object, agent: object, **kwargs: Any) -> Response:
+    async def fake_dispatch_request(
+        request: object, agent: object, **kwargs: Any
+    ) -> Response:
         history = kwargs["message_history"]
         for cap in kwargs.get("capabilities", []):
             if type(cap).__name__ == "ProcessHistory":
@@ -730,7 +777,10 @@ def test_chat_history_includes_tool_calls(
     assert first_assistant["parts"][0]["toolCallId"] == "call_ml_123"
     assert first_assistant["parts"][0]["toolName"] == "search_notebook_context"
     assert "machine learning" in first_assistant["parts"][0]["argsText"]
-    assert first_assistant["parts"][0]["result"] == "SOURCE [filename=ml.pdf doc_id=5f3e9c42-5ba3-4c91-9e7f-1d8975bb42f1 chunk=0]\nML is awesome."
+    assert (
+        first_assistant["parts"][0]["result"]
+        == "SOURCE [filename=ml.pdf doc_id=5f3e9c42-5ba3-4c91-9e7f-1d8975bb42f1 chunk=0]\nML is awesome."
+    )
 
     second_assistant = assistant_messages[1]
     assert len(second_assistant["parts"]) == 1

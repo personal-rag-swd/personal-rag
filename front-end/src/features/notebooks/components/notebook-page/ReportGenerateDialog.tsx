@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { Loader2Icon, SparklesIcon } from "lucide-react"
+import { SparklesIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { useForm } from "@tanstack/react-form"
@@ -78,7 +78,7 @@ export function ReportGenerateDialog({
         },
         {
           onSuccess: (report) => {
-            toast.success("Report generated", {
+            toast.success("Report queued", {
               description: REPORT_TYPE_BY_ID[value.selectedType].label,
             })
             onGenerated?.(report)
@@ -86,7 +86,7 @@ export function ReportGenerateDialog({
             form.reset()
           },
           onError: (error) => {
-            toast.error("Failed to generate report", {
+            toast.error("Failed to queue report", {
               description: error.message,
             })
           },
@@ -107,8 +107,8 @@ export function ReportGenerateDialog({
         <DialogHeader>
           <DialogTitle>Generate report</DialogTitle>
           <DialogDescription>
-            Choose a format and optional focus instructions. The generated
-            output will appear in Studio.
+            Choose a format and optional focus instructions. The report will be
+            generated in the background and appear in Studio when ready.
           </DialogDescription>
         </DialogHeader>
 
@@ -226,17 +226,8 @@ export function ReportGenerateDialog({
             disabled={generateMutation.isPending}
             className="w-full gap-2"
           >
-            {generateMutation.isPending ? (
-              <>
-                <Loader2Icon className="size-4 animate-spin" />
-                Generating report...
-              </>
-            ) : (
-              <>
-                <SparklesIcon className="size-4" />
-                Generate report
-              </>
-            )}
+            <SparklesIcon className="size-4" />
+            {generateMutation.isPending ? "Queuing..." : "Generate report"}
           </Button>
         </form>
       </DialogContent>

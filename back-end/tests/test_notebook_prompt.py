@@ -7,7 +7,10 @@ from app.notebooks.tools.search import RetrievedChunk
 
 def test_notebook_core_instructions_require_source_grounding() -> None:
     assert "Answer only from the retrieved source text" in CHAT_SYSTEM_INSTRUCTIONS
-    assert "If the retrieved sources do not contain enough evidence" in CHAT_SYSTEM_INSTRUCTIONS
+    assert (
+        "If the retrieved sources do not contain enough evidence"
+        in CHAT_SYSTEM_INSTRUCTIONS
+    )
     assert "[filename, chunk N]" in CHAT_SYSTEM_INSTRUCTIONS
     assert "Do not fabricate filenames" in CHAT_SYSTEM_INSTRUCTIONS
 
@@ -27,7 +30,9 @@ def test_context_block_labels_sources_for_citation() -> None:
     )
 
     assert "Cite claims with the matching source label: [filename, chunk N]." in context
-    assert f"SOURCE [filename=research-notes.pdf doc_id={document_id} chunk=3]" in context
+    assert (
+        f"SOURCE [filename=research-notes.pdf doc_id={document_id} chunk=3]" in context
+    )
     assert "Notebook content from the source." in context
 
 

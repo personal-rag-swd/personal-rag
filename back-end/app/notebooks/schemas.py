@@ -124,6 +124,7 @@ class NotebookChatHistoryMessage(BaseModel):
 # Report structured-output schemas (returned by the LLM via pydantic-ai)
 # ---------------------------------------------------------------------------
 
+
 class GlossaryEntry(BaseModel):
     term: str
     definition: str
@@ -161,20 +162,28 @@ class MindMapNode(BaseModel):
     id: str = Field(description="Unique node identifier, e.g. 'root', 'm1', 's1_1'")
     label: str = Field(description="Short text label of the concept")
     type: Literal["root", "main", "sub"] = Field(description="Branch level hierarchy")
-    parent_id: str | None = Field(default=None, description="Parent node ID or null for central topic")
-    description: str | None = Field(default=None, description="Detailed explanation/definition of the concept")
+    parent_id: str | None = Field(
+        default=None, description="Parent node ID or null for central topic"
+    )
+    description: str | None = Field(
+        default=None, description="Detailed explanation/definition of the concept"
+    )
 
 
 class MindMapRelationship(BaseModel):
     source: str = Field(description="Source node ID")
     target: str = Field(description="Target node ID")
-    label: str = Field(description="Description of concept relationship, e.g., 'prerequisite of'")
+    label: str = Field(
+        description="Description of concept relationship, e.g., 'prerequisite of'"
+    )
 
 
 class MindMapReport(BaseModel):
     central_topic: str = Field(description="Central theme of the documents")
     nodes: list[MindMapNode] = Field(description="Tree structure nodes")
-    relationships: list[MindMapRelationship] = Field(default_factory=list, description="Cross-connections")
+    relationships: list[MindMapRelationship] = Field(
+        default_factory=list, description="Cross-connections"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +205,10 @@ class NotebookReportRead(BaseModel):
     id: UUID
     notebook_id: UUID
     report_type: str
+    status: str
+    error_message: str | None = None
+    additional_instructions: str | None = None
+    detail_level: str | None = None
     content: dict[str, Any]
     created_at: datetime
     updated_at: datetime

@@ -16,6 +16,7 @@ import {
   type MindMapNode,
   type MindMapNodeApiPayload,
   type ReportType,
+  type ReportStatus,
 } from "./types"
 
 function buildApiUrl(path: string): string {
@@ -31,6 +32,8 @@ function mapNotebookReport(payload: NotebookReportApiPayload): NotebookReport {
   const base = {
     id: payload.id,
     notebookId: payload.notebook_id,
+    status: payload.status as ReportStatus,
+    errorMessage: payload.error_message ?? null,
     createdAt: payload.created_at,
     updatedAt: payload.updated_at,
   }
@@ -71,8 +74,8 @@ function mapNotebookReport(payload: NotebookReportApiPayload): NotebookReport {
 
 function mapMindMapContent(content: MindMapContentApiPayload): MindMapContent {
   return {
-    central_topic: content.central_topic,
-    nodes: content.nodes.map(mapMindMapNode),
+    central_topic: content.central_topic ?? "",
+    nodes: (content.nodes ?? []).map(mapMindMapNode),
     relationships: content.relationships ?? [],
   }
 }
@@ -353,6 +356,35 @@ export function useNotebookDocumentEvents(notebookId: string | undefined) {
               }
             )
           }
+          return
+        }
+        if (payload.type === "report_snapshot") {
+          if (payload.notebook_id === notebookId) {
+            queryClient.setQueryData(
+              ["notebooks", notebookId, "reports"],
+              payload.reports.map(mapNotebookReport)
+            )
+          }
+          return
+        }
+        if (payload.type === "report_update") {
+          if (payload.notebook_id === notebookId) {
+            queryClient.setQueryData<NotebookReport[]>(
+              ["notebooks", notebookId, "reports"],
+              (current = []) => {
+                const nextReport = mapNotebookReport(payload.report)
+                const existingIndex = current.findIndex(
+                  (report) => report.id === nextReport.id
+                )
+                if (existingIndex === -1) {
+                  return [nextReport, ...current]
+                }
+                const next = [...current]
+                next[existingIndex] = nextReport
+                return next
+              }
+            )
+          }
         }
       } catch (error) {
         console.warn(
@@ -503,6 +535,52 @@ export function useGenerateNotebookReportMutation(notebookId: string) {
         }
       )
       return mapNotebookReport(data)
+    },
+    onSuccess: (report) => {
+      queryClient.setQueryData<NotebookReport[]>(
+        ["notebooks", notebookId, "reports"],
+        (current = []) => {
+          if (current.some((r) => r.id === report.id)) {
+            return current
+          }
+          return [report, ...current]
+        }
+      )
+    },
+  })
+}
+
+export function useCancelNotebookReportMutation(
+  notebookId: string,
+  reportId: string
+) {
+  const queryClient = useQueryClient()
+  return useMutation<void, Error>({
+    mutationFn: async () => {
+      await apiFetch(
+        `/api/v1/notebooks/${notebookId}/reports/${reportId}/cancel`,
+        { method: "POST" }
+      )
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["notebooks", notebookId, "reports"],
+      })
+    },
+  })
+}
+
+export function useDeleteNotebookReportMutation(
+  notebookId: string,
+  reportId: string
+) {
+  const queryClient = useQueryClient()
+  return useMutation<void, Error>({
+    mutationFn: async () => {
+      await apiFetch(
+        `/api/v1/notebooks/${notebookId}/reports/${reportId}`,
+        { method: "DELETE" }
+      )
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({

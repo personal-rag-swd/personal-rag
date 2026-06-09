@@ -36,6 +36,13 @@ export type NotebookDocument = {
   updatedAt: string
 }
 
+export type ReportStatus =
+  | "pending"
+  | "generating"
+  | "completed"
+  | "failed"
+  | "cancelled"
+
 export type NotebookDocumentEvent =
   | {
       type: "snapshot"
@@ -47,6 +54,18 @@ export type NotebookDocumentEvent =
       type: "document_update"
       notebook_id: string
       document: NotebookDocumentApiPayload
+      timestamp: string
+    }
+  | {
+      type: "report_snapshot"
+      notebook_id: string
+      reports: NotebookReportApiPayload[]
+      timestamp: string
+    }
+  | {
+      type: "report_update"
+      notebook_id: string
+      report: NotebookReportApiPayload
       timestamp: string
     }
   | {
@@ -172,6 +191,8 @@ export type NotebookReportApiPayload =
       id: string
       notebook_id: string
       report_type: "briefing"
+      status: ReportStatus
+      error_message: string | null
       content: BriefingDocContent
       created_at: string
       updated_at: string
@@ -180,6 +201,8 @@ export type NotebookReportApiPayload =
       id: string
       notebook_id: string
       report_type: "study_guide"
+      status: ReportStatus
+      error_message: string | null
       content: StudyGuideContent
       created_at: string
       updated_at: string
@@ -188,6 +211,8 @@ export type NotebookReportApiPayload =
       id: string
       notebook_id: string
       report_type: "blog"
+      status: ReportStatus
+      error_message: string | null
       content: BlogPostContent
       created_at: string
       updated_at: string
@@ -196,6 +221,8 @@ export type NotebookReportApiPayload =
       id: string
       notebook_id: string
       report_type: "custom"
+      status: ReportStatus
+      error_message: string | null
       content: CustomReportContent
       created_at: string
       updated_at: string
@@ -204,6 +231,8 @@ export type NotebookReportApiPayload =
       id: string
       notebook_id: string
       report_type: "mindmap"
+      status: ReportStatus
+      error_message: string | null
       content: MindMapContentApiPayload
       created_at: string
       updated_at: string
@@ -214,6 +243,8 @@ export type NotebookReport =
       id: string
       notebookId: string
       reportType: "briefing"
+      status: ReportStatus
+      errorMessage: string | null
       content: BriefingDocContent
       createdAt: string
       updatedAt: string
@@ -222,6 +253,8 @@ export type NotebookReport =
       id: string
       notebookId: string
       reportType: "study_guide"
+      status: ReportStatus
+      errorMessage: string | null
       content: StudyGuideContent
       createdAt: string
       updatedAt: string
@@ -230,6 +263,8 @@ export type NotebookReport =
       id: string
       notebookId: string
       reportType: "blog"
+      status: ReportStatus
+      errorMessage: string | null
       content: BlogPostContent
       createdAt: string
       updatedAt: string
@@ -238,6 +273,8 @@ export type NotebookReport =
       id: string
       notebookId: string
       reportType: "custom"
+      status: ReportStatus
+      errorMessage: string | null
       content: CustomReportContent
       createdAt: string
       updatedAt: string
@@ -246,6 +283,8 @@ export type NotebookReport =
       id: string
       notebookId: string
       reportType: "mindmap"
+      status: ReportStatus
+      errorMessage: string | null
       content: MindMapContent
       createdAt: string
       updatedAt: string

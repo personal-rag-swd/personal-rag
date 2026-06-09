@@ -120,6 +120,8 @@ Once running, the frontend is at `http://localhost:5173` and the API is at
 Backend commands should be run from `back-end/`:
 
 - `uv run pytest`: run backend tests.
+- `uv run ruff check`: lint backend code.
+- `uv run ruff format`: format backend code.
 - `uv run alembic revision --autogenerate -m "message"`: generate a migration from model changes.
 - `uv run alembic upgrade head`: apply migrations.
 

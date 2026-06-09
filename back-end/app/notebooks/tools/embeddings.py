@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 import logging
 import time
-from typing import Any, TYPE_CHECKING
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import Embedder
-from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.embeddings import EmbeddingSettings
-from pydantic_ai.embeddings.openai import OpenAIEmbeddingModel
-from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.embeddings.google import GoogleEmbeddingModel, GoogleEmbeddingSettings
+from pydantic_ai.embeddings.openai import OpenAIEmbeddingModel
+from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.providers.google import GoogleProvider
+from pydantic_ai.providers.openai import OpenAIProvider
 
 if TYPE_CHECKING:
     from app.core.config import Settings
@@ -56,7 +56,7 @@ class PydanticAIEmbeddingAdapter(EmbeddingAdapter):
                             "Rate limit hit (429) on attempt %d/%d. Retrying in %d seconds...",
                             attempt + 1,
                             retries,
-                            sleep_time
+                            sleep_time,
                         )
                         time.sleep(sleep_time)
                         continue
@@ -71,7 +71,9 @@ class PydanticAIEmbeddingAdapter(EmbeddingAdapter):
                         "Embedding provider HTTP error: "
                         f"status_code={exc.status_code}, model={exc.model_name}, body={exc.body!r}"
                     ) from exc
-                except Exception as exc:  # pragma: no cover - provider-specific error handling
+                except (
+                    Exception
+                ) as exc:  # pragma: no cover - provider-specific error handling
                     # OpenAI-compatible providers can return non-standard response payloads
                     # when base URL/auth is misconfigured; surface an actionable message.
                     if "has no attribute 'data'" in str(exc):
@@ -164,7 +166,9 @@ class OpenAICompatibleEmbeddingAdapter(PydanticAIEmbeddingAdapter):
 
         if output_dimensionality and output_dimensionality > 0:
             if extra_body:
-                settings = EmbeddingSettings(dimensions=output_dimensionality, extra_body=extra_body)
+                settings = EmbeddingSettings(
+                    dimensions=output_dimensionality, extra_body=extra_body
+                )
             else:
                 settings = EmbeddingSettings(dimensions=output_dimensionality)
         elif extra_body:
@@ -192,7 +196,9 @@ def get_embedding_adapter(settings: Settings) -> EmbeddingAdapter:
 
     if provider == "openai_compatible":
         if not settings.embedding_api_key:
-            raise RuntimeError("Missing EMBEDDING_API_KEY for openai_compatible provider")
+            raise RuntimeError(
+                "Missing EMBEDDING_API_KEY for openai_compatible provider"
+            )
         return OpenAICompatibleEmbeddingAdapter(
             api_key=settings.embedding_api_key,
             base_url=settings.embedding_provider_url,
@@ -221,9 +227,12 @@ def embed_texts(texts: list[str], settings: Settings) -> list[list[float]]:
             else "https://api.openai.com/v1"
         )
     model = getattr(adapter, "model", settings.embedding_model or "unknown")
-    dimension = getattr(adapter, "output_dimensionality", None) or settings.embedding_dimension or "unknown"
+    dimension = (
+        getattr(adapter, "output_dimensionality", None)
+        or settings.embedding_dimension
+        or "unknown"
+    )
 
-    print(f"Embedding model running: provider_url={provider_url}, model={model}, dimension={dimension}")
     logger.info(
         "Embedding model running: provider_url=%s, model=%s, dimension=%s",
         provider_url,

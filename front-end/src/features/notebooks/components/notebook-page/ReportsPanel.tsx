@@ -32,6 +32,11 @@ export function ReportsPanel({
   report?: NotebookReport | null
 }) {
   const meta = report ? REPORT_TYPE_BY_ID[report.reportType] : null
+  const isCompleted = report?.status === "completed"
+  const isFailed = report?.status === "failed"
+  const isCancelled = report?.status === "cancelled"
+  const isPending =
+    report?.status === "pending" || report?.status === "generating"
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -42,14 +47,32 @@ export function ReportsPanel({
           </DialogTitle>
           <DialogDescription className="truncate text-[11px] text-muted-foreground">
             {report
-              ? `Generated ${formatDistanceToNow(new Date(report.createdAt), { addSuffix: true })}`
+              ? isPending
+                ? "Generating..."
+                : isFailed
+                  ? "Generation failed"
+                  : isCancelled
+                    ? "Cancelled"
+                    : `Generated ${formatDistanceToNow(new Date(report.createdAt), { addSuffix: true })}`
               : "This saved output could not be loaded."}
           </DialogDescription>
         </DialogHeader>
 
         <ScrollArea className="min-h-0 flex-1">
-          {report ? (
+          {report && isCompleted ? (
             <ReportContentView report={report} />
+          ) : isFailed ? (
+            <div className="p-6 text-sm text-destructive">
+              {report.errorMessage ?? "Report generation failed."}
+            </div>
+          ) : isCancelled ? (
+            <div className="p-6 text-sm text-muted-foreground">
+              This report was cancelled.
+            </div>
+          ) : isPending ? (
+            <div className="flex items-center justify-center p-6 text-sm text-muted-foreground">
+              Generating report...
+            </div>
           ) : (
             <div className="p-6 text-sm text-muted-foreground">
               This saved output is unavailable.

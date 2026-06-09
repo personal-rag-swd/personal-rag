@@ -8,8 +8,9 @@ Create Date: 2026-05-26 00:01:00.000000
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision: str = "20260526_0001"
 down_revision: str | None = None
@@ -42,7 +43,9 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_pendingregistration_email", "pendingregistration", ["email"], unique=True)
+    op.create_index(
+        "ix_pendingregistration_email", "pendingregistration", ["email"], unique=True
+    )
 
     op.create_table(
         "refreshtoken",
@@ -58,9 +61,15 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["user_id"], ["user.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_refreshtoken_family_id", "refreshtoken", ["family_id"], unique=False)
-    op.create_index("ix_refreshtoken_token_hash", "refreshtoken", ["token_hash"], unique=True)
-    op.create_index("ix_refreshtoken_user_id", "refreshtoken", ["user_id"], unique=False)
+    op.create_index(
+        "ix_refreshtoken_family_id", "refreshtoken", ["family_id"], unique=False
+    )
+    op.create_index(
+        "ix_refreshtoken_token_hash", "refreshtoken", ["token_hash"], unique=True
+    )
+    op.create_index(
+        "ix_refreshtoken_user_id", "refreshtoken", ["user_id"], unique=False
+    )
 
 
 def downgrade() -> None:

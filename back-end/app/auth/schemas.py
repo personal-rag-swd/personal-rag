@@ -16,7 +16,5 @@ class TokenResponse(BaseModel):
     token_type: str
 
 
-
 class VerificationResponse(BaseModel):
     success: bool
-

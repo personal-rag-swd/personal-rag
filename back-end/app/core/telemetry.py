@@ -1,8 +1,9 @@
 import logging
+
 import logfire
 from sqlalchemy.engine import Engine
-from app.core.config import Settings
 
+from app.core.config import Settings
 
 logger = logging.getLogger("app.telemetry")
 
@@ -19,8 +20,8 @@ def setup_telemetry(settings: Settings) -> None:
         )
         logfire.instrument_pydantic_ai()
         logger.info("Logfire telemetry initialized successfully for Pydantic AI.")
-    except Exception as e:
-        logger.error(f"Failed to initialize Logfire telemetry: {e}")
+    except Exception:
+        logger.exception("Failed to initialize Logfire telemetry")
 
 
 def setup_db_logging(engine: Engine) -> None:
@@ -28,8 +29,5 @@ def setup_db_logging(engine: Engine) -> None:
     try:
         logfire.instrument_sqlalchemy(engine=engine)
         logger.info("SQLAlchemy engine instrumented successfully with Logfire.")
-    except Exception as e:
-        logger.error(f"Failed to instrument SQLAlchemy engine: {e}")
-
-
-
+    except Exception:
+        logger.exception("Failed to instrument SQLAlchemy engine")

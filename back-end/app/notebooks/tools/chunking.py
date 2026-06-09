@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from docx import Document as DocxDocument
 import pdfplumber
+from docx import Document as DocxDocument
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -45,7 +45,9 @@ def split_text(
     )
 
 
-def chunk_pdf(request: ChunkingRequest, *, chunk_size: int, chunk_overlap: int) -> list[Document]:
+def chunk_pdf(
+    request: ChunkingRequest, *, chunk_size: int, chunk_overlap: int
+) -> list[Document]:
     with pdfplumber.open(io.BytesIO(request.content)) as pdf:
         extracted_text = "\n".join((page.extract_text() or "") for page in pdf.pages)
     return split_text(
@@ -57,9 +59,13 @@ def chunk_pdf(request: ChunkingRequest, *, chunk_size: int, chunk_overlap: int) 
     )
 
 
-def chunk_docx(request: ChunkingRequest, *, chunk_size: int, chunk_overlap: int) -> list[Document]:
+def chunk_docx(
+    request: ChunkingRequest, *, chunk_size: int, chunk_overlap: int
+) -> list[Document]:
     doc = DocxDocument(io.BytesIO(request.content))
-    paragraphs = [paragraph.text.strip() for paragraph in doc.paragraphs if paragraph.text.strip()]
+    paragraphs = [
+        paragraph.text.strip() for paragraph in doc.paragraphs if paragraph.text.strip()
+    ]
     table_rows: list[str] = []
     for table in doc.tables:
         for row in table.rows:
@@ -77,7 +83,9 @@ def chunk_docx(request: ChunkingRequest, *, chunk_size: int, chunk_overlap: int)
     )
 
 
-def chunk_markdown(request: ChunkingRequest, *, chunk_size: int, chunk_overlap: int) -> list[Document]:
+def chunk_markdown(
+    request: ChunkingRequest, *, chunk_size: int, chunk_overlap: int
+) -> list[Document]:
     extracted_text = request.content.decode("utf-8", errors="ignore")
     return split_text(
         extracted_text,
@@ -88,7 +96,9 @@ def chunk_markdown(request: ChunkingRequest, *, chunk_size: int, chunk_overlap: 
     )
 
 
-def chunk_text(request: ChunkingRequest, *, chunk_size: int, chunk_overlap: int) -> list[Document]:
+def chunk_text(
+    request: ChunkingRequest, *, chunk_size: int, chunk_overlap: int
+) -> list[Document]:
     extracted_text = request.content.decode("utf-8", errors="ignore")
     return split_text(
         extracted_text,
@@ -107,7 +117,9 @@ ENGINE_BY_EXTENSION = {
 }
 
 
-def chunk_document(request: ChunkingRequest, settings: Settings | None = None) -> list[Document]:
+def chunk_document(
+    request: ChunkingRequest, settings: Settings | None = None
+) -> list[Document]:
     suffix = Path(request.filename).suffix.lower()
     if suffix not in SUPPORTED_EXTENSIONS:
         raise ValueError(f"Unsupported file type: {suffix or 'unknown'}")

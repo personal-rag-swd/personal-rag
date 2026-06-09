@@ -1,5 +1,6 @@
-from pydantic import BaseModel, Field
 from uuid import UUID
+
+from pydantic import BaseModel, Field
 
 
 class PresignedUrlRequest(BaseModel):
@@ -9,10 +10,19 @@ class PresignedUrlRequest(BaseModel):
         min_length=1,
         max_length=1024,
     )
-    operation: str = Field("upload", description="The S3 operation to perform: 'upload' or 'download'")
-    content_type: str | None = Field(None, description="The content type of the file (e.g. application/pdf) for uploads")
-    notebook_id: UUID | None = Field(None, description="Notebook id for notebook-scoped upload ingestion")
-    expires_in: int = Field(3600, ge=60, le=3600, description="URL expiration time in seconds (60 to 3600)")
+    operation: str = Field(
+        "upload", description="The S3 operation to perform: 'upload' or 'download'"
+    )
+    content_type: str | None = Field(
+        None,
+        description="The content type of the file (e.g. application/pdf) for uploads",
+    )
+    notebook_id: UUID | None = Field(
+        None, description="Notebook id for notebook-scoped upload ingestion"
+    )
+    expires_in: int = Field(
+        3600, ge=60, le=3600, description="URL expiration time in seconds (60 to 3600)"
+    )
 
 
 class PresignedUrlResponse(BaseModel):

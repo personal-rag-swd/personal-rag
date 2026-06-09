@@ -1,5 +1,12 @@
+import pytest
+
 from app.core.config import Settings
-from app.notebooks.agent.factory import resolve_chat_provider, GeminiChatProvider, OpenAICompatibleChatProvider, OpenRouterChatProvider
+from app.notebooks.agent.factory import (
+    GeminiChatProvider,
+    OpenAICompatibleChatProvider,
+    OpenRouterChatProvider,
+    resolve_chat_provider,
+)
 
 
 def test_resolve_chat_provider_openrouter(monkeypatch) -> None:
@@ -31,11 +38,8 @@ def test_resolve_chat_provider_unsupported(monkeypatch) -> None:
         "app.notebooks.agent.factory.get_settings",
         lambda: Settings(chat_provider="other"),
     )
-    try:
+    with pytest.raises(ValueError, match="openai_compatible"):
         resolve_chat_provider()
-        assert False, "Expected ValueError"
-    except ValueError as exc:
-        assert "openai_compatible" in str(exc)
 
 
 def test_chat_provider_is_configured(monkeypatch) -> None:
@@ -89,4 +93,3 @@ def test_chat_provider_is_configured(monkeypatch) -> None:
         lambda: Settings(chat_provider="unsupported", chat_api_key="key"),
     )
     assert chat_provider_is_configured() is False
-

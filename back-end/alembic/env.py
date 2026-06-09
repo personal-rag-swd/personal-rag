@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import importlib
-from pathlib import Path
 from logging.config import fileConfig
+from pathlib import Path
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
 
+from alembic import context
 from app.core.config import get_database_url as get_config_database_url
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
 
 def import_models() -> None:
     """Import SQLModel modules so table metadata is registered for autogenerate."""

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models import Model
 from sqlmodel import Session
@@ -13,63 +14,78 @@ from app.notebooks.tools import search_notebook_chunks
 from app.users.models import User
 
 
+@lru_cache(maxsize=1)
+def _get_gemini_model() -> Model:
+    from pydantic_ai.models.google import GoogleModel
+    from pydantic_ai.providers.google import GoogleProvider
+
+    settings = get_settings()
+    provider = GoogleProvider(api_key=settings.chat_api_key)
+    return GoogleModel(settings.chat_model, provider=provider)
+
+
+@lru_cache(maxsize=1)
+def _get_openai_compatible_model() -> Model:
+    from dataclasses import replace
+
+    from pydantic_ai.models.openai import OpenAIModel
+    from pydantic_ai.profiles.openai import OpenAIModelProfile
+    from pydantic_ai.providers.openai import OpenAIProvider
+
+    settings = get_settings()
+    provider = OpenAIProvider(
+        api_key=settings.chat_api_key,
+        base_url=settings.chat_provider_url,
+    )
+    model = OpenAIModel(settings.chat_model, provider=provider)
+
+    # Disable forced tool choice (required) to maximize compatibility with various
+    # open-source models hosted on custom backends that only support tool_choice='auto'
+    if hasattr(model, "profile") and isinstance(model.profile, OpenAIModelProfile):
+        new_profile = replace(model.profile, openai_supports_tool_choice_required=False)
+        model.__dict__["profile"] = new_profile
+        if hasattr(model, "_profile"):
+            model._profile = new_profile
+
+    return model
+
+
+@lru_cache(maxsize=1)
+def _get_openrouter_model() -> Model:
+    from dataclasses import replace
+
+    from pydantic_ai.models.openrouter import OpenRouterModel
+    from pydantic_ai.profiles.openai import OpenAIModelProfile
+    from pydantic_ai.providers.openrouter import OpenRouterProvider
+
+    settings = get_settings()
+    provider = OpenRouterProvider(api_key=settings.chat_api_key)
+    model = OpenRouterModel(settings.chat_model, provider=provider)
+
+    # Disable forced tool choice (required) to maximize compatibility with various
+    # open-source models hosted on OpenRouter that only support tool_choice='auto'
+    if hasattr(model, "profile") and isinstance(model.profile, OpenAIModelProfile):
+        new_profile = replace(model.profile, openai_supports_tool_choice_required=False)
+        model.__dict__["profile"] = new_profile
+        if hasattr(model, "_profile"):
+            model._profile = new_profile
+
+    return model
+
+
 class GeminiChatProvider:
-    @lru_cache
     def build_model(self) -> Model:
-        from pydantic_ai.models.google import GoogleModel
-        from pydantic_ai.providers.google import GoogleProvider
-        settings = get_settings()
-        provider = GoogleProvider(api_key=settings.chat_api_key)
-        return GoogleModel(settings.chat_model, provider=provider)
+        return _get_gemini_model()
 
 
 class OpenAICompatibleChatProvider:
-    @lru_cache
     def build_model(self) -> Model:
-        from dataclasses import replace
-        from pydantic_ai.models.openai import OpenAIModel
-        from pydantic_ai.providers.openai import OpenAIProvider
-        from pydantic_ai.profiles.openai import OpenAIModelProfile
-
-        settings = get_settings()
-        provider = OpenAIProvider(
-            api_key=settings.chat_api_key,
-            base_url=settings.chat_provider_url,
-        )
-        model = OpenAIModel(settings.chat_model, provider=provider)
-
-        # Disable forced tool choice (required) to maximize compatibility with various
-        # open-source models hosted on custom backends that only support tool_choice='auto'
-        if hasattr(model, "profile") and isinstance(model.profile, OpenAIModelProfile):
-            new_profile = replace(model.profile, openai_supports_tool_choice_required=False)
-            model.__dict__["profile"] = new_profile
-            if hasattr(model, "_profile"):
-                model._profile = new_profile
-
-        return model
+        return _get_openai_compatible_model()
 
 
 class OpenRouterChatProvider:
-    @lru_cache
     def build_model(self) -> Model:
-        from dataclasses import replace
-        from pydantic_ai.models.openrouter import OpenRouterModel
-        from pydantic_ai.providers.openrouter import OpenRouterProvider
-        from pydantic_ai.profiles.openai import OpenAIModelProfile
-
-        settings = get_settings()
-        provider = OpenRouterProvider(api_key=settings.chat_api_key)
-        model = OpenRouterModel(settings.chat_model, provider=provider)
-
-        # Disable forced tool choice (required) to maximize compatibility with various
-        # open-source models hosted on OpenRouter that only support tool_choice='auto'
-        if hasattr(model, "profile") and isinstance(model.profile, OpenAIModelProfile):
-            new_profile = replace(model.profile, openai_supports_tool_choice_required=False)
-            model.__dict__["profile"] = new_profile
-            if hasattr(model, "_profile"):
-                model._profile = new_profile
-
-        return model
+        return _get_openrouter_model()
 
 
 _CHAT_PROVIDER_REGISTRY: dict[str, object] = {
