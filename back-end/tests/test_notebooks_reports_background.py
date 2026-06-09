@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Generator
 from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, create_engine
 
 from app.core.config import Settings, get_settings
+from app.core.database import get_session
 from app.core.security import create_access_token
-from app.dependencies import get_session
 from app.main import app
 from app.notebooks.models import (
     Notebook,
@@ -21,16 +21,14 @@ from app.notebooks.models import (
     NotebookDocumentChunk,
     NotebookReport,
 )
-from app.notebooks.router import _run_report_generation
+from app.notebooks.report_service import run_report_generation
 from app.users.models import User
 
-# Shared in-memory engine for all tests in this module
+# Shared PostgreSQL engine for all tests in this module
 _shared_engine = create_engine(
-    "sqlite://",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
+    os.environ["DATABASE_URL"],
+    pool_pre_ping=True,
 )
-SQLModel.metadata.create_all(_shared_engine)
 
 
 @pytest.fixture
@@ -42,7 +40,7 @@ def session() -> Generator[Session]:
 @pytest.fixture
 def settings() -> Settings:
     return Settings(
-        database_url="sqlite://",
+        database_url=os.environ["DATABASE_URL"],
         jwt_secret_key="test-secret-with-at-least-32-bytes",
         jwt_algorithm="HS256",
     )
@@ -123,7 +121,7 @@ def test_report_post_returns_pending(
     _add_indexed_chunk(session, UUID(notebook_id), user.id)
 
     monkeypatch.setattr(
-        "app.notebooks.router.chat_provider_is_configured", lambda: True
+        "app.notebooks.report_service.chat_provider_is_configured", lambda: True
     )
 
     async def noop_gen(context: str, instructions: str | None = None):
@@ -133,7 +131,7 @@ def test_report_post_returns_pending(
             executive_summary="s", key_takeaways=[], strategic_implications=[]
         )
 
-    monkeypatch.setattr("app.notebooks.router.generate_briefing_doc", noop_gen)
+    monkeypatch.setattr("app.notebooks.report_service.generate_briefing_doc", noop_gen)
 
     resp = client.post(
         f"/api/v1/notebooks/{notebook_id}/reports",
@@ -169,7 +167,7 @@ async def test_background_task_completes_successfully(
     session.add(notebook)
     session.commit()
 
-    # Create report directly in _shared_engine so _run_report_generation can find it
+    # Create report directly in _shared_engine so run_report_generation can find it
     with Session(_shared_engine) as shared_session:
         report = NotebookReport(
             notebook_id=notebook.id,
@@ -192,9 +190,11 @@ async def test_background_task_completes_successfully(
             strategic_implications=["s1"],
         )
 
-    monkeypatch.setattr("app.notebooks.router.generate_briefing_doc", fake_briefing)
+    monkeypatch.setattr(
+        "app.notebooks.report_service.generate_briefing_doc", fake_briefing
+    )
 
-    await _run_report_generation(
+    await run_report_generation(
         report_id=report_id,
         report_type="briefing",
         context="some context",
@@ -244,9 +244,11 @@ async def test_background_task_sets_failed_on_error(
     async def failing_gen(context: str, instructions: str | None = None):
         raise RuntimeError("LLM exploded")
 
-    monkeypatch.setattr("app.notebooks.router.generate_briefing_doc", failing_gen)
+    monkeypatch.setattr(
+        "app.notebooks.report_service.generate_briefing_doc", failing_gen
+    )
 
-    await _run_report_generation(
+    await run_report_generation(
         report_id=report_id,
         report_type="briefing",
         context="some context",
@@ -398,10 +400,10 @@ async def test_cancel_prevents_generation(
         )
 
     monkeypatch.setattr(
-        "app.notebooks.router.generate_briefing_doc", should_not_be_called
+        "app.notebooks.report_service.generate_briefing_doc", should_not_be_called
     )
 
-    await _run_report_generation(
+    await run_report_generation(
         report_id=report_id,
         report_type="briefing",
         context="ctx",
@@ -531,11 +533,9 @@ async def test_crash_recovery_requeues_pending_reports(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import app.core.database as db_mod
-    import app.notebooks.router as router_mod
     from app.main import _recover_pending_reports
 
     monkeypatch.setattr(db_mod, "engine", _shared_engine)
-    monkeypatch.setattr(router_mod, "engine", _shared_engine)
 
     user = make_user("recover@example.com")
     session.add(user)
@@ -586,7 +586,7 @@ async def test_crash_recovery_requeues_pending_reports(
             executive_summary="s", key_takeaways=[], strategic_implications=[]
         )
 
-    monkeypatch.setattr("app.notebooks.router.generate_briefing_doc", noop_gen)
+    monkeypatch.setattr("app.notebooks.report_service.generate_briefing_doc", noop_gen)
 
     captured_tasks: list = []
 
@@ -617,11 +617,9 @@ async def test_crash_recovery_resets_generating_to_pending(
 ) -> None:
     """Reports stuck in 'generating' should be reset to 'pending' on recovery."""
     import app.core.database as db_mod
-    import app.notebooks.router as router_mod
     from app.main import _recover_pending_reports
 
     monkeypatch.setattr(db_mod, "engine", _shared_engine)
-    monkeypatch.setattr(router_mod, "engine", _shared_engine)
 
     user = make_user("recover2@example.com")
     session.add(user)
@@ -667,7 +665,7 @@ async def test_crash_recovery_resets_generating_to_pending(
 
         return BlogPostReport(title="t", hook="h", markdown_body="b")
 
-    monkeypatch.setattr("app.notebooks.router.generate_blog_post", noop_gen)
+    monkeypatch.setattr("app.notebooks.report_service.generate_blog_post", noop_gen)
     monkeypatch.setattr("asyncio.create_task", lambda coro: asyncio.ensure_future(coro))
 
     await _recover_pending_reports()

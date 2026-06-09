@@ -7,8 +7,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.core.config import Settings, get_settings
+from app.core.database import get_session
 from app.core.security import create_access_token
-from app.dependencies import get_session
 from app.main import app
 from app.notebooks.models import Notebook, NotebookDocument, NotebookDocumentChunk
 from app.users.models import User
@@ -224,7 +224,7 @@ def test_list_notebook_documents_is_scoped_to_owner(
 def test_notebook_document_events_requires_auth(
     client: TestClient,
 ) -> None:
-    response = client.get("/api/v1/notebooks/events")
+    response = client.get("/api/v1/notebooks/events?once=true")
     assert response.status_code == 401
 
 
@@ -260,20 +260,21 @@ def test_notebook_document_events_scoping(
 
     # Request events as owner
     owner_response = client.get(
-        "/api/v1/notebooks/events",
+        "/api/v1/notebooks/events?once=true",
         headers=auth_headers(owner, settings),
     )
     assert owner_response.status_code == 200
-    assert "doc.pdf" in owner_response.text
-    assert str(owner_notebook["id"]) in owner_response.text
+    owner_event = owner_response.text
+    assert "doc.pdf" in owner_event
+    assert str(owner_notebook["id"]) in owner_event
 
-    # Request events as other_user
     other_response = client.get(
-        "/api/v1/notebooks/events",
+        "/api/v1/notebooks/events?once=true",
         headers=auth_headers(other_user, settings),
     )
     assert other_response.status_code == 200
-    assert "doc.pdf" not in other_response.text
+    other_event = other_response.text
+    assert "doc.pdf" not in other_event
 
 
 def test_delete_notebook_document_removes_source_and_chunks(
@@ -472,7 +473,7 @@ def test_generate_report_requires_configured_provider(
     notebook_id = _create_notebook(client, headers)
 
     monkeypatch.setattr(
-        "app.notebooks.router.chat_provider_is_configured", lambda: False
+        "app.notebooks.report_service.chat_provider_is_configured", lambda: False
     )
 
     response = client.post(
@@ -496,7 +497,7 @@ def test_generate_report_requires_indexed_documents(
     notebook_id = _create_notebook(client, headers)
 
     monkeypatch.setattr(
-        "app.notebooks.router.chat_provider_is_configured", lambda: True
+        "app.notebooks.report_service.chat_provider_is_configured", lambda: True
     )
 
     response = client.post(
@@ -523,7 +524,7 @@ def test_generate_report_persists_and_lists(
     _add_indexed_chunk(session, UUID(notebook_id), user.id)
 
     monkeypatch.setattr(
-        "app.notebooks.router.chat_provider_is_configured", lambda: True
+        "app.notebooks.report_service.chat_provider_is_configured", lambda: True
     )
 
     async def fake_briefing(
@@ -535,7 +536,9 @@ def test_generate_report_persists_and_lists(
             strategic_implications=["do x"],
         )
 
-    monkeypatch.setattr("app.notebooks.router.generate_briefing_doc", fake_briefing)
+    monkeypatch.setattr(
+        "app.notebooks.report_service.generate_briefing_doc", fake_briefing
+    )
 
     response = client.post(
         f"/api/v1/notebooks/{notebook_id}/reports",
@@ -572,7 +575,7 @@ def test_generate_report_custom_requires_instructions(
     _add_indexed_chunk(session, UUID(notebook_id), user.id)
 
     monkeypatch.setattr(
-        "app.notebooks.router.chat_provider_is_configured", lambda: True
+        "app.notebooks.report_service.chat_provider_is_configured", lambda: True
     )
 
     response = client.post(
@@ -599,7 +602,7 @@ def test_generate_report_maps_provider_rate_limit(
     _add_indexed_chunk(session, UUID(notebook_id), user.id)
 
     monkeypatch.setattr(
-        "app.notebooks.router.chat_provider_is_configured", lambda: True
+        "app.notebooks.report_service.chat_provider_is_configured", lambda: True
     )
 
     async def rate_limited(
@@ -607,7 +610,9 @@ def test_generate_report_maps_provider_rate_limit(
     ) -> BriefingDocReport:
         raise ModelHTTPError(status_code=429, model_name="gemini-2.5-flash", body={})
 
-    monkeypatch.setattr("app.notebooks.router.generate_briefing_doc", rate_limited)
+    monkeypatch.setattr(
+        "app.notebooks.report_service.generate_briefing_doc", rate_limited
+    )
 
     response = client.post(
         f"/api/v1/notebooks/{notebook_id}/reports",
@@ -634,7 +639,7 @@ def test_generate_mindmap_report_persists(
     _add_indexed_chunk(session, UUID(notebook_id), user.id)
 
     monkeypatch.setattr(
-        "app.notebooks.router.chat_provider_is_configured", lambda: True
+        "app.notebooks.report_service.chat_provider_is_configured", lambda: True
     )
 
     async def fake_mindmap(
@@ -663,7 +668,7 @@ def test_generate_mindmap_report_persists(
             relationships=[],
         )
 
-    monkeypatch.setattr("app.notebooks.router.generate_mindmap", fake_mindmap)
+    monkeypatch.setattr("app.notebooks.report_service.generate_mindmap", fake_mindmap)
 
     response = client.post(
         f"/api/v1/notebooks/{notebook_id}/reports",

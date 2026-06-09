@@ -75,16 +75,16 @@ export function StudioPanel({
 
   function renderReportIcon(report: NotebookReport) {
     if (report.status === "pending" || report.status === "generating") {
-      return <Loader2Icon className="size-3.5 animate-spin" />
+      return <Loader2Icon className="animate-spin" />
     }
     if (report.status === "failed") {
-      return <AlertCircleIcon className="size-3.5 text-destructive" />
+      return <AlertCircleIcon className="text-destructive" />
     }
     if (report.status === "cancelled") {
-      return <CircleOffIcon className="size-3.5 text-muted-foreground/60" />
+      return <CircleOffIcon className="text-muted-foreground/60" />
     }
     const meta = REPORT_TYPE_BY_ID[report.reportType]
-    return meta?.icon ?? <FileTextIcon className="size-3.5" />
+    return meta?.icon ?? <FileTextIcon />
   }
 
   function renderReportDescription(report: NotebookReport) {
@@ -240,12 +240,12 @@ export function StudioPanel({
                         size="xs"
                         className="cursor-default opacity-70 select-none"
                       >
-                        <ItemMedia className="size-7 rounded-md border border-border bg-muted/30 text-muted-foreground">
-                          <Loader2Icon className="size-3.5 animate-spin" />
+                        <ItemMedia variant="icon" className="text-muted-foreground [&_svg]:size-3.5">
+                          <Loader2Icon className="animate-spin" />
                         </ItemMedia>
                         <ItemContent>
-                          <ItemTitle className="text-xs">Mind Map</ItemTitle>
-                          <ItemDescription className="animate-pulse text-[11px]">
+                          <ItemTitle className="text-xs font-medium">Mind Map</ItemTitle>
+                          <ItemDescription className="animate-pulse text-[10px]">
                             Processing…
                           </ItemDescription>
                         </ItemContent>
@@ -352,17 +352,17 @@ function ReportItem({
         className={cn(
           inProgress
             ? "cursor-default opacity-70 select-none"
-            : "cursor-pointer border-border/40 bg-background hover:border-primary/20 hover:bg-muted/40"
+            : "cursor-pointer hover:bg-muted"
         )}
       >
-        <ItemMedia className="size-7 rounded-md border border-border bg-muted/30 text-muted-foreground">
+        <ItemMedia variant="icon" className="text-muted-foreground [&_svg]:size-3.5">
           {renderReportIcon(report)}
         </ItemMedia>
         <ItemContent>
-          <ItemTitle className="text-xs">
+          <ItemTitle className="text-xs font-medium">
             {meta?.label ?? report.reportType}
           </ItemTitle>
-          <ItemDescription className="text-[11px]">
+          <ItemDescription className="text-[10px]">
             {renderReportDescription(report)}
           </ItemDescription>
         </ItemContent>

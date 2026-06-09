@@ -1,0 +1,18 @@
+services:
+  postgres-test:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_USER: ${TEST_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${TEST_POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${TEST_POSTGRES_DB:-personal_rag_test}
+    ports:
+      - "${TEST_POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 20

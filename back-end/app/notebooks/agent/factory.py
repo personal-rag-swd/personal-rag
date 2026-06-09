@@ -8,6 +8,7 @@ from pydantic_ai.models import Model
 from sqlmodel import Session
 
 from app.core.config import Settings, get_settings
+from app.notebooks.config import NotebookChatSettings, get_notebook_chat_settings
 from app.notebooks.models import Notebook
 from app.notebooks.prompt import CHAT_SYSTEM_INSTRUCTIONS, build_context_block
 from app.notebooks.tools import search_notebook_chunks
@@ -19,7 +20,7 @@ def _get_gemini_model() -> Model:
     from pydantic_ai.models.google import GoogleModel
     from pydantic_ai.providers.google import GoogleProvider
 
-    settings = get_settings()
+    settings = get_notebook_chat_settings(get_settings())
     provider = GoogleProvider(api_key=settings.chat_api_key)
     return GoogleModel(settings.chat_model, provider=provider)
 
@@ -32,7 +33,7 @@ def _get_openai_compatible_model() -> Model:
     from pydantic_ai.profiles.openai import OpenAIModelProfile
     from pydantic_ai.providers.openai import OpenAIProvider
 
-    settings = get_settings()
+    settings = get_notebook_chat_settings(get_settings())
     provider = OpenAIProvider(
         api_key=settings.chat_api_key,
         base_url=settings.chat_provider_url,
@@ -58,7 +59,7 @@ def _get_openrouter_model() -> Model:
     from pydantic_ai.profiles.openai import OpenAIModelProfile
     from pydantic_ai.providers.openrouter import OpenRouterProvider
 
-    settings = get_settings()
+    settings = get_notebook_chat_settings(get_settings())
     provider = OpenRouterProvider(api_key=settings.chat_api_key)
     model = OpenRouterModel(settings.chat_model, provider=provider)
 
@@ -95,8 +96,12 @@ _CHAT_PROVIDER_REGISTRY: dict[str, object] = {
 }
 
 
+def _current_chat_settings() -> NotebookChatSettings:
+    return get_notebook_chat_settings(get_settings())
+
+
 def resolve_chat_provider() -> any:
-    settings = get_settings()
+    settings = _current_chat_settings()
     selected_provider = settings.chat_provider.strip().lower()
     resolved = _CHAT_PROVIDER_REGISTRY.get(selected_provider)
     if resolved is None:
@@ -113,7 +118,7 @@ def chat_provider_is_configured() -> bool:
     Used to surface a friendly 503 before attempting LLM-backed features
     (chat, reports) instead of failing deep inside the provider SDK.
     """
-    settings = get_settings()
+    settings = _current_chat_settings()
     selected_provider = settings.chat_provider.strip().lower()
     if selected_provider in ("gemini", "openrouter", "openai_compatible"):
         return bool(settings.chat_api_key)

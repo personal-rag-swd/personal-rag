@@ -119,7 +119,8 @@ Once running, the frontend is at `http://localhost:5173` and the API is at
 
 Backend commands should be run from `back-end/`:
 
-- `uv run pytest`: run backend tests.
+- `./scripts/run_tests_postgres.sh`: start the Docker pgvector test database and execute the backend tests against the migrated Postgres schema.
+- `uv run pytest`: run backend tests when `DATABASE_URL` already points at the Docker pgvector test database.
 - `uv run ruff check`: lint backend code.
 - `uv run ruff format`: format backend code.
 - `uv run alembic revision --autogenerate -m "message"`: generate a migration from model changes.

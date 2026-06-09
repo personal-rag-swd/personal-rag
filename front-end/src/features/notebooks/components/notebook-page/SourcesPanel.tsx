@@ -32,7 +32,15 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent } from "@/components/ui/card"
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item"
 import {
   Empty,
   EmptyContent,
@@ -314,11 +322,11 @@ export function SourcesPanel({
                 description="Refresh the page or try again after the API is available."
               />
             ) : hasDocuments ? (
-              <div className="mt-3 flex flex-col items-start gap-2 px-3 pb-3">
+              <ItemGroup className="mt-3 px-3 pb-3">
                 {filteredDocuments.map((document) => (
                   <SourceItem key={document.id} document={document} />
                 ))}
-              </div>
+              </ItemGroup>
             ) : (
               <Empty className="border-0 px-6 py-12">
                 <EmptyHeader>
@@ -383,57 +391,60 @@ function SourceItem({ document }: { document: NotebookDocument }) {
 
   return (
     <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-      <Card size="sm" className="h-auto w-full self-start py-0">
-        <CardContent className="px-2 py-1.5">
-          <div className="flex items-center gap-2.5">
-            <div className="min-w-0 flex-1">
-              <p
-                className="truncate text-xs font-medium text-foreground"
-                title={document.filename}
-              >
-                {document.filename}
-              </p>
-              <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
-                <span>{formatBytes(document.size)}</span>
-                <span aria-hidden="true">/</span>
-                <Badge variant={status.variant}>{status.label}</Badge>
-              </div>
-              {document.status === "failed" && document.errorMessage ? (
-                <p className="mt-2 line-clamp-2 text-[11px] leading-relaxed text-destructive">
-                  {document.errorMessage}
-                </p>
-              ) : null}
-            </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    className="self-center text-muted-foreground"
-                    aria-label={`Open actions for ${document.filename}`}
-                  />
-                }
-              >
-                <MoreVerticalIcon />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent className="w-36" align="end">
-                <DropdownMenuGroup>
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onClick={() => setIsDeleteDialogOpen(true)}
-                    disabled={deleteDocumentMutation.isPending}
-                  >
-                    <Trash2Icon data-icon="inline-start" />
-                    <span>Delete</span>
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </CardContent>
-      </Card>
+      <Item
+        variant="outline"
+        size="xs"
+      >
+        <ItemMedia variant="icon" className="text-muted-foreground [&_svg]:size-3.5">
+          <FileTextIcon />
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle title={document.filename} className="text-xs font-medium">
+            {document.filename}
+          </ItemTitle>
+          <ItemDescription className="text-[10px]">
+            <span className="flex flex-wrap items-center gap-1.5">
+              <span>{formatBytes(document.size)}</span>
+              <span aria-hidden="true">/</span>
+              <Badge variant={status.variant} className="py-0 px-1 text-[9px]">{status.label}</Badge>
+            </span>
+            {document.status === "failed" && document.errorMessage ? (
+              <span className="block mt-1 line-clamp-2 text-[10px] leading-relaxed text-destructive">
+                {document.errorMessage}
+              </span>
+            ) : null}
+          </ItemDescription>
+        </ItemContent>
+        <ItemActions>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="self-center text-muted-foreground"
+                  aria-label={`Open actions for ${document.filename}`}
+                />
+              }
+            >
+              <MoreVerticalIcon />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-36" align="end">
+              <DropdownMenuGroup>
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={() => setIsDeleteDialogOpen(true)}
+                  disabled={deleteDocumentMutation.isPending}
+                >
+                  <Trash2Icon data-icon="inline-start" />
+                  <span>Delete</span>
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </ItemActions>
+      </Item>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Delete source?</AlertDialogTitle>

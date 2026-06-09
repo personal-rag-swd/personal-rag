@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
-from app.dependencies import get_session
+from app.core.database import get_session
 from app.users.dependencies import get_current_user, require_role
 from app.users.models import User
 from app.users.schemas import UserRead

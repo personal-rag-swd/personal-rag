@@ -6,7 +6,7 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session, select
 
-from app.core.config import Settings, get_settings
+from app.auth.config import AuthSettings, get_auth_settings
 from app.core.database import get_session
 from app.core.security import decode_access_token
 from app.users.models import User
@@ -29,7 +29,7 @@ def get_access_token(request: Request) -> str | None:
 def get_current_user(
     request: Request,
     session: Annotated[Session, Depends(get_session)],
-    settings: Annotated[Settings, Depends(get_settings)],
+    settings: Annotated[AuthSettings, Depends(get_auth_settings)],
 ) -> User:
     token = get_access_token(request)
     if token is None:
@@ -69,7 +69,7 @@ def get_current_user(
 def require_role(required_role: str) -> Callable[..., None]:
     def dependency(
         request: Request,
-        settings: Annotated[Settings, Depends(get_settings)],
+        settings: Annotated[AuthSettings, Depends(get_auth_settings)],
     ) -> None:
         token = get_access_token(request)
         if token is None:

@@ -1,13 +1,14 @@
 import io
-from types import SimpleNamespace
+import os
 from uuid import uuid4
 
 import pytest
 from docx import Document as DocxDocument
+from sqlmodel import Session
 
 import app.notebooks.tools.chunking as chunking_module
 from app.core.config import Settings
-from app.notebooks.models import Notebook
+from app.notebooks.models import Notebook, NotebookDocument, NotebookDocumentChunk
 from app.notebooks.tools.chunking import (
     ChunkingRequest,
     chunk_document,
@@ -21,7 +22,7 @@ from app.users.models import User
 @pytest.fixture
 def settings() -> Settings:
     return Settings(
-        database_url="sqlite://",
+        database_url=os.environ["DATABASE_URL"],
         jwt_secret_key="test-secret-with-at-least-32-bytes",
         jwt_algorithm="HS256",
         embedding_provider="openai_compatible",
@@ -107,7 +108,7 @@ def test_chunk_document_uses_settings_for_docx(monkeypatch: pytest.MonkeyPatch) 
         document_id="doc-3",
     )
     settings = Settings(
-        database_url="sqlite://",
+        database_url=os.environ["DATABASE_URL"],
         jwt_secret_key="test-secret-with-at-least-32-bytes",
         jwt_algorithm="HS256",
         notebook_chunk_size=2048,
@@ -130,40 +131,65 @@ def test_chunk_document_rejects_unsupported_extension() -> None:
         chunk_document(request)
 
 
-def test_search_postgres_uses_vector_operator(
-    monkeypatch: pytest.MonkeyPatch, settings: Settings
+def test_search_postgres_orders_chunks_by_vector_similarity(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, session: Session
 ) -> None:
     user_id = uuid4()
-    doc_id = uuid4()
-
-    class FakeResult:
-        def all(self):
-            return [(doc_id, "source.txt", 0, "content", {})]
-
-    class FakeSession:
-        def __init__(self):
-            self.bind = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
-            self.executed_stmt = None
-            self.executed_params = None
-
-        def execute(self, stmt, params):
-            self.executed_stmt = str(stmt)
-            self.executed_params = params
-            return FakeResult()
-
-    fake_session = FakeSession()
+    query_vector = [1.0] + [0.0] * 1535
     monkeypatch.setattr(
         "app.notebooks.tools.search.embed_texts",
-        lambda texts, _settings: [[0.1] * 1536],
+        lambda texts, _settings: [query_vector],
     )
 
     notebook = Notebook(user_id=user_id, name="Notebook", description="", tags=[])
     current_user = User(
         id=user_id, email="user@example.com", hashed_password="hashed-password"
     )
+    session.add(current_user)
+    session.commit()
+    session.add(notebook)
+    session.commit()
+
+    matching_document = NotebookDocument(
+        notebook_id=notebook.id,
+        user_id=current_user.id,
+        s3_bucket="bucket",
+        s3_key=f"users/{current_user.id}/matching.txt",
+        filename="matching.txt",
+        status="indexed",
+    )
+    distant_document = NotebookDocument(
+        notebook_id=notebook.id,
+        user_id=current_user.id,
+        s3_bucket="bucket",
+        s3_key=f"users/{current_user.id}/distant.txt",
+        filename="distant.txt",
+        status="indexed",
+    )
+    session.add(matching_document)
+    session.add(distant_document)
+    session.commit()
+
+    session.add(
+        NotebookDocumentChunk(
+            document_id=matching_document.id,
+            chunk_index=0,
+            content="matching content",
+            embedding=query_vector,
+        )
+    )
+    session.add(
+        NotebookDocumentChunk(
+            document_id=distant_document.id,
+            chunk_index=0,
+            content="distant content",
+            embedding=[0.0, 1.0] + [0.0] * 1534,
+        )
+    )
+    session.commit()
 
     results = search_notebook_chunks(
-        fake_session,
+        session,
         notebook=notebook,
         current_user=current_user,
         query="q",
@@ -171,8 +197,8 @@ def test_search_postgres_uses_vector_operator(
         top_k=4,
     )
 
-    assert len(results) == 1
-    assert fake_session.executed_stmt is not None
-    assert "<=>" in fake_session.executed_stmt
-    assert fake_session.executed_params is not None
-    assert fake_session.executed_params["top_k"] == 4
+    assert [result.filename for result in results] == [
+        "matching.txt",
+        "distant.txt",
+    ]
+    assert results[0].content == "matching content"

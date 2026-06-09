@@ -16,6 +16,7 @@ from sqlmodel import Session, select
 
 from app.core.config import Settings
 from app.core.database import engine
+from app.notebooks.config import get_notebook_rabbitmq_settings
 from app.notebooks.models import NotebookDocument
 from app.notebooks.tools.ingestion import (
     TransientIngestionError,
@@ -137,13 +138,14 @@ def parse_minio_object_created_events(
 
 
 def _build_queue_arguments(settings: Settings) -> dict[str, Any] | None:
+    rabbitmq_settings = get_notebook_rabbitmq_settings(settings)
     arguments: dict[str, Any] = {}
-    if settings.rabbitmq_dead_letter_exchange_name:
+    if rabbitmq_settings.rabbitmq_dead_letter_exchange_name:
         arguments["x-dead-letter-exchange"] = (
-            settings.rabbitmq_dead_letter_exchange_name
+            rabbitmq_settings.rabbitmq_dead_letter_exchange_name
         )
         arguments["x-dead-letter-routing-key"] = (
-            settings.rabbitmq_dead_letter_routing_key
+            rabbitmq_settings.rabbitmq_dead_letter_routing_key
         )
     return arguments or None
 
@@ -242,33 +244,34 @@ def process_minio_notification_message(
 async def _declare_topology(
     channel: aio_pika.abc.AbstractChannel, settings: Settings
 ) -> aio_pika.abc.AbstractQueue:
+    rabbitmq_settings = get_notebook_rabbitmq_settings(settings)
     exchange = await channel.declare_exchange(
-        settings.rabbitmq_exchange_name,
-        ExchangeType(settings.rabbitmq_exchange_type),
+        rabbitmq_settings.rabbitmq_exchange_name,
+        ExchangeType(rabbitmq_settings.rabbitmq_exchange_type),
         durable=True,
     )
-    if settings.rabbitmq_dead_letter_exchange_name:
+    if rabbitmq_settings.rabbitmq_dead_letter_exchange_name:
         dead_letter_exchange = await channel.declare_exchange(
-            settings.rabbitmq_dead_letter_exchange_name,
+            rabbitmq_settings.rabbitmq_dead_letter_exchange_name,
             ExchangeType.DIRECT,
             durable=True,
         )
-        if settings.rabbitmq_dead_letter_queue_name:
+        if rabbitmq_settings.rabbitmq_dead_letter_queue_name:
             dead_letter_queue = await channel.declare_queue(
-                settings.rabbitmq_dead_letter_queue_name,
+                rabbitmq_settings.rabbitmq_dead_letter_queue_name,
                 durable=True,
             )
             await dead_letter_queue.bind(
                 dead_letter_exchange,
-                routing_key=settings.rabbitmq_dead_letter_routing_key,
+                routing_key=rabbitmq_settings.rabbitmq_dead_letter_routing_key,
             )
 
     queue = await channel.declare_queue(
-        settings.rabbitmq_queue_name,
+        rabbitmq_settings.rabbitmq_queue_name,
         durable=True,
         arguments=_build_queue_arguments(settings),
     )
-    await queue.bind(exchange, routing_key=settings.rabbitmq_routing_key)
+    await queue.bind(exchange, routing_key=rabbitmq_settings.rabbitmq_routing_key)
     return queue
 
 
@@ -291,23 +294,26 @@ async def _handle_message(message: IncomingMessage, settings: Settings) -> None:
 
 async def run_notebook_document_consumer(settings: Settings) -> None:
     logger.info("Notebook document RabbitMQ consumer started")
+    rabbitmq_settings = get_notebook_rabbitmq_settings(settings)
     while True:
         try:
             logger.debug(
                 "Connecting notebook ingestion consumer to RabbitMQ at %s",
-                settings.rabbitmq_url,
+                rabbitmq_settings.rabbitmq_url,
             )
-            connection = await aio_pika.connect_robust(settings.rabbitmq_url)
+            connection = await aio_pika.connect_robust(rabbitmq_settings.rabbitmq_url)
             async with connection:
                 channel = await connection.channel()
-                await channel.set_qos(prefetch_count=settings.rabbitmq_prefetch_count)
+                await channel.set_qos(
+                    prefetch_count=rabbitmq_settings.rabbitmq_prefetch_count
+                )
                 queue = await _declare_topology(channel, settings)
                 logger.debug(
                     "RabbitMQ consumer ready queue=%s exchange=%s routing_key=%s prefetch=%s",
-                    settings.rabbitmq_queue_name,
-                    settings.rabbitmq_exchange_name,
-                    settings.rabbitmq_routing_key,
-                    settings.rabbitmq_prefetch_count,
+                    rabbitmq_settings.rabbitmq_queue_name,
+                    rabbitmq_settings.rabbitmq_exchange_name,
+                    rabbitmq_settings.rabbitmq_routing_key,
+                    rabbitmq_settings.rabbitmq_prefetch_count,
                 )
                 stale_stats = await asyncio.to_thread(
                     recover_stale_notebook_documents, settings
@@ -339,4 +345,4 @@ async def run_notebook_document_consumer(settings: Settings) -> None:
             raise
         except Exception:
             logger.exception("RabbitMQ consumer loop failed; retrying")
-            await asyncio.sleep(settings.rabbitmq_reconnect_delay_seconds)
+            await asyncio.sleep(rabbitmq_settings.rabbitmq_reconnect_delay_seconds)

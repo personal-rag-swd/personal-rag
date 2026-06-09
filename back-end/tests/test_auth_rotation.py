@@ -1,4 +1,4 @@
-from collections.abc import Generator
+import os
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -7,38 +7,20 @@ from sqlmodel import Session, select
 
 from app.auth.models import RefreshToken
 from app.auth.service import hash_refresh_token
-from app.core.config import Settings, get_settings
+from app.core.config import Settings
 from app.core.security import hash_password
-from app.dependencies import get_session
-from app.main import app
 from app.users.models import User
 
 
 @pytest.fixture
 def settings() -> Settings:
     return Settings(
-        database_url="sqlite://",
+        database_url=os.environ["DATABASE_URL"],
         jwt_secret_key="test-secret-with-at-least-32-bytes",
         jwt_algorithm="HS256",
         access_token_expire_minutes=30,
         refresh_token_expire_days=30,
     )
-
-
-@pytest.fixture
-def client(settings: Settings, session: Session) -> Generator[TestClient]:
-    def override_get_settings() -> Settings:
-        return settings
-
-    def override_get_session() -> Generator[Session]:
-        yield session
-
-    app.dependency_overrides[get_settings] = override_get_settings
-    app.dependency_overrides[get_session] = override_get_session
-    with TestClient(app) as client:
-        yield client
-    app.dependency_overrides.clear()
-
 
 @pytest.fixture
 def user(session: Session) -> User:

@@ -1,5 +1,4 @@
 import os
-from collections.abc import Generator
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -19,14 +18,11 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.ui.ag_ui import AGUIAdapter
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, select
 from starlette.responses import Response
 
-from app.core.config import Settings, get_settings
+from app.core.config import Settings
 from app.core.security import create_access_token
-from app.dependencies import get_session
-from app.main import app
 from app.notebooks.models import (
     Notebook,
     NotebookDocument,
@@ -39,7 +35,7 @@ from app.users.models import User
 @pytest.fixture
 def settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
     s = Settings(
-        database_url="sqlite://",
+        database_url=os.environ["DATABASE_URL"],
         jwt_secret_key="test-secret-with-at-least-32-bytes",
         jwt_algorithm="HS256",
         chat_api_key="test-key",
@@ -58,34 +54,6 @@ def settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
 
     monkeypatch.setattr(config, "get_settings", lambda: s)
     return s
-
-
-@pytest.fixture
-def session() -> Generator[Session]:
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    SQLModel.metadata.create_all(engine)
-    with Session(engine) as session:
-        yield session
-
-
-@pytest.fixture
-def client(settings: Settings, session: Session) -> Generator[TestClient]:
-    def override_get_settings() -> Settings:
-        return settings
-
-    def override_get_session() -> Generator[Session]:
-        yield session
-
-    app.dependency_overrides[get_settings] = override_get_settings
-    app.dependency_overrides[get_session] = override_get_session
-    with TestClient(app) as client:
-        yield client
-    app.dependency_overrides.clear()
-
 
 def make_user(email: str) -> User:
     return User(id=uuid4(), email=email, hashed_password="hashed-password")
@@ -537,9 +505,17 @@ def test_append_notebook_chat_history_does_not_delete_old_messages(
     from app.notebooks.memory.history import append_notebook_chat_history
     from app.notebooks.models import Notebook, NotebookMessage
 
+    user = User(
+        id=uuid.uuid4(),
+        email="history@example.com",
+        hashed_password="hashed-password",
+    )
+    session.add(user)
+    session.commit()
+
     notebook = Notebook(
         id=uuid.uuid4(),
-        user_id=uuid.uuid4(),
+        user_id=user.id,
         name="Test Notebook",
         description="",
         tags=[],
@@ -585,9 +561,17 @@ def test_append_notebook_chat_history_does_not_delete_old_messages(
 
 
 def test_notebook_message_enforces_unique_seq_per_notebook(session: Session) -> None:
+    user = User(
+        id=uuid4(),
+        email="sequence@example.com",
+        hashed_password="hashed-password",
+    )
+    session.add(user)
+    session.commit()
+
     notebook = Notebook(
         id=uuid4(),
-        user_id=uuid4(),
+        user_id=user.id,
         name="Sequence Notebook",
         description="",
         tags=[],

@@ -119,6 +119,9 @@ def test_pydantic_ai_embedding_adapter_embeds_texts_correctly() -> None:
 def test_pydantic_ai_embedding_adapter_logs_model_http_error(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    import logging
+    caplog.set_level(logging.ERROR, logger="app.notebooks.tools.embeddings")
+
     from app.notebooks.tools.embeddings import PydanticAIEmbeddingAdapter
 
     class FailingEmbedder:
@@ -168,3 +171,5 @@ def test_validate_rag_embedding_dimension_rejects_non_1536() -> None:
     )
     with pytest.raises(RuntimeError, match="EMBEDDING_DIMENSION"):
         validate_rag_embedding_dimension(settings)
+
+

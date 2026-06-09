@@ -1,3 +1,4 @@
+import os
 from collections.abc import Generator
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
@@ -8,8 +9,8 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from app.core.config import Settings, get_settings
+from app.core.database import get_session
 from app.core.security import create_access_token
-from app.dependencies import get_session
 from app.main import app
 from app.notebooks.models import Notebook, NotebookDocument
 from app.notebooks.tools.ingestion import (
@@ -24,7 +25,7 @@ from app.users.models import User
 @pytest.fixture
 def settings() -> Settings:
     return Settings(
-        database_url="sqlite://",
+        database_url=os.environ["DATABASE_URL"],
         jwt_secret_key="test-secret-with-at-least-32-bytes",
         jwt_algorithm="HS256",
         s3_bucket="test-bucket",
@@ -297,7 +298,7 @@ def test_get_presigned_url_uses_public_endpoint_for_signing(
     session: Session,
 ) -> None:
     settings_override = Settings(
-        database_url="sqlite://",
+        database_url=os.environ["DATABASE_URL"],
         jwt_secret_key="test-secret-with-at-least-32-bytes",
         jwt_algorithm="HS256",
         s3_bucket="test-bucket",
