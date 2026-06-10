@@ -116,6 +116,8 @@ export type ReportType =
   | "blog"
   | "custom"
   | "mindmap"
+  | "quiz"
+  | "flashcards"
 
 export type BriefingDocContent = {
   executive_summary: string
@@ -172,12 +174,34 @@ export type MindMapContentApiPayload = Omit<MindMapContent, "nodes"> & {
   nodes: MindMapNodeApiPayload[]
 }
 
+export type QuizQuestion = {
+  question: string
+  options: string[]
+  correct_index: number
+  explanation: string
+}
+
+export type QuizContent = {
+  questions: QuizQuestion[]
+}
+
+export type FlashcardItem = {
+  front: string
+  back: string
+}
+
+export type FlashcardContent = {
+  cards: FlashcardItem[]
+}
+
 export type ReportContent =
   | BriefingDocContent
   | StudyGuideContent
   | BlogPostContent
   | CustomReportContent
   | MindMapContent
+  | QuizContent
+  | FlashcardContent
 
 export type ReportContentApiPayload =
   | BriefingDocContent
@@ -185,6 +209,8 @@ export type ReportContentApiPayload =
   | BlogPostContent
   | CustomReportContent
   | MindMapContentApiPayload
+  | QuizContent
+  | FlashcardContent
 
 export type NotebookReportApiPayload =
   | {
@@ -237,6 +263,26 @@ export type NotebookReportApiPayload =
       created_at: string
       updated_at: string
     }
+  | {
+      id: string
+      notebook_id: string
+      report_type: "quiz"
+      status: ReportStatus
+      error_message: string | null
+      content: QuizContent
+      created_at: string
+      updated_at: string
+    }
+  | {
+      id: string
+      notebook_id: string
+      report_type: "flashcards"
+      status: ReportStatus
+      error_message: string | null
+      content: FlashcardContent
+      created_at: string
+      updated_at: string
+    }
 
 export type NotebookReport =
   | {
@@ -286,6 +332,26 @@ export type NotebookReport =
       status: ReportStatus
       errorMessage: string | null
       content: MindMapContent
+      createdAt: string
+      updatedAt: string
+    }
+  | {
+      id: string
+      notebookId: string
+      reportType: "quiz"
+      status: ReportStatus
+      errorMessage: string | null
+      content: QuizContent
+      createdAt: string
+      updatedAt: string
+    }
+  | {
+      id: string
+      notebookId: string
+      reportType: "flashcards"
+      status: ReportStatus
+      errorMessage: string | null
+      content: FlashcardContent
       createdAt: string
       updatedAt: string
     }

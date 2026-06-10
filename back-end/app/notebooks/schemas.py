@@ -186,17 +186,53 @@ class MindMapReport(BaseModel):
     )
 
 
+class QuizQuestion(BaseModel):
+    question: str = Field(description="The quiz question text")
+    options: list[str] = Field(
+        description="Answer choices for the question; provide exactly 4 options"
+    )
+    correct_index: int = Field(
+        description="0-based index into options of the single correct answer (0, 1, 2, or 3)"
+    )
+    explanation: str = Field(
+        description="Brief explanation, grounded in the sources, of why the correct option is correct"
+    )
+
+
+class QuizReport(BaseModel):
+    questions: list[QuizQuestion] = Field(
+        description="The generated multiple-choice questions"
+    )
+
+
+class FlashcardItem(BaseModel):
+    front: str = Field(
+        description="Concise prompt for the card front — a key term, concept, or short question"
+    )
+    back: str = Field(
+        description="Clear answer/definition/explanation for the front, grounded in the sources"
+    )
+
+
+class FlashcardReport(BaseModel):
+    cards: list[FlashcardItem] = Field(description="The generated study flashcards")
+
+
 # ---------------------------------------------------------------------------
 # Report API schemas
 # ---------------------------------------------------------------------------
 
-ReportType = Literal["briefing", "study_guide", "blog", "custom", "mindmap"]
+ReportType = Literal[
+    "briefing", "study_guide", "blog", "custom", "mindmap", "quiz", "flashcards"
+]
 
 
 class ReportGenerateRequest(BaseModel):
     report_type: ReportType
     additional_instructions: str | None = Field(default=None, max_length=2000)
     detail_level: str | None = Field(default=None, max_length=20)
+    number_of_questions: str | None = Field(default=None, max_length=20)
+    number_of_cards: str | None = Field(default=None, max_length=20)
 
 
 class NotebookReportRead(BaseModel):

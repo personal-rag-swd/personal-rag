@@ -10,7 +10,9 @@ from app.notebooks.agent.report import (
     generate_blog_post,
     generate_briefing_doc,
     generate_custom_report,
+    generate_flashcards,
     generate_mindmap,
+    generate_quiz,
     generate_study_guide,
 )
 
@@ -22,7 +24,9 @@ __all__ = [
     "generate_blog_post",
     "generate_briefing_doc",
     "generate_custom_report",
+    "generate_flashcards",
     "generate_mindmap",
+    "generate_quiz",
     "generate_study_guide",
     "get_notebook_chat_agent",
     "resolve_chat_provider",
