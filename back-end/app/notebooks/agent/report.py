@@ -13,17 +13,25 @@ from app.notebooks.prompt import (
     BLOG_SYSTEM,
     BRIEFING_SYSTEM,
     CUSTOM_SYSTEM_BASE,
+    FLASHCARDS_SYSTEM,
     MINDMAP_SYSTEM,
+    QUIZ_SYSTEM,
     STUDY_GUIDE_SYSTEM,
     build_custom_report_user_message,
+    build_flashcards_user_message,
     build_mindmap_user_message,
+    build_quiz_user_message,
     build_report_user_message,
 )
 from app.notebooks.schemas import (
     BlogPostReport,
     BriefingDocReport,
     CustomReport,
+    FlashcardItem,
+    FlashcardReport,
     MindMapReport,
+    QuizQuestion,
+    QuizReport,
     StudyGuideReport,
 )
 
@@ -128,3 +136,90 @@ async def generate_mindmap(
     )
     result = await _run_agent_with_retry(agent, user_message)
     return result.output
+
+
+async def generate_quiz(
+    context: str,
+    count: int = 20,
+    difficulty: str | None = None,
+    additional_instructions: str | None = None,
+) -> QuizReport:
+    agent = Agent(
+        resolve_chat_provider().build_model(),
+        output_type=QuizReport,
+        instructions=QUIZ_SYSTEM,
+    )
+    user_message = build_quiz_user_message(
+        context, count, difficulty, additional_instructions
+    )
+    result = await _run_agent_with_retry(agent, user_message)
+    return _sanitize_quiz(result.output)
+
+
+def _sanitize_quiz(quiz: QuizReport) -> QuizReport:
+    """Keep only well-formed questions so client-side scoring stays reliable.
+
+    A question is valid only if it has exactly 4 options and a correct_index that
+    points at one of them. Caps the quiz at 50 questions and raises if nothing
+    valid remains (so the report is marked failed rather than silently empty).
+    """
+    valid: list[QuizQuestion] = []
+    for q in quiz.questions:
+        if not q.question.strip():
+            continue
+        options = [opt for opt in q.options if isinstance(opt, str) and opt.strip()]
+        if len(options) != 4:
+            continue
+        if not 0 <= q.correct_index < len(options):
+            continue
+        valid.append(
+            QuizQuestion(
+                question=q.question.strip(),
+                options=options,
+                correct_index=q.correct_index,
+                explanation=q.explanation.strip(),
+            )
+        )
+        if len(valid) >= 50:
+            break
+    if not valid:
+        raise ValueError("Quiz generation produced no valid multiple-choice questions")
+    return QuizReport(questions=valid)
+
+
+async def generate_flashcards(
+    context: str,
+    count: int = 20,
+    difficulty: str | None = None,
+    additional_instructions: str | None = None,
+) -> FlashcardReport:
+    agent = Agent(
+        resolve_chat_provider().build_model(),
+        output_type=FlashcardReport,
+        instructions=FLASHCARDS_SYSTEM,
+    )
+    user_message = build_flashcards_user_message(
+        context, count, difficulty, additional_instructions
+    )
+    result = await _run_agent_with_retry(agent, user_message)
+    return _sanitize_flashcards(result.output)
+
+
+def _sanitize_flashcards(deck: FlashcardReport) -> FlashcardReport:
+    """Keep only cards that have a non-empty front and back; cap at 50.
+
+    Raises if nothing valid remains so the report is marked failed rather than
+    silently empty.
+    """
+    valid: list[FlashcardItem] = []
+    for card in deck.cards:
+        front = card.front.strip()
+        back = card.back.strip()
+        if not front or not back:
+            continue
+        valid.append(FlashcardItem(front=front, back=back))
+        if len(valid) >= 50:
+            break
+    if not valid:
+        raise ValueError("Flashcard generation produced no valid cards")
+    return FlashcardReport(cards=valid)

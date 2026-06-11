@@ -1,9 +1,11 @@
 import {
+  FileQuestionIcon,
   FileTextIcon,
   GraduationCapIcon,
   NewspaperIcon,
   PenLineIcon,
   GitForkIcon,
+  SquareStackIcon,
 } from "lucide-react"
 
 import type { ReportType } from "@/features/notebooks/types"
@@ -66,6 +68,22 @@ export const REPORT_TYPE_BY_ID = {
     shortLabel: "Mind Map",
     description: "Visual concept map and semantic relationship graph.",
     icon: <GitForkIcon className="size-4" />,
+    placeholder: "",
+  },
+  quiz: {
+    id: "quiz" as ReportType,
+    label: "Quiz",
+    shortLabel: "Quiz",
+    description: "Interactive multiple-choice quiz with scoring.",
+    icon: <FileQuestionIcon className="size-4" />,
+    placeholder: "",
+  },
+  flashcards: {
+    id: "flashcards" as ReportType,
+    label: "Flashcards",
+    shortLabel: "Flashcards",
+    description: "Study cards you flip to review key concepts.",
+    icon: <SquareStackIcon className="size-4" />,
     placeholder: "",
   },
 } as Record<ReportType, ReportTypeMeta>

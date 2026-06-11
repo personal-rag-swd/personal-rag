@@ -58,14 +58,14 @@ const ALL_STUDIO_ACTIONS: StudioAction[] = [
     label: "Flashcards",
     description: "Review cards",
     icon: SquareStackIcon,
-    implemented: false,
+    implemented: true,
   },
   {
     id: "quiz",
     label: "Quiz",
     description: "Practice questions",
     icon: FileQuestionIcon,
-    implemented: false,
+    implemented: true,
   },
 ]
 

@@ -32,7 +32,9 @@ from app.notebooks.agent import (
     generate_blog_post,
     generate_briefing_doc,
     generate_custom_report,
+    generate_flashcards,
     generate_mindmap,
+    generate_quiz,
     generate_study_guide,
     get_notebook_chat_agent,
 )
@@ -51,6 +53,7 @@ from app.notebooks.schemas import (
     BlogPostReport,
     BriefingDocReport,
     CustomReport,
+    FlashcardReport,
     MindMapReport,
     NotebookChatHistoryMessage,
     NotebookCreate,
@@ -59,6 +62,7 @@ from app.notebooks.schemas import (
     NotebookRead,
     NotebookReportRead,
     NotebookUpdate,
+    QuizReport,
     ReportGenerateRequest,
     StudyGuideReport,
 )
@@ -81,6 +85,9 @@ logger = logging.getLogger(__name__)
 # Maximum characters of source text fed to the LLM for report generation.
 # ~120 k chars ≈ 30 k tokens, safely within most context windows.
 _REPORT_CONTEXT_CHAR_LIMIT = 120_000
+
+# Maps the "Fewer / Standard / More" preset (quiz questions or flashcards) to a count.
+_COUNT_BY_SIZE = {"fewer": 10, "standard": 20, "more": 30}
 
 
 router = APIRouter(prefix="/notebooks", tags=["Notebooks"])
@@ -591,6 +598,7 @@ async def _run_report_generation(
     context: str,
     instructions: str | None,
     detail_level: str | None,
+    question_count: int | None = None,
     _engine: object | None = None,
 ) -> None:
     """Background task that runs the LLM call and persists the result."""
@@ -620,6 +628,8 @@ async def _run_report_generation(
             | BlogPostReport
             | CustomReport
             | MindMapReport
+            | QuizReport
+            | FlashcardReport
         )
         try:
             match report_type:
@@ -636,6 +646,20 @@ async def _run_report_generation(
                 case "mindmap":
                     report_content = await generate_mindmap(
                         context, detail_level, instructions
+                    )
+                case "quiz":
+                    report_content = await generate_quiz(
+                        context,
+                        count=question_count or 20,
+                        difficulty=detail_level,
+                        additional_instructions=instructions,
+                    )
+                case "flashcards":
+                    report_content = await generate_flashcards(
+                        context,
+                        count=question_count or 20,
+                        difficulty=detail_level,
+                        additional_instructions=instructions,
                     )
                 case _:
                     logger.error("Unknown report type: %s", report_type)
@@ -721,6 +745,16 @@ async def generate_notebook_report(
             detail="additional_instructions is required for report_type 'custom'.",
         )
 
+    question_count: int | None = None
+    if payload.report_type == "quiz":
+        question_count = _COUNT_BY_SIZE.get(
+            (payload.number_of_questions or "standard").strip().lower(), 20
+        )
+    elif payload.report_type == "flashcards":
+        question_count = _COUNT_BY_SIZE.get(
+            (payload.number_of_cards or "standard").strip().lower(), 20
+        )
+
     now = datetime.now(UTC)
     report = NotebookReport(
         notebook_id=notebook.id,
@@ -755,6 +789,7 @@ async def generate_notebook_report(
         context=context,
         instructions=instructions,
         detail_level=payload.detail_level,
+        question_count=question_count,
         _engine=session_engine,
     )
 

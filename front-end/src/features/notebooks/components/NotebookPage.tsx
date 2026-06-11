@@ -20,6 +20,18 @@ import { ReportsPanel } from "./notebook-page/ReportsPanel"
 import { MindMapDialog } from "./notebook-page/MindMapDialog"
 import { ReportGenerateDialog } from "./notebook-page/ReportGenerateDialog"
 import { MindMapGenerateDialog } from "./notebook-page/MindMapGenerateDialog"
+import {
+  QuizGenerateDialog,
+  type QuizQuestionCount,
+  type QuizDifficulty,
+} from "./notebook-page/QuizGenerateDialog"
+import { QuizDialog } from "./notebook-page/QuizDialog"
+import {
+  FlashcardsGenerateDialog,
+  type FlashcardCount,
+  type FlashcardDifficulty,
+} from "./notebook-page/FlashcardsGenerateDialog"
+import { FlashcardsDialog } from "./notebook-page/FlashcardsDialog"
 import { UpdateNotebookDialog } from "./UpdateNotebookDialog"
 import { DeleteNotebookDialog } from "./DeleteNotebookDialog"
 
@@ -44,11 +56,25 @@ export function NotebookPage() {
   const [selectedMindMap, setSelectedMindMap] = useState<NotebookReport | null>(
     null
   )
+  const [isQuizGenerateOpen, setIsQuizGenerateOpen] = useState(false)
+  const [isQuizViewerOpen, setIsQuizViewerOpen] = useState(false)
+  const [selectedQuiz, setSelectedQuiz] = useState<NotebookReport | null>(null)
+  const [isFlashcardsGenerateOpen, setIsFlashcardsGenerateOpen] =
+    useState(false)
+  const [isFlashcardsViewerOpen, setIsFlashcardsViewerOpen] = useState(false)
+  const [selectedFlashcards, setSelectedFlashcards] =
+    useState<NotebookReport | null>(null)
 
   const handleViewReport = (report: NotebookReport) => {
     if (report.reportType === "mindmap") {
       setSelectedMindMap(report)
       setIsMindMapViewerOpen(true)
+    } else if (report.reportType === "quiz") {
+      setSelectedQuiz(report)
+      setIsQuizViewerOpen(true)
+    } else if (report.reportType === "flashcards") {
+      setSelectedFlashcards(report)
+      setIsFlashcardsViewerOpen(true)
     } else {
       setSelectedReport(report)
       setIsReportViewerOpen(true)
@@ -73,6 +99,50 @@ export function NotebookPage() {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error"
       toast.error(`Failed to generate mind map: ${errorMessage}`)
+    }
+  }
+
+  const generateQuizMutation = useGenerateNotebookReportMutation(id || "")
+
+  const handleGenerateQuiz = async (
+    numberOfQuestions: QuizQuestionCount,
+    difficulty: QuizDifficulty,
+    instructions: string
+  ) => {
+    setIsQuizGenerateOpen(false)
+    try {
+      await generateQuizMutation.mutateAsync({
+        reportType: "quiz",
+        numberOfQuestions,
+        detailLevel: difficulty,
+        additionalInstructions: instructions.trim() || undefined,
+      })
+      toast.success("Quiz is generating — it'll appear in Studio shortly.")
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error"
+      toast.error(`Failed to start quiz: ${errorMessage}`)
+    }
+  }
+
+  const generateFlashcardsMutation = useGenerateNotebookReportMutation(id || "")
+
+  const handleGenerateFlashcards = async (
+    numberOfCards: FlashcardCount,
+    difficulty: FlashcardDifficulty,
+    instructions: string
+  ) => {
+    setIsFlashcardsGenerateOpen(false)
+    try {
+      await generateFlashcardsMutation.mutateAsync({
+        reportType: "flashcards",
+        numberOfCards,
+        detailLevel: difficulty,
+        additionalInstructions: instructions.trim() || undefined,
+      })
+      toast.success("Flashcards are generating — they'll appear in Studio shortly.")
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error"
+      toast.error(`Failed to start flashcards: ${errorMessage}`)
     }
   }
 
@@ -141,6 +211,10 @@ export function NotebookPage() {
                   } else if (actionId === "mind-map") {
                     setSelectedMindMap(null)
                     setIsMindMapGenerateOpen(true)
+                  } else if (actionId === "quiz") {
+                    setIsQuizGenerateOpen(true)
+                  } else if (actionId === "flashcards") {
+                    setIsFlashcardsGenerateOpen(true)
                   }
                 }}
                 onViewReport={handleViewReport}
@@ -167,6 +241,10 @@ export function NotebookPage() {
                 } else if (actionId === "mind-map") {
                   setSelectedMindMap(null)
                   setIsMindMapGenerateOpen(true)
+                } else if (actionId === "quiz") {
+                  setIsQuizGenerateOpen(true)
+                } else if (actionId === "flashcards") {
+                  setIsFlashcardsGenerateOpen(true)
                 }
               }}
               onViewReport={handleViewReport}
@@ -213,6 +291,46 @@ export function NotebookPage() {
           if (!open) setSelectedMindMap(null)
         }}
         initialMap={selectedMindMap}
+      />
+
+      <QuizGenerateDialog
+        open={isQuizGenerateOpen}
+        onOpenChange={setIsQuizGenerateOpen}
+        isGenerating={generateQuizMutation.isPending}
+        onGenerate={handleGenerateQuiz}
+      />
+
+      <QuizDialog
+        key={
+          isQuizViewerOpen ? `quiz-${selectedQuiz?.id ?? "none"}` : "quiz-closed"
+        }
+        open={isQuizViewerOpen}
+        onOpenChange={(open) => {
+          setIsQuizViewerOpen(open)
+          if (!open) setSelectedQuiz(null)
+        }}
+        report={selectedQuiz}
+      />
+
+      <FlashcardsGenerateDialog
+        open={isFlashcardsGenerateOpen}
+        onOpenChange={setIsFlashcardsGenerateOpen}
+        isGenerating={generateFlashcardsMutation.isPending}
+        onGenerate={handleGenerateFlashcards}
+      />
+
+      <FlashcardsDialog
+        key={
+          isFlashcardsViewerOpen
+            ? `flashcards-${selectedFlashcards?.id ?? "none"}`
+            : "flashcards-closed"
+        }
+        open={isFlashcardsViewerOpen}
+        onOpenChange={(open) => {
+          setIsFlashcardsViewerOpen(open)
+          if (!open) setSelectedFlashcards(null)
+        }}
+        report={selectedFlashcards}
       />
 
       {/* Edit & Delete Dialog Modals */}

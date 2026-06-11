@@ -69,6 +69,18 @@ function mapNotebookReport(payload: NotebookReportApiPayload): NotebookReport {
         reportType: "custom",
         content: payload.content,
       }
+    case "quiz":
+      return {
+        ...base,
+        reportType: "quiz",
+        content: payload.content,
+      }
+    case "flashcards":
+      return {
+        ...base,
+        reportType: "flashcards",
+        content: payload.content,
+      }
   }
 }
 
@@ -520,9 +532,17 @@ export function useGenerateNotebookReportMutation(notebookId: string) {
       reportType: ReportType
       additionalInstructions?: string
       detailLevel?: string
+      numberOfQuestions?: string
+      numberOfCards?: string
     }
   >({
-    mutationFn: async ({ reportType, additionalInstructions, detailLevel }) => {
+    mutationFn: async ({
+      reportType,
+      additionalInstructions,
+      detailLevel,
+      numberOfQuestions,
+      numberOfCards,
+    }) => {
       const data = await apiFetch<NotebookReportApiPayload>(
         `/api/v1/notebooks/${notebookId}/reports`,
         {
@@ -531,6 +551,8 @@ export function useGenerateNotebookReportMutation(notebookId: string) {
             report_type: reportType,
             additional_instructions: additionalInstructions,
             detail_level: detailLevel,
+            number_of_questions: numberOfQuestions,
+            number_of_cards: numberOfCards,
           },
         }
       )
