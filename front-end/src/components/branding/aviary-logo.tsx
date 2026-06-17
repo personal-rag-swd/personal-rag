@@ -11,7 +11,7 @@ export function AviaryLogo({ className, title = "Aviary" }: AviaryLogoProps) {
     <img
       src="/aviary_logo.png"
       alt={title}
-      className={cn("h-auto w-auto", className)}
+      className={cn("h-auto w-auto dark:invert-0 invert", className)}
       loading="eager"
       decoding="async"
     />

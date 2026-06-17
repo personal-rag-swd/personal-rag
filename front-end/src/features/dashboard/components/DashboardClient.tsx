@@ -348,7 +348,7 @@ export function DashboardClient() {
   )
 }
 
-function CreateNotebookDialogContent({
+export function CreateNotebookDialogContent({
   onSuccess,
   onClose,
 }: {

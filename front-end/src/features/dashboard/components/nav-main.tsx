@@ -1,3 +1,5 @@
+import { Link } from "react-router-dom"
+
 import { Button } from "@/components/ui/button"
 import {
   SidebarGroup,
@@ -10,12 +12,14 @@ import { CirclePlusIcon, MailIcon } from "lucide-react"
 
 export function NavMain({
   items,
+  onQuickCreateClick,
 }: {
   items: {
     title: string
     url: string
     icon?: React.ReactNode
   }[]
+  onQuickCreateClick?: () => void
 }) {
   return (
     <SidebarGroup>
@@ -23,6 +27,7 @@ export function NavMain({
         <SidebarMenu>
           <SidebarMenuItem className="flex items-center gap-2">
             <SidebarMenuButton
+              onClick={onQuickCreateClick}
               tooltip="Quick Create"
               className="min-w-8 bg-primary text-primary-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
             >
@@ -42,7 +47,16 @@ export function NavMain({
         <SidebarMenu>
           {items.map((item) => (
             <SidebarMenuItem key={item.title}>
-              <SidebarMenuButton tooltip={item.title}>
+              <SidebarMenuButton
+                tooltip={item.title}
+                render={
+                  item.url.startsWith("/") ? (
+                    <Link to={item.url} />
+                  ) : (
+                    <a href={item.url} />
+                  )
+                }
+              >
                 {item.icon}
                 <span>{item.title}</span>
               </SidebarMenuButton>

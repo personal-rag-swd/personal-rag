@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom"
 import { PencilIcon, Trash2Icon } from "lucide-react"
 
 import { AviaryLogo } from "@/components/branding/aviary-logo"
@@ -24,7 +25,9 @@ export function NotebookHeader({
 }: NotebookHeaderProps) {
   return (
     <div className="flex min-h-12 shrink-0 items-center gap-3 border-b bg-background px-3 md:px-4">
-      <AviaryLogo className="size-18 shrink-0 object-contain" />
+      <Link to="/dashboard" className="flex shrink-0">
+        <AviaryLogo className="size-18 shrink-0 object-contain" />
+      </Link>
 
       <div className="flex min-w-0 flex-1 items-center gap-3">
         <div className="min-w-0">

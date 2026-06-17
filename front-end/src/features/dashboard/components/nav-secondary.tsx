@@ -1,4 +1,5 @@
 import * as React from "react"
+import { Link } from "react-router-dom"
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -23,7 +24,15 @@ export function NavSecondary({
         <SidebarMenu>
           {items.map((item) => (
             <SidebarMenuItem key={item.title}>
-              <SidebarMenuButton render={<a href={item.url} />}>
+              <SidebarMenuButton
+                render={
+                  item.url.startsWith("/") ? (
+                    <Link to={item.url} />
+                  ) : (
+                    <a href={item.url} />
+                  )
+                }
+              >
                 {item.icon}
                 <span>{item.title}</span>
               </SidebarMenuButton>

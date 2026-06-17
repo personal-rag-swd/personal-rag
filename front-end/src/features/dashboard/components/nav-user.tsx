@@ -7,6 +7,11 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
 } from "@/components/ui/dropdown-menu"
 import {
   SidebarMenu,
@@ -15,12 +20,16 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { useAuth } from "@/features/auth/store/auth-store"
+import { useTheme, type Theme } from "@/components/theme-store"
 import {
   EllipsisVerticalIcon,
   CircleUserRoundIcon,
   CreditCardIcon,
   BellIcon,
   LogOutIcon,
+  SunIcon,
+  MoonIcon,
+  LaptopIcon,
 } from "lucide-react"
 
 export function NavUser({
@@ -34,6 +43,7 @@ export function NavUser({
 }) {
   const { isMobile } = useSidebar()
   const { logout, user: authUser } = useAuth()
+  const { theme, setTheme } = useTheme()
 
   const displayUser = {
     name: authUser?.email?.split("@")[0] || user.name,
@@ -103,6 +113,36 @@ export function NavUser({
                 <BellIcon />
                 Notifications
               </DropdownMenuItem>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  {theme === "light" && <SunIcon />}
+                  {theme === "dark" && <MoonIcon />}
+                  {theme === "system" && <LaptopIcon />}
+                  <span>Theme</span>
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuRadioGroup
+                    value={theme}
+                    onValueChange={(value) => setTheme(value as Theme)}
+                  >
+                    <DropdownMenuRadioItem value="light">
+                      <SunIcon />
+                      <span>Light</span>
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="dark">
+                      <MoonIcon />
+                      <span>Dark</span>
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="system">
+                      <LaptopIcon />
+                      <span>System</span>
+                    </DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={logout}>
