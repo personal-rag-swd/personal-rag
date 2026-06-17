@@ -384,7 +384,7 @@ function PanelCard({
       >
         <CardTitle className="text-sm leading-none">{title}</CardTitle>
       </CardHeader>
-      <CardContent className="min-h-0 flex-1 px-0">{children}</CardContent>
+      <CardContent className="min-h-0 flex-1 px-0 flex flex-col">{children}</CardContent>
     </Card>
   )
 }
