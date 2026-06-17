@@ -8,7 +8,7 @@ import { RegisterForm } from "@/features/auth/components/RegisterForm"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { AppSidebar } from "@/features/dashboard/components/app-sidebar"
 import { SiteHeader } from "@/features/dashboard/components/site-header"
-import { DashboardClient } from "@/features/dashboard/components/DashboardClient"
+import { DashboardClient } from "@/features/dashboard/components/dashboard-client"
 import { NotebookPage } from "@/features/notebooks/components/NotebookPage"
 
 // Premium, beautifully animated full-screen loader

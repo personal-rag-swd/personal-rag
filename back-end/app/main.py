@@ -130,7 +130,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # Resolve Embedding Model & Provider
     embed_prov = settings.embedding_provider.strip().lower()
     if embed_prov == "auto":
-        embed_prov = "gemini" if settings.embedding_api_key else "openai_compatible"
+        embed_prov = "openai_compatible"
     embed_model = settings.embedding_model
 
     logger = logging.getLogger("app.startup")

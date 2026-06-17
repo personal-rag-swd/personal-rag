@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/sidebar"
 import { Dialog } from "@/components/ui/dialog"
 import { useNotebooks } from "@/features/notebooks/store/notebook-store"
-import { CreateNotebookDialogContent } from "./DashboardClient"
+import { CreateNotebookDialogContent } from "./dashboard-client"
 import {
   LayoutDashboardIcon,
   SearchIcon,

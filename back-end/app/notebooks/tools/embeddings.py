@@ -7,10 +7,8 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import Embedder
 from pydantic_ai.embeddings import EmbeddingSettings
-from pydantic_ai.embeddings.google import GoogleEmbeddingModel, GoogleEmbeddingSettings
 from pydantic_ai.embeddings.openai import OpenAIEmbeddingModel
 from pydantic_ai.exceptions import ModelHTTPError
-from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 if TYPE_CHECKING:
@@ -104,31 +102,6 @@ class OpenRouterEmbeddingModel(OpenAIEmbeddingModel):
         self.model_kwargs = model_kwargs or {}
 
 
-class GeminiEmbeddingAdapter(PydanticAIEmbeddingAdapter):
-    def __init__(
-        self,
-        *,
-        api_key: str,
-        model: str,
-        output_dimensionality: int | None = None,
-    ) -> None:
-        self.model = model
-        self.output_dimensionality = output_dimensionality
-        self.provider_url = "https://generativelanguage.googleapis.com"
-
-        provider = GoogleProvider(api_key=api_key)
-        embedding_model = GoogleEmbeddingModel(
-            model_name=model,
-            provider=provider,
-        )
-        settings = None
-        if output_dimensionality and output_dimensionality > 0:
-            settings = GoogleEmbeddingSettings(dimensions=output_dimensionality)
-
-        embedder = Embedder(embedding_model, settings=settings)
-        super().__init__(embedder)
-
-
 class OpenAICompatibleEmbeddingAdapter(PydanticAIEmbeddingAdapter):
     def __init__(
         self,
@@ -183,16 +156,7 @@ def get_embedding_adapter(settings: Settings) -> EmbeddingAdapter:
     provider = settings.embedding_provider.strip().lower()
 
     if provider == "auto":
-        provider = "gemini" if settings.embedding_api_key else "openai_compatible"
-
-    if provider == "gemini":
-        if not settings.embedding_api_key:
-            raise RuntimeError("Missing EMBEDDING_API_KEY for gemini provider")
-        return GeminiEmbeddingAdapter(
-            api_key=settings.embedding_api_key,
-            model=settings.embedding_model,
-            output_dimensionality=settings.embedding_dimension,
-        )
+        provider = "openai_compatible"
 
     if provider == "openai_compatible":
         if not settings.embedding_api_key:
@@ -208,7 +172,7 @@ def get_embedding_adapter(settings: Settings) -> EmbeddingAdapter:
 
     raise RuntimeError(
         f"Unsupported embedding provider '{settings.embedding_provider}'. "
-        f"Use one of: auto, gemini, openai_compatible."
+        f"Use one of: auto, openai_compatible."
     )
 
 
@@ -221,11 +185,7 @@ def embed_texts(texts: list[str], settings: Settings) -> list[list[float]]:
 
     provider_url = getattr(adapter, "provider_url", None)
     if provider_url is None:
-        provider_url = settings.embedding_provider_url or (
-            "https://generativelanguage.googleapis.com"
-            if settings.embedding_provider == "gemini"
-            else "https://api.openai.com/v1"
-        )
+        provider_url = settings.embedding_provider_url or "https://api.openai.com/v1"
     model = getattr(adapter, "model", settings.embedding_model or "unknown")
     dimension = (
         getattr(adapter, "output_dimensionality", None)

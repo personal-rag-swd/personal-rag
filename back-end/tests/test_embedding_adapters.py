@@ -4,20 +4,9 @@ from pydantic_ai.exceptions import ModelHTTPError
 from app.core.config import Settings, validate_rag_embedding_dimension
 from app.notebooks.tools import embeddings
 from app.notebooks.tools.embeddings import (
-    GeminiEmbeddingAdapter,
     embed_texts,
     get_embedding_adapter,
 )
-
-
-def test_auto_provider_uses_gemini_when_key_present() -> None:
-    settings = Settings(
-        embedding_provider="auto",
-        embedding_api_key="gemini-key",
-        embedding_model="gemini-embedding-2",
-    )
-    adapter = get_embedding_adapter(settings)
-    assert isinstance(adapter, GeminiEmbeddingAdapter)
 
 
 def test_auto_provider_uses_openai_compatible_without_key() -> None:

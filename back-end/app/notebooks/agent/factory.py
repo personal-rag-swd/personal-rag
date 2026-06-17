@@ -15,42 +15,6 @@ from app.users.models import User
 
 
 @lru_cache(maxsize=1)
-def _get_gemini_model() -> Model:
-    from pydantic_ai.models.google import GoogleModel
-    from pydantic_ai.providers.google import GoogleProvider
-
-    settings = get_settings()
-    provider = GoogleProvider(api_key=settings.chat_api_key)
-    return GoogleModel(settings.chat_model, provider=provider)
-
-
-@lru_cache(maxsize=1)
-def _get_openai_compatible_model() -> Model:
-    from dataclasses import replace
-
-    from pydantic_ai.models.openai import OpenAIModel
-    from pydantic_ai.profiles.openai import OpenAIModelProfile
-    from pydantic_ai.providers.openai import OpenAIProvider
-
-    settings = get_settings()
-    provider = OpenAIProvider(
-        api_key=settings.chat_api_key,
-        base_url=settings.chat_provider_url,
-    )
-    model = OpenAIModel(settings.chat_model, provider=provider)
-
-    # Disable forced tool choice (required) to maximize compatibility with various
-    # open-source models hosted on custom backends that only support tool_choice='auto'
-    if hasattr(model, "profile") and isinstance(model.profile, OpenAIModelProfile):
-        new_profile = replace(model.profile, openai_supports_tool_choice_required=False)
-        model.__dict__["profile"] = new_profile
-        if hasattr(model, "_profile"):
-            model._profile = new_profile
-
-    return model
-
-
-@lru_cache(maxsize=1)
 def _get_openrouter_model() -> Model:
     from dataclasses import replace
 
@@ -73,16 +37,6 @@ def _get_openrouter_model() -> Model:
     return model
 
 
-class GeminiChatProvider:
-    def build_model(self) -> Model:
-        return _get_gemini_model()
-
-
-class OpenAICompatibleChatProvider:
-    def build_model(self) -> Model:
-        return _get_openai_compatible_model()
-
-
 class OpenRouterChatProvider:
     def build_model(self) -> Model:
         return _get_openrouter_model()
@@ -90,8 +44,6 @@ class OpenRouterChatProvider:
 
 _CHAT_PROVIDER_REGISTRY: dict[str, object] = {
     "openrouter": OpenRouterChatProvider(),
-    "openai_compatible": OpenAICompatibleChatProvider(),
-    "gemini": GeminiChatProvider(),
 }
 
 
@@ -101,8 +53,7 @@ def resolve_chat_provider() -> any:
     resolved = _CHAT_PROVIDER_REGISTRY.get(selected_provider)
     if resolved is None:
         raise ValueError(
-            f"Unsupported chat provider '{selected_provider}'. "
-            "Use openrouter, openai_compatible, or gemini."
+            f"Unsupported chat provider '{selected_provider}'. Use openrouter."
         )
     return resolved
 
@@ -115,7 +66,7 @@ def chat_provider_is_configured() -> bool:
     """
     settings = get_settings()
     selected_provider = settings.chat_provider.strip().lower()
-    if selected_provider in ("gemini", "openrouter", "openai_compatible"):
+    if selected_provider == "openrouter":
         return bool(settings.chat_api_key)
     return False
 

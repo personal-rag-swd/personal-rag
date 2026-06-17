@@ -46,14 +46,10 @@ def settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
     )
     from app.core import config
     from app.notebooks.agent.factory import (
-        _get_gemini_model,
-        _get_openai_compatible_model,
         _get_openrouter_model,
     )
 
     _get_openrouter_model.cache_clear()
-    _get_openai_compatible_model.cache_clear()
-    _get_gemini_model.cache_clear()
     config.get_settings.cache_clear()
 
     monkeypatch.setattr(config, "get_settings", lambda: s)

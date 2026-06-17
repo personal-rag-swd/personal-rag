@@ -92,7 +92,11 @@ def test_chunk_document_uses_settings_for_docx(monkeypatch: pytest.MonkeyPatch) 
     captured: dict[str, int] = {}
 
     def fake_chunk_docx(
-        request: ChunkingRequest, *, chunk_size: int, chunk_overlap: int
+        request: ChunkingRequest,
+        *,
+        settings: Settings | None = None,
+        chunk_size: int,
+        chunk_overlap: int,
     ):
         captured["chunk_size"] = chunk_size
         captured["chunk_overlap"] = chunk_overlap
@@ -116,6 +120,37 @@ def test_chunk_document_uses_settings_for_docx(monkeypatch: pytest.MonkeyPatch) 
 
     assert chunk_document(request, settings) == []
     assert captured == {"chunk_size": 2048, "chunk_overlap": 128}
+
+
+def test_semantic_chunking_success(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    text = "First sentence about cats. Second sentence about dogs. Third sentence about math."
+    # 3 sentences -> 3 embeddings
+    mock_vectors = [
+        [1.0] * 1536,
+        [1.0] * 1536,
+        [0.0] * 1536,
+    ]
+
+    def fake_embed_texts(texts: list[str], s: Settings) -> list[list[float]]:
+        return [mock_vectors[i % len(mock_vectors)] for i in range(len(texts))]
+
+    monkeypatch.setattr(
+        "app.notebooks.tools.embeddings.embed_texts",
+        fake_embed_texts,
+    )
+
+    request = ChunkingRequest(
+        content=text.encode("utf-8"),
+        filename="sample.txt",
+        source="txt-source",
+        document_id="doc-5",
+    )
+
+    chunks = chunk_document(request, settings)
+    assert len(chunks) > 0
+    assert any("First sentence" in chunk.page_content for chunk in chunks)
 
 
 def test_chunk_document_rejects_unsupported_extension() -> None:
