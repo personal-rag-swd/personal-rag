@@ -1,11 +1,8 @@
-from app.notebooks.agent.factory import (
+from app.notebooks.agent.chat_agent import (
     NotebookChatDeps,
-    OpenRouterChatProvider,
-    chat_provider_is_configured,
-    get_notebook_chat_agent,
-    resolve_chat_provider,
+    notebook_chat_agent,
 )
-from app.notebooks.agent.report import (
+from app.notebooks.agent.report_agents import (
     generate_blog_post,
     generate_briefing_doc,
     generate_custom_report,
@@ -17,8 +14,6 @@ from app.notebooks.agent.report import (
 
 __all__ = [
     "NotebookChatDeps",
-    "OpenRouterChatProvider",
-    "chat_provider_is_configured",
     "generate_blog_post",
     "generate_briefing_doc",
     "generate_custom_report",
@@ -26,6 +21,5 @@ __all__ = [
     "generate_mindmap",
     "generate_quiz",
     "generate_study_guide",
-    "get_notebook_chat_agent",
-    "resolve_chat_provider",
+    "notebook_chat_agent",
 ]

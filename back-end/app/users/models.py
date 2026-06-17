@@ -1,25 +1,22 @@
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, Column, DateTime
-from sqlmodel import Field, SQLModel
+from beanie import Document
+from pydantic import Field
 
 
-class User(SQLModel, table=True):
-    __tablename__ = "user"  # type: ignore
-    __table_args__ = (
-        CheckConstraint("role IN ('user', 'admin')", name="ck_user_role_valid"),
-    )
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
-    email: str = Field(index=True, unique=True, max_length=320)
+class User(Document):
+    id: UUID = Field(default_factory=uuid4)
+    email: str
     hashed_password: str
-    role: str = Field(default="user", max_length=50)
-    is_active: bool = Field(default=True)
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        sa_column=Column(DateTime(timezone=True), nullable=False),
-    )
-    updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        sa_column=Column(DateTime(timezone=True), nullable=False),
-    )
+    role: str = "user"
+    is_active: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    class Settings:
+        name = "users"
+        use_state_management = True
+        indexes = [
+            [("email", 1)],
+        ]

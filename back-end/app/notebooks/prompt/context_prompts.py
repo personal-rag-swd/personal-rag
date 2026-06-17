@@ -1,4 +1,9 @@
-from app.notebooks.tools.search import RetrievedChunk
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.notebooks.rag.search_service import RetrievedChunk
 
 
 def build_context_block(chunks: list[RetrievedChunk]) -> str:

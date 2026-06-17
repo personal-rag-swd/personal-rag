@@ -3,12 +3,9 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import HTTPException, status
 from pydantic_ai import ModelMessage, ModelMessagesTypeAdapter
 from pydantic_ai.messages import ModelRequest, ModelResponse
 from pydantic_core import to_jsonable_python
-from sqlalchemy.exc import SQLAlchemyError
-from sqlmodel import Session, delete, select
 
 from app.notebooks.models import Notebook, NotebookMessage
 
@@ -20,63 +17,17 @@ CITATION_PATTERN = re.compile(
 )
 
 
-def load_notebook_chat_history(
-    session: Session, notebook: Notebook
+async def load_notebook_chat_history(
+    notebook: Notebook,
 ) -> list[ModelMessage]:
-    statement = (
-        select(NotebookMessage.message)
-        .where(NotebookMessage.notebook_id == notebook.id)
-        .order_by(NotebookMessage.seq.asc())
-    )
-    rows = list(session.exec(statement).all())
+    messages = await NotebookMessage.find(
+        {"notebook_id": notebook.id}
+    ).sort(("seq", 1)).to_list()
+    rows = [msg.message for msg in messages]
     return list(ModelMessagesTypeAdapter.validate_python(rows))
 
 
-def save_notebook_chat_history(
-    session: Session,
-    notebook: Notebook,
-    messages: list[ModelMessage],
-) -> Notebook:
-    now = datetime.now(UTC)
-    jsonable_messages = to_jsonable_python(messages)
-    existing_rows = list(
-        session.exec(
-            select(NotebookMessage)
-            .where(NotebookMessage.notebook_id == notebook.id)
-            .order_by(NotebookMessage.seq.asc())
-        ).all()
-    )
-    replace_all = len(existing_rows) > len(jsonable_messages) or any(
-        row.message != jsonable_messages[idx] for idx, row in enumerate(existing_rows)
-    )
-
-    if replace_all:
-        session.exec(
-            delete(NotebookMessage).where(NotebookMessage.notebook_id == notebook.id)
-        )
-        start_seq = 1
-    else:
-        start_seq = len(existing_rows) + 1
-
-    for idx, message in enumerate(jsonable_messages[start_seq - 1 :], start=start_seq):
-        session.add(NotebookMessage(notebook_id=notebook.id, seq=idx, message=message))
-
-    notebook.last_active_at = now
-    notebook.updated_at = now
-    try:
-        session.add(notebook)
-        session.commit()
-        session.refresh(notebook)
-    except SQLAlchemyError as exc:
-        session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
-        ) from exc
-    return notebook
-
-
-def append_notebook_chat_history(
-    session: Session,
+async def append_notebook_chat_history(
     notebook: Notebook,
     new_messages: list[ModelMessage],
 ) -> Notebook:
@@ -85,29 +36,20 @@ def append_notebook_chat_history(
 
     now = datetime.now(UTC)
     jsonable_new_messages = to_jsonable_python(new_messages)
-    max_seq = (
-        session.exec(
-            select(NotebookMessage.seq)
-            .where(NotebookMessage.notebook_id == notebook.id)
-            .order_by(NotebookMessage.seq.desc())
-        ).first()
-        or 0
-    )
+
+    last = await NotebookMessage.find(
+        {"notebook_id": notebook.id}
+    ).sort(("seq", -1)).first_or_none()
+    max_seq = last.seq if last else 0
 
     for idx, message in enumerate(jsonable_new_messages, start=max_seq + 1):
-        session.add(NotebookMessage(notebook_id=notebook.id, seq=idx, message=message))
+        await NotebookMessage(
+            notebook_id=notebook.id, seq=idx, message=message
+        ).insert()
 
     notebook.last_active_at = now
     notebook.updated_at = now
-    try:
-        session.add(notebook)
-        session.commit()
-        session.refresh(notebook)
-    except SQLAlchemyError as exc:
-        session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
-        ) from exc
+    await notebook.save()
     return notebook
 
 
@@ -125,13 +67,12 @@ def parse_chunks_from_context_block(block: str) -> list[dict[str, object]]:
     ]
 
 
-def extract_notebook_chat_transcript(
-    session: Session,
+async def extract_notebook_chat_transcript(
     notebook: Notebook,
     *,
     include_reasoning: bool = False,
 ) -> list[dict[str, object]]:
-    messages = load_notebook_chat_history(session, notebook)
+    messages = await load_notebook_chat_history(notebook)
     transcript: list[dict[str, object]] = []
 
     assistant_message_seq = 0
@@ -172,14 +113,12 @@ def extract_notebook_chat_transcript(
                         }
                     )
 
-            # Extract tool calls
             for part in message.parts:
                 if getattr(part, "part_kind", "") == "tool-call":
                     tool_name = getattr(part, "tool_name", "")
                     tool_call_id = getattr(part, "tool_call_id", "")
                     args = getattr(part, "args", "")
 
-                    # Find matching tool return in subsequent messages
                     tool_result = None
                     for next_msg in messages[idx + 1 :]:
                         if isinstance(next_msg, ModelRequest):
@@ -229,7 +168,6 @@ def extract_notebook_chat_transcript(
                 or (isinstance(part.get("content"), str) and part["content"].strip())
             ]
             if parts:
-                # scan backward to find search_notebook_context results returned since the previous response
                 sources = []
                 for prev_msg in reversed(messages[:idx]):
                     if isinstance(prev_msg, ModelResponse):
@@ -277,7 +215,6 @@ def extract_notebook_chat_transcript(
                         source = source_lookup.get((filename, doc_id, chunk_index))
 
                     if source is None:
-                        # Fallback for legacy citations or missing doc_id
                         for (f, d, c), src in source_lookup.items():
                             if f == filename and c == chunk_index:
                                 source = src

@@ -4,29 +4,25 @@ from pathlib import Path
 
 from botocore.exceptions import ClientError
 from fastapi import HTTPException, status
-from sqlmodel import Session
 
 from app.core.config import Settings
 from app.core.s3 import get_s3_client
 from app.file.schemas import PresignedUrlRequest, PresignedUrlResponse
-from app.notebooks.service import get_notebook
-from app.notebooks.tools import register_pending_notebook_document
+from app.notebooks.models import NotebookDocument
 from app.users.models import User
 
 logger = logging.getLogger(__name__)
 
 
 def sanitize_filename(filename: str) -> str:
-    """Strips path traversal components and returns the clean file basename."""
     base = Path(filename).name
     return base.replace("/", "").replace("\\", "")
 
 
-def generate_presigned_url_service(
+async def generate_presigned_url_service(
     request: PresignedUrlRequest,
     current_user: User,
     settings: Settings,
-    session: Session,
 ) -> PresignedUrlResponse:
     operation = request.operation.lower()
     if operation not in ("upload", "download"):
@@ -60,7 +56,6 @@ def generate_presigned_url_service(
         s3_key = request.filename
 
     try:
-        # Sign against the same endpoint the browser will call.
         presign_endpoint = settings.s3_public_endpoint_url or settings.s3_endpoint_url
         s3_client = get_s3_client(settings, endpoint_url=presign_endpoint)
         if operation == "upload":
@@ -88,15 +83,15 @@ def generate_presigned_url_service(
         ) from exc
 
     if operation == "upload" and request.notebook_id is not None:
-        notebook = get_notebook(session, request.notebook_id, current_user)
-        register_pending_notebook_document(
-            session,
-            notebook=notebook,
-            current_user=current_user,
-            bucket=settings.s3_bucket,
-            key=s3_key,
+        document = NotebookDocument(
+            notebook_id=request.notebook_id,
+            user_id=current_user.id,
+            s3_bucket=settings.s3_bucket,
+            s3_key=s3_key,
             filename=cleaned_name,
             content_type=request.content_type,
+            status="pending",
         )
+        await document.insert()
 
     return PresignedUrlResponse(url=presigned_url, key=s3_key)

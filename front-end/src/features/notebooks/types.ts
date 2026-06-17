@@ -30,7 +30,7 @@ export type NotebookDocument = {
   filename: string
   contentType: string | null
   size: number | null
-  status: "pending" | "uploaded" | "processing" | "indexed" | "failed" | string
+  status: "pending" | "uploaded" | "processing" | "indexing" | "indexed" | "failed" | string
   errorMessage: string | null
   createdAt: string
   updatedAt: string

@@ -5,8 +5,8 @@
 This repository contains a FastAPI backend and a Vite React frontend.
 
 - `back-end/app/`: API code grouped by feature (`auth`, `users`, `file`, `notebooks`) plus `core/`.
-- `back-end/tests/`: pytest coverage for auth, RBAC, files, callbacks, and notebooks.
-- `back-end/alembic/`: database migration environment and versions.
+- `back-end/tests/`: pytest coverage for auth, RBAC, files, reports, notebooks, and chat.
+- `back-end/alembic/`: (deleted) — migrated from PostgreSQL to MongoDB.
 - `front-end/src/`: React code. Shared UI is in `components/ui/`, feature API/types in `features/`, and app wiring in `App.tsx` and `routes.tsx`.
 - `front-end/public/` and `front-end/src/assets/`: static assets.
 - `front-end-old/`: legacy Next.js code; avoid changing it unless the task explicitly targets it.
@@ -20,8 +20,7 @@ Run backend commands from `back-end/`:
 - `uv run pytest`: run backend tests.
 - `uv run ruff check`: lint backend code.
 - `uv run ruff format`: format backend code.
-- `uv run alembic upgrade head`: apply database migrations.
-- `uv run alembic revision --autogenerate -m "add feature"`: create a migration.
+- `uv run alembic upgrade head`: *(no longer available — project uses MongoDB)*.
 
 Run frontend commands from `front-end/`:
 
@@ -55,10 +54,18 @@ Start backend configuration from `back-end/.env.example`. Never commit secrets, 
 
 Production compose requires these variables (see `docker-compose.prod.yml`):
 
-- `POSTGRES_USER`, `POSTGRES_PASSWORD`
+- `MONGODB_URL`
 - `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`
 - `MINIO_BROWSER_REDIRECT_URL`, `MINIO_SERVER_URL`
 - `JWT_SECRET_KEY`
 - `CORS_ORIGINS`
 - `S3_PUBLIC_ENDPOINT_URL`
 - `VITE_API_URL`
+
+### MongoDB & Beanie Notes
+
+The project uses **MongoDB** with **Beanie 2.1.0** as the ODM. Key patterns:
+- Always use **dict-based queries** (`{"field": value}`), never `Eq(Model.field, value)` — Pydantic v2 metaclass blocks class-level field access.
+- For `id` lookups, use `{"_id": value}`, NOT `{"id": value}` — Beanie maps Python `id` to MongoDB `_id`.
+- Atlas `$vectorSearch` uses `queryText` (server-side embeddings), not `queryVector`.
+- Tests use `mongomock-motor` — patch `list_collection_names` to drop `authorizedCollections` kwarg for compatibility.

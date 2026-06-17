@@ -1,8 +1,8 @@
 from uuid import uuid4
 
-from app.notebooks.prompt.context import build_context_block
-from app.notebooks.prompt.system import CHAT_SYSTEM_INSTRUCTIONS
-from app.notebooks.tools.search import RetrievedChunk
+from app.notebooks.prompt.context_prompts import build_context_block
+from app.notebooks.prompt.system_prompts import CHAT_SYSTEM_INSTRUCTIONS
+from app.notebooks.rag.search_service import RetrievedChunk
 
 
 def test_notebook_core_instructions_require_source_grounding() -> None:

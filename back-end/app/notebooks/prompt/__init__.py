@@ -1,5 +1,5 @@
-from app.notebooks.prompt.context import build_context_block
-from app.notebooks.prompt.report import (
+from app.notebooks.prompt.context_prompts import build_context_block
+from app.notebooks.prompt.report_prompts import (
     BLOG_SYSTEM,
     BRIEFING_SYSTEM,
     CUSTOM_SYSTEM_BASE,
@@ -13,7 +13,7 @@ from app.notebooks.prompt.report import (
     build_quiz_user_message,
     build_report_user_message,
 )
-from app.notebooks.prompt.system import CHAT_SYSTEM_INSTRUCTIONS
+from app.notebooks.prompt.system_prompts import CHAT_SYSTEM_INSTRUCTIONS
 
 __all__ = [
     "BLOG_SYSTEM",

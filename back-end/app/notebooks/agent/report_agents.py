@@ -6,9 +6,10 @@ from typing import Any
 import logfire
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.models import Model
 from pydantic_ai.run import AgentRunResult
 
-from app.notebooks.agent.factory import resolve_chat_provider
+from app.core.llm_provider import resolve_chat_provider
 from app.notebooks.prompt import (
     BLOG_SYSTEM,
     BRIEFING_SYSTEM,
@@ -35,17 +36,54 @@ from app.notebooks.schemas import (
     StudyGuideReport,
 )
 
+# Statically defined report agents
+briefing_agent = Agent(
+    output_type=BriefingDocReport,
+    instructions=BRIEFING_SYSTEM,
+)
+
+study_guide_agent = Agent(
+    output_type=StudyGuideReport,
+    instructions=STUDY_GUIDE_SYSTEM,
+)
+
+blog_agent = Agent(
+    output_type=BlogPostReport,
+    instructions=BLOG_SYSTEM,
+)
+
+custom_agent = Agent(
+    output_type=CustomReport,
+    instructions=CUSTOM_SYSTEM_BASE,
+)
+
+mindmap_agent = Agent(
+    output_type=MindMapReport,
+    instructions=MINDMAP_SYSTEM,
+)
+
+quiz_agent = Agent(
+    output_type=QuizReport,
+    instructions=QUIZ_SYSTEM,
+)
+
+flashcards_agent = Agent(
+    output_type=FlashcardReport,
+    instructions=FLASHCARDS_SYSTEM,
+)
+
 
 async def _run_agent_with_retry(
     agent: Agent,
     user_msg: str,
+    model: Model,
     max_retries: int = 4,
     initial_delay: float = 2.0,
 ) -> AgentRunResult[Any]:
     delay = initial_delay
     for attempt in range(max_retries):
         try:
-            return await agent.run(user_msg)
+            return await agent.run(user_msg, model=model)
         except ModelHTTPError as exc:
             if exc.status_code in (429, 502, 503, 500) and attempt < max_retries - 1:
                 logfire.warning(
@@ -65,13 +103,11 @@ async def generate_briefing_doc(
     context: str,
     additional_instructions: str | None = None,
 ) -> BriefingDocReport:
-    agent = Agent(
-        resolve_chat_provider().build_model(),
-        output_type=BriefingDocReport,
-        instructions=BRIEFING_SYSTEM,
-    )
+    model = resolve_chat_provider()
     result = await _run_agent_with_retry(
-        agent, build_report_user_message(context, additional_instructions)
+        briefing_agent,
+        build_report_user_message(context, additional_instructions),
+        model=model,
     )
     return result.output
 
@@ -80,13 +116,11 @@ async def generate_study_guide(
     context: str,
     additional_instructions: str | None = None,
 ) -> StudyGuideReport:
-    agent = Agent(
-        resolve_chat_provider().build_model(),
-        output_type=StudyGuideReport,
-        instructions=STUDY_GUIDE_SYSTEM,
-    )
+    model = resolve_chat_provider()
     result = await _run_agent_with_retry(
-        agent, build_report_user_message(context, additional_instructions)
+        study_guide_agent,
+        build_report_user_message(context, additional_instructions),
+        model=model,
     )
     return result.output
 
@@ -95,13 +129,11 @@ async def generate_blog_post(
     context: str,
     additional_instructions: str | None = None,
 ) -> BlogPostReport:
-    agent = Agent(
-        resolve_chat_provider().build_model(),
-        output_type=BlogPostReport,
-        instructions=BLOG_SYSTEM,
-    )
+    model = resolve_chat_provider()
     result = await _run_agent_with_retry(
-        agent, build_report_user_message(context, additional_instructions)
+        blog_agent,
+        build_report_user_message(context, additional_instructions),
+        model=model,
     )
     return result.output
 
@@ -111,13 +143,9 @@ async def generate_custom_report(
     additional_instructions: str,
 ) -> CustomReport:
     """Custom reports treat additional_instructions as the entire core directive."""
-    agent = Agent(
-        resolve_chat_provider().build_model(),
-        output_type=CustomReport,
-        instructions=CUSTOM_SYSTEM_BASE,
-    )
+    model = resolve_chat_provider()
     user_message = build_custom_report_user_message(context, additional_instructions)
-    result = await _run_agent_with_retry(agent, user_message)
+    result = await _run_agent_with_retry(custom_agent, user_message, model=model)
     return result.output
 
 
@@ -126,15 +154,11 @@ async def generate_mindmap(
     detail_level: str | None = None,
     additional_instructions: str | None = None,
 ) -> MindMapReport:
-    agent = Agent(
-        resolve_chat_provider().build_model(),
-        output_type=MindMapReport,
-        instructions=MINDMAP_SYSTEM,
-    )
+    model = resolve_chat_provider()
     user_message = build_mindmap_user_message(
         context, detail_level, additional_instructions
     )
-    result = await _run_agent_with_retry(agent, user_message)
+    result = await _run_agent_with_retry(mindmap_agent, user_message, model=model)
     return result.output
 
 
@@ -144,15 +168,11 @@ async def generate_quiz(
     difficulty: str | None = None,
     additional_instructions: str | None = None,
 ) -> QuizReport:
-    agent = Agent(
-        resolve_chat_provider().build_model(),
-        output_type=QuizReport,
-        instructions=QUIZ_SYSTEM,
-    )
+    model = resolve_chat_provider()
     user_message = build_quiz_user_message(
         context, count, difficulty, additional_instructions
     )
-    result = await _run_agent_with_retry(agent, user_message)
+    result = await _run_agent_with_retry(quiz_agent, user_message, model=model)
     return _sanitize_quiz(result.output)
 
 
@@ -193,15 +213,11 @@ async def generate_flashcards(
     difficulty: str | None = None,
     additional_instructions: str | None = None,
 ) -> FlashcardReport:
-    agent = Agent(
-        resolve_chat_provider().build_model(),
-        output_type=FlashcardReport,
-        instructions=FLASHCARDS_SYSTEM,
-    )
+    model = resolve_chat_provider()
     user_message = build_flashcards_user_message(
         context, count, difficulty, additional_instructions
     )
-    result = await _run_agent_with_retry(agent, user_message)
+    result = await _run_agent_with_retry(flashcards_agent, user_message, model=model)
     return _sanitize_flashcards(result.output)
 
 

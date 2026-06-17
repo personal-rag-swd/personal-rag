@@ -5,19 +5,15 @@ import json
 import logging
 import urllib.parse
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import Any
 
 import aio_pika
 from aio_pika import ExchangeType, IncomingMessage
 from pydantic import BaseModel
-from sqlalchemy.exc import SQLAlchemyError
-from sqlmodel import Session, select
 
 from app.core.config import Settings
-from app.core.database import engine
 from app.notebooks.models import NotebookDocument
-from app.notebooks.tools.ingestion import (
+from app.notebooks.rag.ingestion_service import (
     TransientIngestionError,
     claim_document_for_ingestion,
     fail_stale_pending_documents,
@@ -64,11 +60,6 @@ class ParsedMinioEvent:
     bucket: str
     key: str
     size: int | None
-
-
-class MessageOutcome(StrEnum):
-    ACK = "ack"
-    RETRY = "retry"
 
 
 def _is_object_created_event(event_name: str | None) -> bool:
@@ -148,95 +139,98 @@ def _build_queue_arguments(settings: Settings) -> dict[str, Any] | None:
     return arguments or None
 
 
-def recover_stale_notebook_documents(settings: Settings) -> dict[str, int]:
-    with Session(engine) as session:
-        return {
-            "recovered_processing": fail_stale_processing_documents(session, settings),
-            "recovered_pending": fail_stale_pending_documents(session, settings),
-        }
+async def recover_stale_notebook_documents(settings: Settings) -> dict[str, int]:
+    return {
+        "recovered_processing": await fail_stale_processing_documents(settings),
+        "recovered_pending": await fail_stale_pending_documents(settings),
+    }
 
 
-def _find_document_by_storage_key(
-    session: Session, *, bucket: str, key: str
+async def _find_document_by_storage_key(
+    *, bucket: str, key: str
 ) -> NotebookDocument | None:
-    return session.exec(
-        select(NotebookDocument).where(
-            NotebookDocument.s3_bucket == bucket,
-            NotebookDocument.s3_key == key,
-        )
-    ).first()
+    return await NotebookDocument.find_one(
+        {"s3_bucket": bucket, "s3_key": key},
+    )
 
 
-def process_minio_notification_payload(
+async def process_minio_notification_payload(
     payload: dict[str, Any], settings: Settings
-) -> MessageOutcome:
+) -> bool:
     events = parse_minio_object_created_events(payload)
     if not events:
         logger.debug("RabbitMQ notification had no object-created events")
-        return MessageOutcome.ACK
-    logger.debug("RabbitMQ notification parsed %s object-created event(s)", len(events))
+        return True
+    logger.info("RabbitMQ notification parsed %s object-created event(s)", len(events))
 
-    with Session(engine) as session:
-        for event in events:
-            logger.debug(
-                "Processing object-created event bucket=%s key=%s size=%s",
+    for event in events:
+        logger.info(
+            "Processing object-created event: bucket=%s key=%s size=%s",
+            event.bucket,
+            event.key,
+            event.size,
+        )
+        document = await _find_document_by_storage_key(
+            bucket=event.bucket, key=event.key
+        )
+        if document is None:
+            logger.info(
+                "Skipping MinIO event for unknown object %s/%s",
                 event.bucket,
                 event.key,
-                event.size,
             )
-            document = _find_document_by_storage_key(
-                session, bucket=event.bucket, key=event.key
+            continue
+
+        claimed = await claim_document_for_ingestion(
+            document.id, size=event.size
+        )
+        if claimed is None:
+            logger.info(
+                "Skipping MinIO event for already-claimed document %s", document.id
             )
-            if document is None:
-                logger.info(
-                    "Skipping MinIO event for unknown object %s/%s",
-                    event.bucket,
-                    event.key,
-                )
-                continue
+            continue
+        logger.info(
+            "Claimed notebook document %s for ingestion (filename: %s)",
+            claimed.id,
+            claimed.filename,
+        )
 
-            claimed = claim_document_for_ingestion(
-                session, document.id, size=event.size
+        try:
+            await ingest_document_by_id(
+                claimed.id,
+                settings,
+                require_processing_status=True,
             )
-            if claimed is None:
-                logger.info(
-                    "Skipping MinIO event for already-claimed document %s", document.id
-                )
-                continue
-            logger.debug("Claimed notebook document %s for ingestion", claimed.id)
+            logger.info(
+                "Notebook document ingestion successfully completed for document %s (ID: %s)",
+                claimed.filename,
+                claimed.id,
+            )
+        except TransientIngestionError as exc:
+            logger.warning(
+                "Notebook document ingestion will retry for document %s (ID: %s) due to transient error: %r",
+                claimed.filename,
+                claimed.id,
+                exc,
+            )
+            return False
+        except Exception:
+            logger.exception(
+                "Database failure while processing document %s", claimed.id
+            )
+            return False
 
-            try:
-                ingest_document_by_id(
-                    session,
-                    claimed.id,
-                    settings,
-                    require_processing_status=True,
-                )
-                logger.debug("Notebook document ingestion completed for %s", claimed.id)
-            except TransientIngestionError:
-                logger.debug(
-                    "Notebook document ingestion will retry for %s", claimed.id
-                )
-                return MessageOutcome.RETRY
-            except SQLAlchemyError:
-                logger.exception(
-                    "Database failure while processing document %s", claimed.id
-                )
-                return MessageOutcome.RETRY
-
-    return MessageOutcome.ACK
+    return True
 
 
-def process_minio_notification_message(
-    body: bytes, settings: Settings
-) -> MessageOutcome:
+async def process_minio_notification_message(body: bytes, settings: Settings) -> bool:
     try:
         payload = json.loads(body.decode("utf-8"))
-    except UnicodeDecodeError, json.JSONDecodeError:
+    except (UnicodeDecodeError, json.JSONDecodeError):
         logger.warning("Skipping non-JSON RabbitMQ message body")
-        return MessageOutcome.ACK
-    logger.debug("Received RabbitMQ message body with %s byte(s)", len(body))
-    return process_minio_notification_payload(payload, settings)
+        return True
+    logger.info("Received RabbitMQ message body with %s byte(s)", len(body))
+    return await process_minio_notification_payload(payload, settings)
 
 
 async def _declare_topology(
@@ -273,19 +267,23 @@ async def _declare_topology(
 
 
 async def _handle_message(message: IncomingMessage, settings: Settings) -> None:
-    logger.debug(
+    logger.info(
         "Handling RabbitMQ delivery_tag=%s routing_key=%s",
         message.delivery_tag,
         message.routing_key,
     )
-    outcome = await asyncio.to_thread(
-        process_minio_notification_message, message.body, settings
-    )
-    if outcome is MessageOutcome.RETRY:
-        logger.debug("Requeueing RabbitMQ delivery_tag=%s", message.delivery_tag)
+    outcome = await process_minio_notification_message(message.body, settings)
+    if not outcome:
+        logger.warning(
+            "Requeueing RabbitMQ delivery_tag=%s due to ingestion failure",
+            message.delivery_tag,
+        )
         await message.nack(requeue=True)
     else:
-        logger.debug("Acknowledging RabbitMQ delivery_tag=%s", message.delivery_tag)
+        logger.info(
+            "Acknowledging RabbitMQ delivery_tag=%s (ingestion success)",
+            message.delivery_tag,
+        )
         await message.ack()
 
 
@@ -309,9 +307,7 @@ async def run_notebook_document_consumer(settings: Settings) -> None:
                     settings.rabbitmq_routing_key,
                     settings.rabbitmq_prefetch_count,
                 )
-                stale_stats = await asyncio.to_thread(
-                    recover_stale_notebook_documents, settings
-                )
+                stale_stats = await recover_stale_notebook_documents(settings)
                 if (
                     stale_stats["recovered_processing"]
                     or stale_stats["recovered_pending"]
