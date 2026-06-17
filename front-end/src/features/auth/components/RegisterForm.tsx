@@ -19,6 +19,7 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group"
+import { REGEXP_ONLY_DIGITS } from "input-otp"
 import {
   InputOTP,
   InputOTPGroup,
@@ -391,7 +392,7 @@ function VerificationForm({
                     id={field.name}
                     name={field.name}
                     maxLength={6}
-                    pattern="^[0-9]{6}$"
+                    pattern={REGEXP_ONLY_DIGITS}
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(val) => field.handleChange(val)}
