@@ -7,7 +7,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session, delete, func, select
 
 from app.notebooks.memory import load_notebook_chat_history
-from app.notebooks.models import Notebook, NotebookDocument, NotebookDocumentChunk
+from app.notebooks.models import (
+    Notebook,
+    NotebookDocument,
+    NotebookDocumentChunk,
+    NotebookReport,
+)
 from app.notebooks.schemas import NotebookCreate, NotebookUpdate
 from app.users.models import User
 
@@ -75,6 +80,20 @@ def delete_notebook_document(
                 NotebookDocumentChunk.document_id == document.id
             )
         )
+
+        # Delete any note reports referencing this document ID
+        note_reports = session.exec(
+            select(NotebookReport)
+            .where(NotebookReport.notebook_id == notebook.id)
+            .where(NotebookReport.user_id == current_user.id)
+            .where(NotebookReport.report_type == "note")
+        ).all()
+        for r in note_reports:
+            if isinstance(r.content, dict) and r.content.get("document_id") == str(
+                document.id
+            ):
+                session.delete(r)
+
         session.delete(document)
         session.commit()
     except SQLAlchemyError as exc:

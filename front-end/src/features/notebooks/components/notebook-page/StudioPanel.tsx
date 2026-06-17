@@ -58,6 +58,7 @@ export function StudioPanel({
   activeFeature,
   onViewReport,
   isMindMapGenerating,
+  onAddNoteClick,
 }: {
   notebookId?: string
   isCollapsed?: boolean
@@ -66,6 +67,7 @@ export function StudioPanel({
   activeFeature?: string | null
   onViewReport?: (report: NotebookReport) => void
   isMindMapGenerating?: boolean
+  onAddNoteClick?: () => void
 }) {
   const { data: reports, isLoading: isReportsLoading } =
     useNotebookReportsQuery(notebookId)
@@ -166,6 +168,7 @@ export function StudioPanel({
           <div className="flex w-full flex-col items-center px-2">
             <Tooltip>
               <TooltipTrigger
+                onClick={onAddNoteClick}
                 className="flex size-9 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
                 aria-label="Add note"
               >
@@ -226,8 +229,8 @@ export function StudioPanel({
           {/* Saved outputs — scrollable area with no scrollbar */}
           <div
             className={cn(
-              "flex min-h-0 flex-1 flex-col border-t",
-              !showSavedOutputs && ""
+              "flex flex-col border-t",
+              showSavedOutputs ? "min-h-0 flex-1" : "grow shrink-0"
             )}
           >
             {isReportsLoading ? (
@@ -290,7 +293,12 @@ export function StudioPanel({
 
           {/* Fixed bottom buttons — always visible, never scrolled */}
           <div className="shrink-0 border-t px-4 pt-3 pb-4">
-            <Button variant="outline" size="default" className="w-full text-sm">
+            <Button
+              variant="outline"
+              size="default"
+              className="w-full text-sm"
+              onClick={onAddNoteClick}
+            >
               <PlusIcon data-icon="inline-start" />
               Add note
             </Button>
@@ -348,10 +356,20 @@ function ReportItem({
   return (
     <>
       <Item
-        render={inProgress ? undefined : <button />}
+        render={inProgress ? undefined : <div role="button" tabIndex={0} />}
         variant={inProgress ? "muted" : "outline"}
         size="xs"
         onClick={inProgress ? undefined : () => onViewReport?.(report)}
+        onKeyDown={
+          inProgress
+            ? undefined
+            : (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault()
+                  onViewReport?.(report)
+                }
+              }
+        }
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         className={cn(

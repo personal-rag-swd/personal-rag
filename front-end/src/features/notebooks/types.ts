@@ -118,6 +118,7 @@ export type ReportType =
   | "mindmap"
   | "quiz"
   | "flashcards"
+  | "note"
 
 export type BriefingDocContent = {
   executive_summary: string
@@ -194,6 +195,13 @@ export type FlashcardContent = {
   cards: FlashcardItem[]
 }
 
+export type NoteContent = {
+  title: string
+  content: string
+  document_id?: string
+  documentId?: string
+}
+
 export type ReportContent =
   | BriefingDocContent
   | StudyGuideContent
@@ -202,6 +210,7 @@ export type ReportContent =
   | MindMapContent
   | QuizContent
   | FlashcardContent
+  | NoteContent
 
 export type ReportContentApiPayload =
   | BriefingDocContent
@@ -211,6 +220,7 @@ export type ReportContentApiPayload =
   | MindMapContentApiPayload
   | QuizContent
   | FlashcardContent
+  | NoteContent
 
 export type NotebookReportApiPayload =
   | {
@@ -283,6 +293,16 @@ export type NotebookReportApiPayload =
       created_at: string
       updated_at: string
     }
+  | {
+      id: string
+      notebook_id: string
+      report_type: "note"
+      status: ReportStatus
+      error_message: string | null
+      content: NoteContent
+      created_at: string
+      updated_at: string
+    }
 
 export type NotebookReport =
   | {
@@ -352,6 +372,16 @@ export type NotebookReport =
       status: ReportStatus
       errorMessage: string | null
       content: FlashcardContent
+      createdAt: string
+      updatedAt: string
+    }
+  | {
+      id: string
+      notebookId: string
+      reportType: "note"
+      status: ReportStatus
+      errorMessage: string | null
+      content: NoteContent
       createdAt: string
       updatedAt: string
     }

@@ -680,3 +680,85 @@ def test_generate_mindmap_report_persists(
     assert body["report_type"] == "mindmap"
     assert body["status"] == "pending"
     assert body["content"] == {}
+
+
+def test_create_note_success(
+    client: TestClient,
+    settings: Settings,
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = make_user("note_user@example.com")
+    session.add(user)
+    session.commit()
+    headers = auth_headers(user, settings)
+
+    notebook = client.post(
+        "/api/v1/notebooks/",
+        json={"name": "Notes Workspace", "description": "", "tags": []},
+        headers=headers,
+    ).json()
+
+    mock_ingested = []
+
+    def fake_ingest(s, doc_id, settings, **kwargs):
+        mock_ingested.append(doc_id)
+        doc = s.get(NotebookDocument, doc_id)
+        if doc:
+            doc.status = "indexed"
+            s.add(doc)
+            s.commit()
+
+    monkeypatch.setattr(
+        "app.notebooks.tools.ingestion.ingest_document_by_id",
+        fake_ingest,
+    )
+
+    response = client.post(
+        f"/api/v1/notebooks/{notebook['id']}/notes",
+        json={
+            "title": "Meeting Takeaways",
+            "content": "We discussed RAG database notes implementation.",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["filename"] == "Meeting Takeaways.txt"
+    assert body["status"] == "uploaded"
+
+    # Verify document is in DB
+    db_doc = session.get(NotebookDocument, UUID(body["id"]))
+    assert db_doc is not None
+    assert db_doc.content == "We discussed RAG database notes implementation."
+    assert db_doc.s3_bucket is None
+    assert db_doc.s3_key.startswith("db-notes/")
+
+    # Verify corresponding note report is in DB
+    from app.notebooks.models import NotebookReport
+
+    db_report = session.exec(
+        select(NotebookReport)
+        .where(NotebookReport.notebook_id == UUID(notebook["id"]))
+        .where(NotebookReport.report_type == "note")
+    ).first()
+    assert db_report is not None
+    assert db_report.status == "completed"
+    assert db_report.content["title"] == "Meeting Takeaways"
+    assert (
+        db_report.content["content"]
+        == "We discussed RAG database notes implementation."
+    )
+    assert db_report.content["document_id"] == body["id"]
+
+    # Verify deleting report deletes the document
+    del_response = client.delete(
+        f"/api/v1/notebooks/{notebook['id']}/reports/{db_report.id}",
+        headers=headers,
+    )
+    assert del_response.status_code == 204
+
+    session.expire_all()
+    assert session.get(NotebookDocument, UUID(body["id"])) is None
+    assert session.get(NotebookReport, db_report.id) is None

@@ -86,4 +86,12 @@ export const REPORT_TYPE_BY_ID = {
     icon: <SquareStackIcon className="size-4" />,
     placeholder: "",
   },
+  note: {
+    id: "note" as ReportType,
+    label: "Note",
+    shortLabel: "Note",
+    description: "Your custom notes saved in this workspace.",
+    icon: <PenLineIcon className="size-4" />,
+    placeholder: "",
+  },
 } as Record<ReportType, ReportTypeMeta>

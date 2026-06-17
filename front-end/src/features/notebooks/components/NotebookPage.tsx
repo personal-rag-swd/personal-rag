@@ -34,6 +34,7 @@ import {
 import { FlashcardsDialog } from "./notebook-page/FlashcardsDialog"
 import { UpdateNotebookDialog } from "./UpdateNotebookDialog"
 import { DeleteNotebookDialog } from "./DeleteNotebookDialog"
+import { NoteCreateDialog } from "./notebook-page/NoteCreateDialog"
 
 type TabType = "sources" | "chat" | "studio"
 
@@ -64,6 +65,7 @@ export function NotebookPage() {
   const [isFlashcardsViewerOpen, setIsFlashcardsViewerOpen] = useState(false)
   const [selectedFlashcards, setSelectedFlashcards] =
     useState<NotebookReport | null>(null)
+  const [isNoteCreateOpen, setIsNoteCreateOpen] = useState(false)
 
   const handleViewReport = (report: NotebookReport) => {
     if (report.reportType === "mindmap") {
@@ -219,6 +221,7 @@ export function NotebookPage() {
                 }}
                 onViewReport={handleViewReport}
                 isMindMapGenerating={generateMindMapMutation.isPending}
+                onAddNoteClick={() => setIsNoteCreateOpen(true)}
               />
             </PanelCard>
           </TabsContent>
@@ -249,6 +252,7 @@ export function NotebookPage() {
               }}
               onViewReport={handleViewReport}
               isMindMapGenerating={generateMindMapMutation.isPending}
+              onAddNoteClick={() => setIsNoteCreateOpen(true)}
             />
           </PanelCard>
         </div>
@@ -331,6 +335,13 @@ export function NotebookPage() {
           if (!open) setSelectedFlashcards(null)
         }}
         report={selectedFlashcards}
+      />
+
+      <NoteCreateDialog
+        key={isNoteCreateOpen ? "note-open" : "note-closed"}
+        notebookId={id}
+        open={isNoteCreateOpen}
+        onOpenChange={setIsNoteCreateOpen}
       />
 
       {/* Edit & Delete Dialog Modals */}

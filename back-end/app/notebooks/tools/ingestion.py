@@ -255,13 +255,19 @@ def _run_document_ingestion(
     settings: Settings,
     s3_client: Any,
 ) -> None:
-    obj = s3_client.get_object(Bucket=document.s3_bucket, Key=document.s3_key)
-    body = obj["Body"].read()
+    if document.content is not None:
+        body = document.content.encode("utf-8")
+        source_key = f"db-notes/{document.id}"
+    else:
+        obj = s3_client.get_object(Bucket=document.s3_bucket, Key=document.s3_key)
+        body = obj["Body"].read()
+        source_key = document.s3_key
+
     split_docs = chunk_document(
         ChunkingRequest(
             content=body,
             filename=document.filename,
-            source=document.s3_key,
+            source=source_key,
             document_id=str(document.id),
         ),
         settings,

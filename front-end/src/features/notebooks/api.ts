@@ -81,6 +81,12 @@ function mapNotebookReport(payload: NotebookReportApiPayload): NotebookReport {
         reportType: "flashcards",
         content: payload.content,
       }
+    case "note":
+      return {
+        ...base,
+        reportType: "note",
+        content: payload.content,
+      }
   }
 }
 
@@ -461,6 +467,9 @@ export function useDeleteNotebookDocumentMutation() {
       void queryClient.invalidateQueries({
         queryKey: ["notebooks", variables.notebookId, "documents"],
       })
+      void queryClient.invalidateQueries({
+        queryKey: ["notebooks", variables.notebookId, "reports"],
+      })
       void queryClient.invalidateQueries({ queryKey: ["notebooks"] })
     },
   })
@@ -607,6 +616,10 @@ export function useDeleteNotebookReportMutation(
       void queryClient.invalidateQueries({
         queryKey: ["notebooks", notebookId, "reports"],
       })
+      void queryClient.invalidateQueries({
+        queryKey: ["notebooks", notebookId, "documents"],
+      })
+      void queryClient.invalidateQueries({ queryKey: ["notebooks"] })
     },
   })
 }

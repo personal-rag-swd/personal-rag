@@ -119,7 +119,7 @@ def build_quiz_user_message(
         level = "medium"
     try:
         target = max(1, min(int(count), 50))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         target = 20
 
     parts = [
@@ -166,7 +166,7 @@ def build_flashcards_user_message(
         level = "medium"
     try:
         target = max(1, min(int(count), 50))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         target = 20
 
     parts = [

@@ -4,7 +4,7 @@ import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import (
     APIRouter,
@@ -22,7 +22,7 @@ from pydantic_ai.messages import ModelMessage, ModelRequest
 from pydantic_ai.run import AgentRunResult
 from pydantic_ai.ui.ag_ui import AGUIAdapter
 from sqlalchemy.exc import SQLAlchemyError
-from sqlmodel import Session, select
+from sqlmodel import Session, delete, select
 
 from app.core.config import get_settings
 from app.core.database import get_session
@@ -62,6 +62,7 @@ from app.notebooks.schemas import (
     NotebookRead,
     NotebookReportRead,
     NotebookUpdate,
+    NoteCreate,
     QuizReport,
     ReportGenerateRequest,
     StudyGuideReport,
@@ -291,6 +292,26 @@ def read_notebook_documents(
     return list_notebook_documents(session, notebook_id, current_user)
 
 
+def _run_background_note_ingestion(
+    document_id: UUID,
+    _engine: object | None = None,
+) -> None:
+    """Background task to run vector embedding ingestion on a database-stored note."""
+    from app.core.config import get_settings
+    from app.core.database import engine as _default_engine
+    from app.notebooks.tools.ingestion import ingest_document_by_id
+
+    db_engine = _engine or _default_engine
+    settings = get_settings()
+    with Session(db_engine) as session:
+        try:
+            ingest_document_by_id(session, document_id, settings)
+        except Exception:
+            logger.exception(
+                "Background note ingestion failed for document %s", document_id
+            )
+
+
 @router.delete(
     "/{notebook_id}/documents/{document_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -303,6 +324,77 @@ def delete_notebook_document_route(
 ) -> Response:
     delete_notebook_document(session, notebook_id, document_id, current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{notebook_id}/notes",
+    response_model=NotebookDocumentRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_notebook_note(
+    notebook_id: UUID,
+    payload: NoteCreate,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> object:
+    notebook = get_notebook(session, notebook_id, current_user)
+
+    filename = payload.title.strip()
+    if not filename.endswith(".txt") and not filename.endswith(".md"):
+        filename += ".txt"
+
+    now = datetime.now(UTC)
+    doc_id = uuid4()
+    document = NotebookDocument(
+        id=doc_id,
+        notebook_id=notebook.id,
+        user_id=current_user.id,
+        s3_bucket=None,
+        s3_key=f"db-notes/{doc_id}",
+        filename=filename,
+        content_type="text/plain",
+        size=len(payload.content.encode("utf-8")),
+        status="uploaded",  # Mark as uploaded so ingestion claims it properly
+        content=payload.content,
+        created_at=now,
+        updated_at=now,
+    )
+
+    report = NotebookReport(
+        notebook_id=notebook.id,
+        user_id=current_user.id,
+        report_type="note",
+        status="completed",
+        content={
+            "title": payload.title,
+            "content": payload.content,
+            "document_id": str(doc_id),
+        },
+        created_at=now,
+        updated_at=now,
+    )
+
+    try:
+        session.add(document)
+        session.add(report)
+        session.commit()
+        session.refresh(document)
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
+        ) from exc
+
+    # Queue the background ingestion
+    session_engine = session.get_bind()
+    background_tasks.add_task(
+        _run_background_note_ingestion,
+        document_id=document.id,
+        _engine=session_engine,
+    )
+
+    return document
 
 
 @router.post("/{notebook_id}/chat")
@@ -863,6 +955,30 @@ def delete_notebook_report(
         )
 
     try:
+        # If it's a note, also delete the corresponding document
+        if report.report_type == "note" and isinstance(report.content, dict):
+            doc_id_str = report.content.get("document_id")
+            if doc_id_str:
+                try:
+                    doc_id = UUID(doc_id_str)
+                    document = session.exec(
+                        select(NotebookDocument).where(
+                            NotebookDocument.id == doc_id,
+                            NotebookDocument.notebook_id == notebook.id,
+                            NotebookDocument.user_id == current_user.id,
+                        )
+                    ).first()
+                    if document:
+                        session.exec(
+                            delete(NotebookDocumentChunk).where(
+                                NotebookDocumentChunk.document_id == document.id
+                            )
+                        )
+                        session.delete(document)
+                except Exception:
+                    logger.exception(
+                        "Failed to delete corresponding note document %s", doc_id_str
+                    )
         session.delete(report)
         session.commit()
     except SQLAlchemyError as exc:

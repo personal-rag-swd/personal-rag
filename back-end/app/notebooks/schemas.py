@@ -17,6 +17,16 @@ def normalize_tags(tags: list[str]) -> list[str]:
     return normalized
 
 
+class NoteCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    content: str = Field(..., min_length=1)
+
+    @field_validator("title", "content", mode="before")
+    @classmethod
+    def strip_text(cls, value: str) -> str:
+        return value.strip() if isinstance(value, str) else value
+
+
 class NotebookCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
     description: str = Field(default="", max_length=1000)

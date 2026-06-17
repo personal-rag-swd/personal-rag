@@ -105,8 +105,15 @@ class NotebookDocument(SQLModel, table=True):
             ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
         ),
     )
-    s3_bucket: str = Field(max_length=255, nullable=False)
-    s3_key: str = Field(sa_column=Column(String(1024), nullable=False, unique=True))
+    s3_bucket: str | None = Field(default=None, max_length=255, nullable=True)
+    s3_key: str | None = Field(
+        default=None,
+        sa_column=Column(String(1024), nullable=True, unique=True),
+    )
+    content: str | None = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
+    )
     filename: str = Field(max_length=255, nullable=False)
     content_type: str | None = Field(default=None, max_length=255)
     size: int | None = Field(default=None)

@@ -18,6 +18,7 @@ import type {
   CustomReportContent,
   NotebookReport,
   StudyGuideContent,
+  NoteContent,
 } from "@/features/notebooks/types"
 
 import { REPORT_TYPE_BY_ID } from "./reportTypes"
@@ -94,6 +95,8 @@ function ReportContentView({ report }: { report: NotebookReport }) {
       return <BlogPostView content={report.content} />
     case "custom":
       return <CustomReportView content={report.content} />
+    case "note":
+      return <NoteReportView content={report.content} />
   }
 }
 
@@ -242,6 +245,20 @@ function CustomReportView({ content }: { content: CustomReportContent }) {
   return (
     <div className="max-w-3xl p-6">
       <MarkdownText content={content.markdown_content} />
+    </div>
+  )
+}
+
+function NoteReportView({ content }: { content: NoteContent }) {
+  return (
+    <div className="max-w-3xl space-y-4 p-6">
+      <h1 className="text-2xl leading-tight font-bold text-foreground">
+        {content.title}
+      </h1>
+      <hr className="border-border/40" />
+      <p className="text-sm leading-relaxed whitespace-pre-wrap text-foreground">
+        {content.content}
+      </p>
     </div>
   )
 }

@@ -232,7 +232,7 @@ def process_minio_notification_message(
 ) -> MessageOutcome:
     try:
         payload = json.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+    except UnicodeDecodeError, json.JSONDecodeError:
         logger.warning("Skipping non-JSON RabbitMQ message body")
         return MessageOutcome.ACK
     logger.debug("Received RabbitMQ message body with %s byte(s)", len(body))
