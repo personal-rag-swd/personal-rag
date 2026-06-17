@@ -6,10 +6,7 @@ type AviaryLogoProps = {
   wordmark?: boolean
 }
 
-export function AviaryLogo({
-  className,
-  title = "Aviary",
-}: AviaryLogoProps) {
+export function AviaryLogo({ className, title = "Aviary" }: AviaryLogoProps) {
   return (
     <img
       src="/aviary_logo.png"

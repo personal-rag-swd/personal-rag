@@ -300,8 +300,12 @@ export function SourcesPanel({
                   value={searchValue}
                   onChange={(e) => setSearchValue(e.target.value)}
                 />
-                <InputGroupAddon align="inline-end" className="text-[10px] text-muted-foreground select-none">
-                  {filteredDocuments.length} {filteredDocuments.length === 1 ? "result" : "results"}
+                <InputGroupAddon
+                  align="inline-end"
+                  className="text-[10px] text-muted-foreground select-none"
+                >
+                  {filteredDocuments.length}{" "}
+                  {filteredDocuments.length === 1 ? "result" : "results"}
                 </InputGroupAddon>
               </InputGroup>
             </div>

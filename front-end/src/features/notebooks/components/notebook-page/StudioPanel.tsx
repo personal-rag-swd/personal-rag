@@ -118,7 +118,7 @@ export function StudioPanel({
         "flex h-full min-h-0 flex-col bg-card transition-all duration-300",
         isCollapsed
           ? "w-14 shrink-0 items-center justify-between py-2"
-          : "overflow-y-auto scrollbar-none"
+          : "scrollbar-none overflow-y-auto"
       )}
     >
       {isCollapsed ? (
@@ -135,7 +135,7 @@ export function StudioPanel({
               <TooltipContent side="left">Expand panel</TooltipContent>
             </Tooltip>
 
-            <div className="min-h-0 w-full flex-1 overflow-y-auto scrollbar-none">
+            <div className="scrollbar-none min-h-0 w-full flex-1 overflow-y-auto">
               <div className="flex flex-col items-center gap-2.5 px-2">
                 {STUDIO_ACTIONS.map((action) => {
                   const ActionIcon = action.icon
@@ -224,7 +224,12 @@ export function StudioPanel({
           </div>
 
           {/* Saved outputs — scrollable area with no scrollbar */}
-          <div className={cn("border-t min-h-0 flex-1 flex flex-col", !showSavedOutputs && "")}>
+          <div
+            className={cn(
+              "flex min-h-0 flex-1 flex-col border-t",
+              !showSavedOutputs && ""
+            )}
+          >
             {isReportsLoading ? (
               <div className="flex items-center justify-center py-8 text-muted-foreground">
                 <Loader2Icon className="size-4 animate-spin" />
@@ -234,7 +239,7 @@ export function StudioPanel({
                 <p className="px-4 pt-3 pb-1 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
                   Saved outputs
                 </p>
-                <div className="min-h-0 flex-1 overflow-y-auto scrollbar-none">
+                <div className="scrollbar-none min-h-0 flex-1 overflow-y-auto">
                   <ItemGroup className="px-3 pt-3 pb-3">
                     {isMindMapGenerating && (
                       <Item
@@ -346,9 +351,7 @@ function ReportItem({
         render={inProgress ? undefined : <button />}
         variant={inProgress ? "muted" : "outline"}
         size="xs"
-        onClick={
-          inProgress ? undefined : () => onViewReport?.(report)
-        }
+        onClick={inProgress ? undefined : () => onViewReport?.(report)}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         className={cn(
@@ -391,7 +394,8 @@ function ReportItem({
           <DialogHeader>
             <DialogTitle>Delete report</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this {meta?.label ?? report.reportType}? This action cannot be undone.
+              Are you sure you want to delete this{" "}
+              {meta?.label ?? report.reportType}? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

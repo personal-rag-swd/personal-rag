@@ -61,11 +61,7 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import {
-  Sheet,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
+import { Sheet, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
 
 import { useNotebookReportsQuery } from "@/features/notebooks/api"
@@ -118,7 +114,10 @@ const MindMapActionsCtx = createContext<MindMapActions | null>(null)
 
 function useMindMapActions(): MindMapActions {
   const ctx = useContext(MindMapActionsCtx)
-  if (!ctx) throw new Error("useMindMapActions must be used inside MindMapActionsCtx.Provider")
+  if (!ctx)
+    throw new Error(
+      "useMindMapActions must be used inside MindMapActionsCtx.Provider"
+    )
   return ctx
 }
 
@@ -245,7 +244,8 @@ export function MindMapDialog({
         totalHeight += h
       })
 
-      if (branchNodes.length > 1) totalHeight += (branchNodes.length - 1) * mainGap
+      if (branchNodes.length > 1)
+        totalHeight += (branchNodes.length - 1) * mainGap
 
       let currentY = -totalHeight / 2
 
@@ -318,14 +318,18 @@ export function MindMapDialog({
   const expandRoot = useCallback(() => {
     setIsRootExpanded(true)
     if (!graphData?.nodes?.length) return
-    const root = graphData.nodes.find((n) => n.type === "root") ?? graphData.nodes[0]
-    const mains = graphData.nodes.filter((n) => n.type === "main" && n.id !== root.id)
+    const root =
+      graphData.nodes.find((n) => n.type === "root") ?? graphData.nodes[0]
+    const mains = graphData.nodes.filter(
+      (n) => n.type === "main" && n.id !== root.id
+    )
     setPendingFocusNodeIds([root.id, ...mains.map((n) => n.id)])
   }, [graphData])
 
   const collapseRoot = useCallback(() => {
     if (!graphData?.nodes?.length) return
-    const root = graphData.nodes.find((n) => n.type === "root") ?? graphData.nodes[0]
+    const root =
+      graphData.nodes.find((n) => n.type === "root") ?? graphData.nodes[0]
     setIsRootExpanded(false)
     setExpandedMainNodeIds(new Set())
     setPendingFocusNodeIds([root.id])
@@ -355,7 +359,8 @@ export function MindMapDialog({
         return next
       })
       if (!graphData?.nodes?.length) return
-      const root = graphData.nodes.find((n) => n.type === "root") ?? graphData.nodes[0]
+      const root =
+        graphData.nodes.find((n) => n.type === "root") ?? graphData.nodes[0]
       const isMobile = window.innerWidth < 640
       setPendingFocusNodeIds(isMobile ? [nodeId] : [nodeId, root.id])
     },
@@ -421,7 +426,9 @@ export function MindMapDialog({
     (label: string, description?: string | null): HighlightState => {
       if (!searchQuery.trim()) return "normal"
       const haystack = `${label} ${description ?? ""}`.toLowerCase()
-      return haystack.includes(searchQuery.toLowerCase()) ? "highlighted" : "dimmed"
+      return haystack.includes(searchQuery.toLowerCase())
+        ? "highlighted"
+        : "dimmed"
     },
     [searchQuery]
   )
@@ -459,7 +466,13 @@ export function MindMapDialog({
         },
       ]
     })
-  }, [expandedMainNodeIds, getHighlightState, graphData, isRootExpanded, layout])
+  }, [
+    expandedMainNodeIds,
+    getHighlightState,
+    graphData,
+    isRootExpanded,
+    layout,
+  ])
 
   const flowEdges = useMemo<MindMapFlowEdge[]>(() => {
     if (!graphData?.nodes?.length || !layout) return []
@@ -482,7 +495,9 @@ export function MindMapDialog({
           animated: false,
           selectable: false,
           style: {
-            stroke: isSub ? "rgba(16, 185, 129, 0.32)" : "rgba(59, 130, 246, 0.35)",
+            stroke: isSub
+              ? "rgba(16, 185, 129, 0.32)"
+              : "rgba(59, 130, 246, 0.35)",
             strokeWidth: isSub ? 1.8 : 2.1,
           },
         } satisfies MindMapFlowEdge
@@ -547,7 +562,11 @@ export function MindMapDialog({
                   }
                 >
                   <span className="truncate">
-                    V{mindMaps.length - (activeMap ? mindMaps.findIndex(m => m.id === activeMap.id) : 0)}
+                    V
+                    {mindMaps.length -
+                      (activeMap
+                        ? mindMaps.findIndex((m) => m.id === activeMap.id)
+                        : 0)}
                   </span>
                   <ChevronDownIcon className="size-3.5 opacity-50" />
                 </DropdownMenuTrigger>
@@ -558,7 +577,9 @@ export function MindMapDialog({
                       onClick={() => setSelectedMap(map)}
                       className="flex flex-col items-start gap-0.5 py-2"
                     >
-                      <span className="font-semibold">V{mindMaps.length - i}</span>
+                      <span className="font-semibold">
+                        V{mindMaps.length - i}
+                      </span>
                       <span className="text-[10px] text-muted-foreground">
                         {formatDistanceToNow(new Date(map.createdAt), {
                           addSuffix: true,
@@ -613,7 +634,7 @@ export function MindMapDialog({
           {selectedNode ? (
             <Sheet open={true}>
               <div className="absolute top-0 right-0 bottom-0 z-20 flex w-[85vw] max-w-sm shrink-0 animate-in flex-col overflow-hidden bg-card shadow-2xl duration-250 slide-in-from-right sm:relative sm:w-80 sm:border-l sm:shadow-none">
-                <SheetHeader className="flex-row items-center justify-between border-b bg-muted/40 px-4 py-3.5 space-y-0">
+                <SheetHeader className="flex-row items-center justify-between space-y-0 border-b bg-muted/40 px-4 py-3.5">
                   <SheetTitle className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
                     Concept Details
                   </SheetTitle>
@@ -629,23 +650,26 @@ export function MindMapDialog({
                 </SheetHeader>
 
                 <ScrollArea className="min-h-0 flex-1">
-                  <FieldGroup className="p-4 gap-6">
+                  <FieldGroup className="gap-6 p-4">
                     <Field>
                       <div className="flex flex-col gap-3">
                         <Badge
                           variant="outline"
                           className={cn(
-                            "w-fit border-none px-2 uppercase text-[10px] font-semibold",
-                            selectedNode.type === "root" && "bg-slate-900 text-slate-200",
-                            selectedNode.type === "main" && "bg-blue-950 text-blue-400",
-                            selectedNode.type === "sub" && "bg-emerald-950 text-emerald-400"
+                            "w-fit border-none px-2 text-[10px] font-semibold uppercase",
+                            selectedNode.type === "root" &&
+                              "bg-slate-900 text-slate-200",
+                            selectedNode.type === "main" &&
+                              "bg-blue-950 text-blue-400",
+                            selectedNode.type === "sub" &&
+                              "bg-emerald-950 text-emerald-400"
                           )}
                         >
                           {selectedNode.type === "root" && "Central Topic"}
                           {selectedNode.type === "main" && "Core Concept"}
                           {selectedNode.type === "sub" && "Concept Detail"}
                         </Badge>
-                        <h3 className="text-base font-bold text-foreground leading-snug">
+                        <h3 className="text-base leading-snug font-bold text-foreground">
                           {selectedNode.label}
                         </h3>
                       </div>
@@ -672,7 +696,9 @@ export function MindMapDialog({
                           {selectedNodeRelationships.map((r, i) => {
                             const isSource = r.source === selectedNodeId
                             const partnerId = isSource ? r.target : r.source
-                            const partner = graphData?.nodes.find((n) => n.id === partnerId)
+                            const partner = graphData?.nodes.find(
+                              (n) => n.id === partnerId
+                            )
                             if (!partner) return null
                             return (
                               <button
@@ -682,7 +708,9 @@ export function MindMapDialog({
                               >
                                 <div className="min-w-0 flex-1">
                                   <div className="truncate text-[9px] font-semibold text-orange-500">
-                                    {isSource ? "leads to ->" : "<- relates from"}
+                                    {isSource
+                                      ? "leads to ->"
+                                      : "<- relates from"}
                                   </div>
                                   <div className="mt-0.5 truncate font-medium text-foreground group-hover:text-primary">
                                     {partner.label}
@@ -764,7 +792,7 @@ function MindMapCanvasNode({ id, data }: NodeProps<MindMapFlowNode>) {
           <button
             type="button"
             className={cn(
-              "nodrag nopan cursor-pointer flex size-6 shrink-0 items-center justify-center rounded-full border transition-colors",
+              "nodrag nopan flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border transition-colors",
               data.variant === "root" &&
                 "border-slate-300 bg-white/70 text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200",
               data.variant === "main" &&
@@ -846,13 +874,17 @@ function MindMapFlowCanvas({
 
   // Local node state allows React Flow to track drag positions.
   // Sync from the computed flowNodes whenever the layout changes (expand/collapse resets positions).
-  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<MindMapFlowNode>(flowNodes)
+  const [rfNodes, setRfNodes, onNodesChange] =
+    useNodesState<MindMapFlowNode>(flowNodes)
   useEffect(() => {
     setRfNodes(flowNodes)
   }, [flowNodes, setRfNodes])
 
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
-  const reactFlowRef = useRef<ReactFlowInstance<MindMapFlowNode, MindMapFlowEdge> | null>(null)
+  const reactFlowRef = useRef<ReactFlowInstance<
+    MindMapFlowNode,
+    MindMapFlowEdge
+  > | null>(null)
   const flowCanvasRef = useRef<HTMLDivElement | null>(null)
   const lastFitMapIdRef = useRef<string | null>(null)
   const lastDimensionsRef = useRef({ width: 800, height: 600 })
@@ -869,9 +901,12 @@ function MindMapFlowCanvas({
 
   // Stable MindMapActions object — same reference for the lifetime of this
   // component. Context consumers won't re-render when callbacks change.
-  const stableActions = useMemo<MindMapActions>(() => ({
-    toggle: (id) => toggleRef.current(id),
-  }), [])
+  const stableActions = useMemo<MindMapActions>(
+    () => ({
+      toggle: (id) => toggleRef.current(id),
+    }),
+    []
+  )
 
   const containerRef = useCallback((node: HTMLDivElement | null) => {
     if (resizeObserverRef.current) {
@@ -913,7 +948,10 @@ function MindMapFlowCanvas({
   )
 
   const resetView = useCallback(() => {
-    void reactFlowRef.current?.setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 260 })
+    void reactFlowRef.current?.setViewport(
+      { x: 0, y: 0, zoom: 1 },
+      { duration: 260 }
+    )
   }, [])
 
   const zoomIn = useCallback(() => {
@@ -935,7 +973,8 @@ function MindMapFlowCanvas({
 
     if (
       flowNodes.length > 0 &&
-      (lastFitMapIdRef.current !== (activeMapId ?? "new") || dimensionsChangedFromDefault)
+      (lastFitMapIdRef.current !== (activeMapId ?? "new") ||
+        dimensionsChangedFromDefault)
     ) {
       const t = window.setTimeout(() => {
         fitToNodes()
@@ -958,7 +997,12 @@ function MindMapFlowCanvas({
 
   // Focus selected node
   useEffect(() => {
-    if (!selectedNodeId || pendingFocusNodeIds?.length || !graphData?.nodes?.length) return
+    if (
+      !selectedNodeId ||
+      pendingFocusNodeIds?.length ||
+      !graphData?.nodes?.length
+    )
+      return
     const node = graphData.nodes.find((n) => n.id === selectedNodeId)
     if (!node) return
 
@@ -967,13 +1011,20 @@ function MindMapFlowCanvas({
     if (node.type === "sub" && node.parentId) {
       focusIds.push(node.parentId)
     } else if (!isMobile && node.type === "main") {
-      const root = graphData.nodes.find((n) => n.type === "root") ?? graphData.nodes[0]
+      const root =
+        graphData.nodes.find((n) => n.type === "root") ?? graphData.nodes[0]
       if (root) focusIds.push(root.id)
     }
 
     const t = window.setTimeout(() => fitToNodes(focusIds), 80)
     return () => window.clearTimeout(t)
-  }, [dimensions.width, fitToNodes, graphData, pendingFocusNodeIds, selectedNodeId])
+  }, [
+    dimensions.width,
+    fitToNodes,
+    graphData,
+    pendingFocusNodeIds,
+    selectedNodeId,
+  ])
 
   // -------------------------------------------------------------------------
   // Export helpers
@@ -1035,7 +1086,9 @@ function MindMapFlowCanvas({
                 onInit={(instance) => {
                   reactFlowRef.current = instance
                 }}
-                onNodesChange={(changes: NodeChange<MindMapFlowNode>[]) => onNodesChange(changes)}
+                onNodesChange={(changes: NodeChange<MindMapFlowNode>[]) =>
+                  onNodesChange(changes)
+                }
                 onPaneClick={() => setSelectedNodeId(null)}
                 onNodeClick={(_, node) => onSelectNode(node.id)}
                 nodesDraggable={true}
@@ -1068,7 +1121,9 @@ function MindMapFlowCanvas({
                 <Input
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={dimensions.width < 640 ? "Search..." : "Search concepts..."}
+                  placeholder={
+                    dimensions.width < 640 ? "Search..." : "Search concepts..."
+                  }
                   className="h-9 w-full border-border bg-background/95 pr-8 pl-9 text-xs text-foreground shadow-lg backdrop-blur focus-visible:ring-primary"
                 />
                 {searchQuery && (
@@ -1107,10 +1162,26 @@ function MindMapFlowCanvas({
           {/* Zoom controls */}
           <div className="pointer-events-none absolute inset-x-0 bottom-4 left-4 z-10 flex">
             <div className="pointer-events-auto flex gap-1 rounded-lg border border-border bg-background/90 p-1 shadow-lg backdrop-blur">
-              <TooltipIconButton icon={<ZoomInIcon className="size-4" />} onClick={zoomIn} label="Zoom In" />
-              <TooltipIconButton icon={<ZoomOutIcon className="size-4" />} onClick={zoomOut} label="Zoom Out" />
-              <TooltipIconButton icon={<Maximize2Icon className="size-4" />} onClick={() => fitToNodes()} label="Fit Canvas" />
-              <TooltipIconButton icon={<Minimize2Icon className="size-4" />} onClick={resetView} label="Reset View" />
+              <TooltipIconButton
+                icon={<ZoomInIcon className="size-4" />}
+                onClick={zoomIn}
+                label="Zoom In"
+              />
+              <TooltipIconButton
+                icon={<ZoomOutIcon className="size-4" />}
+                onClick={zoomOut}
+                label="Zoom Out"
+              />
+              <TooltipIconButton
+                icon={<Maximize2Icon className="size-4" />}
+                onClick={() => fitToNodes()}
+                label="Fit Canvas"
+              />
+              <TooltipIconButton
+                icon={<Minimize2Icon className="size-4" />}
+                onClick={resetView}
+                label="Reset View"
+              />
             </div>
           </div>
         </>
@@ -1121,8 +1192,8 @@ function MindMapFlowCanvas({
               Mind map data is incomplete
             </h3>
             <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-              This saved output does not contain renderable nodes. Generate a new
-              mind map or open another saved version.
+              This saved output does not contain renderable nodes. Generate a
+              new mind map or open another saved version.
             </p>
             {onGenerateNew ? (
               <Button
