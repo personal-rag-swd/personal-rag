@@ -116,7 +116,9 @@ export function StudioPanel({
     <div
       className={cn(
         "flex h-full min-h-0 flex-col bg-card transition-all duration-300",
-        isCollapsed ? "w-14 shrink-0 items-center justify-between py-2" : ""
+        isCollapsed
+          ? "w-14 shrink-0 items-center justify-between py-2"
+          : "overflow-y-auto scrollbar-none"
       )}
     >
       {isCollapsed ? (
@@ -133,7 +135,7 @@ export function StudioPanel({
               <TooltipContent side="left">Expand panel</TooltipContent>
             </Tooltip>
 
-            <div className="min-h-0 w-full flex-1 overflow-y-auto [&::-webkit-scrollbar]:hidden [& scrollbar-width-none]">
+            <div className="min-h-0 w-full flex-1 overflow-y-auto scrollbar-none">
               <div className="flex flex-col items-center gap-2.5 px-2">
                 {STUDIO_ACTIONS.map((action) => {
                   const ActionIcon = action.icon
@@ -232,7 +234,7 @@ export function StudioPanel({
                 <p className="px-4 pt-3 pb-1 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
                   Saved outputs
                 </p>
-                <div className="min-h-0 flex-1 overflow-y-auto [&::-webkit-scrollbar]:hidden [& scrollbar-width-none]">
+                <div className="min-h-0 flex-1 overflow-y-auto scrollbar-none">
                   <ItemGroup className="px-3 pt-3 pb-3">
                     {isMindMapGenerating && (
                       <Item
