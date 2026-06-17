@@ -195,6 +195,67 @@ def test_notebook_chat_endpoint_persists_message_history(
     assert ModelMessagesTypeAdapter.validate_python(stored_messages) == messages
 
 
+def test_notebook_chat_endpoint_persists_user_turn_from_request(
+    client: TestClient,
+    settings: Settings,
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: AG-UI forwards the user message as ``message_history`` only, so
+    ``result.new_messages()`` contains just the assistant response. The user turn
+    must still be persisted (captured from the request body) so it survives a reload.
+    """
+    user = make_user("userturn@example.com")
+    session.add(user)
+    session.commit()
+
+    headers = auth_headers(user, settings)
+    created = client.post(
+        "/api/v1/notebooks/",
+        json={"name": "Chat", "description": "", "tags": []},
+        headers=headers,
+    ).json()
+
+    # Mimic real AG-UI: new_messages() holds ONLY the generated assistant response.
+    assistant_only = [ModelResponse(parts=[TextPart(content="Here is the answer.")])]
+
+    async def fake_dispatch_request(
+        request: object, agent: object, **kwargs: Any
+    ) -> Response:
+        await kwargs["on_complete"](FakeRunResult(assistant_only))
+        return Response(content="ok", media_type="text/plain")
+
+    monkeypatch.setattr(AGUIAdapter, "dispatch_request", fake_dispatch_request)
+
+    response = client.post(
+        f"/api/v1/notebooks/{created['id']}/chat",
+        json={
+            "messages": [
+                {"id": "m1", "role": "user", "content": "What is in this notebook?"}
+            ]
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200
+
+    notebook_id = UUID(created["id"])
+    stored_messages = list(
+        session.exec(
+            select(NotebookMessage.message)
+            .where(NotebookMessage.notebook_id == notebook_id)
+            .order_by(NotebookMessage.seq.asc())
+        ).all()
+    )
+    restored = ModelMessagesTypeAdapter.validate_python(stored_messages)
+    assert len(restored) == 2
+    assert isinstance(restored[0], ModelRequest)
+    user_parts = [p for p in restored[0].parts if isinstance(p, UserPromptPart)]
+    assert [p.content for p in user_parts] == ["What is in this notebook?"]
+    assert isinstance(restored[1], ModelResponse)
+    text_parts = [p for p in restored[1].parts if isinstance(p, TextPart)]
+    assert [p.content for p in text_parts] == ["Here is the answer."]
+
+
 def test_notebook_chat_endpoint_loads_existing_message_history(
     client: TestClient,
     settings: Settings,

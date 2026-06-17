@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import HTTPException, status
 from pydantic_ai import ModelMessage, ModelMessagesTypeAdapter
-from pydantic_ai.messages import ModelRequest, ModelResponse
+from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart
 from pydantic_core import to_jsonable_python
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session, delete, select
@@ -109,6 +109,43 @@ def append_notebook_chat_history(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
         ) from exc
     return notebook
+
+
+def build_user_message_from_agui_payload(
+    payload: object,
+) -> ModelRequest | None:
+    """Extract the latest user turn from an AG-UI chat request body.
+
+    The AG-UI adapter passes incoming messages to the agent as ``message_history``
+    rather than as a fresh prompt, so they are excluded from
+    ``AgentRunResult.new_messages()``. We therefore reconstruct the user's new
+    message from the request payload so it can be persisted alongside the
+    assistant response. Returns ``None`` when no user text is present (e.g. an
+    empty ``messages`` array).
+    """
+    if not isinstance(payload, dict):
+        return None
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return None
+
+    for message in reversed(messages):
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        content = message.get("content")
+        text = ""
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            text = "".join(
+                part.get("text", "")
+                for part in content
+                if isinstance(part, dict) and part.get("type") == "text"
+            )
+        if text.strip():
+            return ModelRequest(parts=[UserPromptPart(content=text)])
+        return None
+    return None
 
 
 def parse_chunks_from_context_block(block: str) -> list[dict[str, object]]:
