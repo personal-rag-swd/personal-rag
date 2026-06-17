@@ -1,12 +1,12 @@
 import type { LucideIcon } from "lucide-react"
 import {
-  AudioLinesIcon,
+  // AudioLinesIcon, // TODO: dùng lại khi code Audio Overview
   BarChart3Icon,
   BrainCircuitIcon,
   FileQuestionIcon,
-  LayoutPanelTopIcon,
+  // LayoutPanelTopIcon, // TODO: dùng lại khi code Slide Deck
   SquareStackIcon,
-  VideoIcon,
+  // VideoIcon, // TODO: dùng lại khi code Video Draft
 } from "lucide-react"
 
 export type StudioAction = {
@@ -32,27 +32,28 @@ const ALL_STUDIO_ACTIONS: StudioAction[] = [
     icon: BarChart3Icon,
     implemented: true,
   },
-  {
-    id: "audio-overview",
-    label: "Audio Overview",
-    description: "Narrated summary",
-    icon: AudioLinesIcon,
-    implemented: false,
-  },
-  {
-    id: "slide-deck",
-    label: "Slide Deck",
-    description: "Notes into slides",
-    icon: LayoutPanelTopIcon,
-    implemented: false,
-  },
-  {
-    id: "video-draft",
-    label: "Video Draft",
-    description: "Video outline",
-    icon: VideoIcon,
-    implemented: false,
-  },
+  // TODO: Chưa code — tạm ẩn các tính năng này
+  // {
+  //   id: "audio-overview",
+  //   label: "Audio Overview",
+  //   description: "Narrated summary",
+  //   icon: AudioLinesIcon,
+  //   implemented: false,
+  // },
+  // {
+  //   id: "slide-deck",
+  //   label: "Slide Deck",
+  //   description: "Notes into slides",
+  //   icon: LayoutPanelTopIcon,
+  //   implemented: false,
+  // },
+  // {
+  //   id: "video-draft",
+  //   label: "Video Draft",
+  //   description: "Video outline",
+  //   icon: VideoIcon,
+  //   implemented: false,
+  // },
   {
     id: "flashcards",
     label: "Flashcards",
