@@ -120,17 +120,17 @@ export function NotebookPage() {
               <TabsTrigger value="studio">Studio</TabsTrigger>
             </TabsList>
           </div>
-          <TabsContent value="sources" className="min-h-0 flex-1">
+          <TabsContent value="sources" className="flex min-h-0 flex-1 flex-col">
             <PanelCard title="Sources" hideHeaderBorder>
               <SourcesPanel notebookId={id} />
             </PanelCard>
           </TabsContent>
-          <TabsContent value="chat" className="min-h-0 flex-1">
+          <TabsContent value="chat" className="flex min-h-0 flex-1 flex-col">
             <PanelCard title="Chat" hideHeaderBorder>
               <ChatPanel notebookId={id} />
             </PanelCard>
           </TabsContent>
-          <TabsContent value="studio" className="min-h-0 flex-1">
+          <TabsContent value="studio" className="flex min-h-0 flex-1 flex-col">
             <PanelCard title="Studio" hideHeaderBorder>
               <StudioPanel
                 notebookId={id}
@@ -266,7 +266,9 @@ function PanelCard({
       >
         <CardTitle className="text-sm leading-none">{title}</CardTitle>
       </CardHeader>
-      <CardContent className="min-h-0 flex-1 px-0 flex flex-col">{children}</CardContent>
+      <CardContent className="flex min-h-0 flex-1 flex-col px-0">
+        {children}
+      </CardContent>
     </Card>
   )
 }

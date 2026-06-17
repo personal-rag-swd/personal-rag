@@ -577,10 +577,9 @@ export function useDeleteNotebookReportMutation(
   const queryClient = useQueryClient()
   return useMutation<void, Error>({
     mutationFn: async () => {
-      await apiFetch(
-        `/api/v1/notebooks/${notebookId}/reports/${reportId}`,
-        { method: "DELETE" }
-      )
+      await apiFetch(`/api/v1/notebooks/${notebookId}/reports/${reportId}`, {
+        method: "DELETE",
+      })
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({

@@ -187,7 +187,7 @@ const Composer: FC = () => {
           aria-label="Message input"
         />
         {textLength > 0 && (
-          <span className="text-[10px] text-muted-foreground/60 tabular-nums select-none shrink-0 px-1">
+          <span className="shrink-0 px-1 text-[10px] text-muted-foreground/60 tabular-nums select-none">
             {textLength} characters
           </span>
         )}
@@ -199,7 +199,7 @@ const Composer: FC = () => {
 
 const ComposerAction: FC = () => {
   return (
-    <div className="aui-composer-action-wrapper relative flex items-center shrink-0">
+    <div className="aui-composer-action-wrapper relative flex shrink-0 items-center">
       <AuiIf condition={(s) => !s.thread.isRunning}>
         <ComposerPrimitive.Send
           render={
