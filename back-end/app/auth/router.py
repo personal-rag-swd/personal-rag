@@ -92,7 +92,7 @@ async def create_registration(
     body: RegistrationCreate,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> Response:
-    await start_registration(str(body.email), body.password, settings)
+    await start_registration(body.email, body.password, settings)
     return Response(status_code=status.HTTP_202_ACCEPTED)
 
 
@@ -101,7 +101,7 @@ async def create_email_verification(
     body: EmailVerificationCreate,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> VerificationResponse:
-    await verify_registration_otp(str(body.email), body.otp, settings)
+    await verify_registration_otp(body.email, body.otp, settings)
     return VerificationResponse(success=True)
 
 

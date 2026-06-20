@@ -17,7 +17,14 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 from pydantic_ai.capabilities.process_history import ProcessHistory
-from pydantic_ai.messages import ModelMessage, ModelRequest
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    RetryPromptPart,
+    SystemPromptPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 from pydantic_ai.run import AgentRunResult
 from pydantic_ai.ui.ag_ui import AGUIAdapter
 
@@ -27,7 +34,11 @@ from app.notebooks.agent import (
     NotebookChatDeps,
     notebook_chat_agent,
 )
-from app.notebooks.events import event_bus
+from app.notebooks.events import (
+    build_document_snapshots,
+    build_report_snapshots,
+    event_bus,
+)
 from app.notebooks.memory import (
     append_notebook_chat_history,
     extract_notebook_chat_transcript,
@@ -70,6 +81,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/notebooks", tags=["Notebooks"])
 
+# Idle interval between SSE keep-alive comments on the events stream.
+SSE_PING_SECONDS = 30.0
+
 
 @router.get("/", response_model=list[NotebookRead])
 async def read_notebooks(
@@ -91,49 +105,25 @@ async def read_notebook_events(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> StreamingResponse:
     async def event_generator() -> AsyncIterator[str]:
-        docs = await NotebookDocument.find(
-            {"user_id": current_user.id}
-        ).to_list()
-        reports = await NotebookReport.find(
-            {"user_id": current_user.id}
-        ).to_list()
+        documents = await NotebookDocument.find({"user_id": current_user.id}).to_list()
+        reports = await NotebookReport.find({"user_id": current_user.id}).to_list()
 
-        by_notebook: dict[str, list] = {}
-        for doc in docs:
-            by_notebook.setdefault(str(doc.notebook_id), []).append(doc)
+        # Replay current state so a (re)connecting client is immediately in sync.
+        for event in (
+            *build_document_snapshots(documents),
+            *build_report_snapshots(reports),
+        ):
+            yield f"data: {json.dumps(event)}\n\n"
 
-        for notebook_id, notebook_docs in by_notebook.items():
-            serialized_docs = [
-                NotebookDocumentRead.model_validate(doc).model_dump(mode="json")
-                for doc in notebook_docs
-            ]
-            yield f"data: {json.dumps({'type': 'snapshot', 'notebook_id': notebook_id, 'documents': serialized_docs, 'timestamp': datetime.now(UTC).isoformat()})}\n\n"
-
-        reports_by_notebook: dict[str, list] = {}
-        for report in reports:
-            reports_by_notebook.setdefault(str(report.notebook_id), []).append(report)
-
-        for notebook_id, notebook_reports in reports_by_notebook.items():
-            serialized_reports = [
-                NotebookReportRead.model_validate(r).model_dump(mode="json")
-                for r in notebook_reports
-            ]
-            yield f"data: {json.dumps({'type': 'report_snapshot', 'notebook_id': notebook_id, 'reports': serialized_reports, 'timestamp': datetime.now(UTC).isoformat()})}\n\n"
-
-        q = event_bus.subscribe(current_user.id)
-        try:
+        async with event_bus.subscribe(current_user.id) as queue:
             while True:
                 try:
-                    event = await asyncio.wait_for(q.get(), timeout=30.0)
+                    event = await asyncio.wait_for(
+                        queue.get(), timeout=SSE_PING_SECONDS
+                    )
                     yield f"data: {json.dumps(event)}\n\n"
                 except TimeoutError:
-                    pass
-
-                yield ": ping\n\n"
-        except asyncio.CancelledError:
-            pass
-        finally:
-            event_bus.unsubscribe(current_user.id, q)
+                    yield ": ping\n\n"  # keep-alive comment; ignored by EventSource
 
     return StreamingResponse(
         event_generator(),
@@ -287,7 +277,7 @@ async def chat_notebook_route(
     )
 
     async def persist_chat_history(result: AgentRunResult[object]) -> None:
-        all_new = result.all_messages()[len(message_history):]
+        all_new = result.all_messages()[len(message_history) :]
         await append_notebook_chat_history(notebook, all_new)
 
     async def keep_recent(messages: list[ModelMessage]) -> list[ModelMessage]:
@@ -296,13 +286,15 @@ async def chat_notebook_route(
         for msg in messages:
             is_system = False
             if isinstance(msg, ModelRequest):
-                part_names = {type(part).__name__ for part in msg.parts}
-                if "SystemPromptPart" in part_names or (
-                    msg.instructions
-                    and not (
-                        part_names
-                        & {"UserPromptPart", "ToolReturnPart", "RetryPromptPart"}
-                    )
+                has_system_part = any(
+                    isinstance(part, SystemPromptPart) for part in msg.parts
+                )
+                has_conversational_part = any(
+                    isinstance(part, (UserPromptPart, ToolReturnPart, RetryPromptPart))
+                    for part in msg.parts
+                )
+                if has_system_part or (
+                    msg.instructions and not has_conversational_part
                 ):
                     is_system = True
 
@@ -364,9 +356,11 @@ async def read_document_chunks(
             status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
         )
 
-    chunks = await NotebookDocumentChunk.find(
-        {"document_id": document.id}
-    ).sort(("chunk_index", 1)).to_list()
+    chunks = (
+        await NotebookDocumentChunk.find({"document_id": document.id})
+        .sort(("chunk_index", 1))
+        .to_list()
+    )
 
     return [
         {
@@ -398,9 +392,11 @@ async def read_document_chunks_by_id(
             status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
         )
 
-    chunks = await NotebookDocumentChunk.find(
-        {"document_id": document.id}
-    ).sort(("chunk_index", 1)).to_list()
+    chunks = (
+        await NotebookDocumentChunk.find({"document_id": document.id})
+        .sort(("chunk_index", 1))
+        .to_list()
+    )
 
     return [
         {
@@ -581,7 +577,11 @@ async def delete_notebook_report(
             try:
                 doc_id = UUID(doc_id_str)
                 document = await NotebookDocument.find_one(
-                    {"_id": doc_id, "notebook_id": notebook.id, "user_id": current_user.id},
+                    {
+                        "_id": doc_id,
+                        "notebook_id": notebook.id,
+                        "user_id": current_user.id,
+                    },
                 )
                 if document:
                     await NotebookDocumentChunk.find(
@@ -602,9 +602,13 @@ async def list_notebook_reports(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> list:
     notebook = await get_notebook(notebook_id, current_user)
-    return await NotebookReport.find(
-        {"notebook_id": notebook.id, "user_id": current_user.id},
-    ).sort(("created_at", -1)).to_list()
+    return (
+        await NotebookReport.find(
+            {"notebook_id": notebook.id, "user_id": current_user.id},
+        )
+        .sort(("created_at", -1))
+        .to_list()
+    )
 
 
 @router.get("/{notebook_id}/reports/{report_id}", response_model=NotebookReportRead)

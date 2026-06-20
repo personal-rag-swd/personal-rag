@@ -10,7 +10,7 @@ from app.core.llm_provider import (
     chat_provider_is_configured,
     resolve_chat_provider,
 )
-from app.notebooks.models import Notebook, NotebookDocumentChunk
+from app.notebooks.models import Notebook, NotebookDocument, NotebookDocumentChunk
 from app.users.models import User
 
 
@@ -83,21 +83,24 @@ async def search_notebook_chunks(
 
     results = await NotebookDocumentChunk.aggregate(pipeline).to_list()
 
-    doc_ids = {r["document_id"] for r in results}
-    from app.notebooks.models import NotebookDocument as ND
-
-    docs = await ND.find(
-        {ND.id: {"$in": [UUID(did) if isinstance(did, str) else did for did in doc_ids]}}
-    ).to_list()
-    doc_map = {str(d.id): d.filename for d in docs}
-
-    return [
+    # Raw aggregate rows carry document_id as a BSON value; RetrievedChunk's
+    # ``UUID`` field coerces it so the downstream lookup uses real UUIDs.
+    chunks = [
         RetrievedChunk(
-            document_id=r["document_id"],
-            filename=doc_map.get(str(r["document_id"]), "unknown"),
-            chunk_index=r["chunk_index"],
-            content=r["content"],
-            metadata=r.get("chunk_metadata", {}),
+            document_id=row["document_id"],
+            filename="",
+            chunk_index=row["chunk_index"],
+            content=row["content"],
+            metadata=row.get("chunk_metadata", {}),
         )
-        for r in results
+        for row in results
     ]
+
+    doc_ids = {chunk.document_id for chunk in chunks}
+    documents = await NotebookDocument.find({"_id": {"$in": list(doc_ids)}}).to_list()
+    filename_by_id = {document.id: document.filename for document in documents}
+
+    for chunk in chunks:
+        chunk.filename = filename_by_id.get(chunk.document_id, "unknown")
+
+    return chunks

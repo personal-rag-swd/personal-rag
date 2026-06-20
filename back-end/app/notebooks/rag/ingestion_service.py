@@ -470,7 +470,7 @@ async def ingest_document_by_id(
         client = s3_client or get_s3_client(settings)
         await _run_document_ingestion(document, settings, client)
     except Exception as exc:
-        if isinstance(exc, (ClientError)):
+        if isinstance(exc, ClientError):
             logger.exception(
                 "Notebook document ingestion hit a transient error for %s", document_id
             )

@@ -14,7 +14,7 @@ settings = get_settings()
 setup_telemetry(settings)
 
 log_level_name = settings.log_level.strip().upper()
-log_level_value = getattr(logging, log_level_name, logging.INFO)
+log_level_value = logging.getLevelNamesMapping().get(log_level_name, logging.INFO)
 
 logging.basicConfig(
     level=log_level_value,
@@ -98,9 +98,7 @@ async def _recover_pending_reports() -> None:
                     report.id,
                 )
                 report.status = "failed"
-                report.error_message = (
-                    "Recovery failed: no indexed documents found."
-                )
+                report.error_message = "Recovery failed: no indexed documents found."
                 await report.save()
                 continue
 
@@ -115,9 +113,7 @@ async def _recover_pending_reports() -> None:
             )
             _recovered_tasks.add(task)
             task.add_done_callback(_recovered_tasks.discard)
-            logger.info(
-                "Re-queued report %s (type=%s)", report.id, report.report_type
-            )
+            logger.info("Re-queued report %s (type=%s)", report.id, report.report_type)
     except Exception:
         logger.exception("Failed to recover pending reports")
 

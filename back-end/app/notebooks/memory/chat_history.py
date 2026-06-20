@@ -4,7 +4,15 @@ from datetime import UTC, datetime
 from typing import Any
 
 from pydantic_ai import ModelMessage, ModelMessagesTypeAdapter
-from pydantic_ai.messages import ModelRequest, ModelResponse
+from pydantic_ai.messages import (
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    ThinkingPart,
+    ToolCallPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 from pydantic_core import to_jsonable_python
 
 from app.notebooks.models import Notebook, NotebookMessage
@@ -20,9 +28,11 @@ CITATION_PATTERN = re.compile(
 async def load_notebook_chat_history(
     notebook: Notebook,
 ) -> list[ModelMessage]:
-    messages = await NotebookMessage.find(
-        {"notebook_id": notebook.id}
-    ).sort(("seq", 1)).to_list()
+    messages = (
+        await NotebookMessage.find({"notebook_id": notebook.id})
+        .sort(("seq", 1))
+        .to_list()
+    )
     rows = [msg.message for msg in messages]
     return list(ModelMessagesTypeAdapter.validate_python(rows))
 
@@ -37,9 +47,11 @@ async def append_notebook_chat_history(
     now = datetime.now(UTC)
     jsonable_new_messages = to_jsonable_python(new_messages)
 
-    last = await NotebookMessage.find(
-        {"notebook_id": notebook.id}
-    ).sort(("seq", -1)).first_or_none()
+    last = (
+        await NotebookMessage.find({"notebook_id": notebook.id})
+        .sort(("seq", -1))
+        .first_or_none()
+    )
     max_seq = last.seq if last else 0
 
     for idx, message in enumerate(jsonable_new_messages, start=max_seq + 1):
@@ -81,8 +93,7 @@ async def extract_notebook_chat_transcript(
             user_chunks = [
                 part.content
                 for part in message.parts
-                if getattr(part, "part_kind", "") == "user-prompt"
-                and isinstance(getattr(part, "content", None), str)
+                if isinstance(part, UserPromptPart) and isinstance(part.content, str)
             ]
             if user_chunks:
                 transcript.append(
@@ -102,8 +113,7 @@ async def extract_notebook_chat_transcript(
                 reasoning_chunks = [
                     part.content
                     for part in message.parts
-                    if getattr(part, "part_kind", "") == "thinking"
-                    and isinstance(getattr(part, "content", None), str)
+                    if isinstance(part, ThinkingPart)
                 ]
                 if reasoning_chunks:
                     parts.append(
@@ -114,21 +124,20 @@ async def extract_notebook_chat_transcript(
                     )
 
             for part in message.parts:
-                if getattr(part, "part_kind", "") == "tool-call":
-                    tool_name = getattr(part, "tool_name", "")
-                    tool_call_id = getattr(part, "tool_call_id", "")
-                    args = getattr(part, "args", "")
+                if isinstance(part, ToolCallPart):
+                    tool_name = part.tool_name
+                    tool_call_id = part.tool_call_id
+                    args = part.args
 
                     tool_result = None
                     for next_msg in messages[idx + 1 :]:
                         if isinstance(next_msg, ModelRequest):
                             for r_part in next_msg.parts:
                                 if (
-                                    getattr(r_part, "part_kind", "") == "tool-return"
-                                    and getattr(r_part, "tool_call_id", "")
-                                    == tool_call_id
+                                    isinstance(r_part, ToolReturnPart)
+                                    and r_part.tool_call_id == tool_call_id
                                 ):
-                                    tool_result = getattr(r_part, "content", None)
+                                    tool_result = r_part.content
                                     break
                             if tool_result is not None:
                                 break
@@ -151,10 +160,7 @@ async def extract_notebook_chat_transcript(
                     )
 
             assistant_chunks = [
-                part.content
-                for part in message.parts
-                if getattr(part, "part_kind", "") == "text"
-                and isinstance(getattr(part, "content", None), str)
+                part.content for part in message.parts if isinstance(part, TextPart)
             ]
             if assistant_chunks:
                 parts.append(
@@ -175,11 +181,10 @@ async def extract_notebook_chat_transcript(
                     if isinstance(prev_msg, ModelRequest):
                         for part in prev_msg.parts:
                             if (
-                                getattr(part, "part_kind", "") == "tool-return"
-                                and getattr(part, "tool_name", "")
-                                == "search_notebook_context"
+                                isinstance(part, ToolReturnPart)
+                                and part.tool_name == "search_notebook_context"
                             ):
-                                content_str = str(getattr(part, "content", ""))
+                                content_str = str(part.content)
                                 sources.extend(
                                     parse_chunks_from_context_block(content_str)
                                 )

@@ -13,18 +13,18 @@ from app.core.config import get_settings
 
 @lru_cache(maxsize=1)
 def _get_openrouter_model() -> Model:
-
     settings = get_settings()
     provider = OpenRouterProvider(api_key=settings.chat_api_key)
     model = OpenRouterModel(settings.chat_model, provider=provider)
 
     # Disable forced tool choice (required) to maximize compatibility with various
-    # open-source models hosted on OpenRouter that only support tool_choice='auto'
-    if hasattr(model, "profile") and isinstance(model.profile, OpenAIModelProfile):
-        new_profile = replace(model.profile, openai_supports_tool_choice_required=False)
-        model.__dict__["profile"] = new_profile
-        if hasattr(model, "_profile"):
-            model._profile = new_profile
+    # open-source models hosted on OpenRouter that only support tool_choice='auto'.
+    # ``Model.profile`` is a writable cached_property (pydantic-ai assigns to it
+    # internally), so we override it through the public attribute.
+    if isinstance(model.profile, OpenAIModelProfile):
+        model.profile = replace(
+            model.profile, openai_supports_tool_choice_required=False
+        )
 
     return model
 

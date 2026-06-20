@@ -2,7 +2,6 @@ import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
-from beanie.odm.operators.find.comparison import In
 from fastapi import HTTPException, status
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelRequest
@@ -32,6 +31,7 @@ from app.notebooks.schemas import (
     FlashcardReport,
     MindMapReport,
     NotebookCreate,
+    NotebookPopulateRead,
     NotebookUpdate,
     QuizReport,
     StudyGuideReport,
@@ -42,11 +42,11 @@ _logger = logging.getLogger(__name__)
 
 
 async def list_notebooks(current_user: User) -> list[Notebook]:
-    return await Notebook.find(
-        {"user_id": current_user.id}
-    ).sort(
-        ("last_active_at", -1), ("created_at", -1)
-    ).to_list()
+    return (
+        await Notebook.find({"user_id": current_user.id})
+        .sort(("last_active_at", -1), ("created_at", -1))
+        .to_list()
+    )
 
 
 async def get_notebook(notebook_id: UUID, current_user: User) -> Notebook:
@@ -65,9 +65,13 @@ async def list_notebook_documents(
     current_user: User,
 ) -> list[NotebookDocument]:
     notebook = await get_notebook(notebook_id, current_user)
-    return await NotebookDocument.find(
-        {"notebook_id": notebook.id, "user_id": current_user.id},
-    ).sort(("created_at", -1)).to_list()
+    return (
+        await NotebookDocument.find(
+            {"notebook_id": notebook.id, "user_id": current_user.id},
+        )
+        .sort(("created_at", -1))
+        .to_list()
+    )
 
 
 async def delete_notebook_document(
@@ -84,9 +88,7 @@ async def delete_notebook_document(
             status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
         )
 
-    await NotebookDocumentChunk.find(
-        {"document_id": document.id}
-    ).delete()
+    await NotebookDocumentChunk.find({"document_id": document.id}).delete()
 
     note_reports = await NotebookReport.find(
         {"notebook_id": notebook.id, "user_id": current_user.id, "report_type": "note"},
@@ -100,9 +102,7 @@ async def delete_notebook_document(
     await document.delete()
 
 
-async def create_notebook(
-    payload: NotebookCreate, current_user: User
-) -> Notebook:
+async def create_notebook(payload: NotebookCreate, current_user: User) -> Notebook:
     notebook = Notebook(
         user_id=current_user.id,
         name=payload.name,
@@ -138,31 +138,24 @@ async def touch_notebook(notebook_id: UUID, current_user: User) -> Notebook:
 
 async def populate_notebook_metrics(
     notebook_id: UUID, current_user: User
-) -> Notebook:
+) -> NotebookPopulateRead:
     notebook = await get_notebook(notebook_id, current_user)
     doc_count = await NotebookDocument.find(
         {"notebook_id": notebook.id, "user_id": current_user.id},
     ).count()
     messages = await load_notebook_chat_history(notebook)
     query_count = sum(1 for message in messages if isinstance(message, ModelRequest))
-    notebook.__dict__["document_count"] = doc_count
-    notebook.__dict__["query_count"] = query_count
-    return notebook
+    metrics = NotebookPopulateRead.model_validate(notebook, from_attributes=True)
+    metrics.document_count = doc_count
+    metrics.query_count = query_count
+    return metrics
 
 
 async def _delete_notebook_child_documents(notebook_id: UUID) -> None:
-    await NotebookMessage.find(
-        {"notebook_id": notebook_id}
-    ).delete()
-    await NotebookDocument.find(
-        {"notebook_id": notebook_id}
-    ).delete()
-    await NotebookDocumentChunk.find(
-        {"notebook_id": notebook_id}
-    ).delete()
-    await NotebookReport.find(
-        {"notebook_id": notebook_id}
-    ).delete()
+    await NotebookMessage.find({"notebook_id": notebook_id}).delete()
+    await NotebookDocument.find({"notebook_id": notebook_id}).delete()
+    await NotebookDocumentChunk.find({"notebook_id": notebook_id}).delete()
+    await NotebookReport.find({"notebook_id": notebook_id}).delete()
 
 
 async def delete_notebook(notebook_id: UUID, current_user: User) -> None:
@@ -174,12 +167,18 @@ async def delete_notebook(notebook_id: UUID, current_user: User) -> None:
 _REPORT_CONTEXT_CHAR_LIMIT = 120_000
 
 
-async def build_report_context(
-    notebook: Notebook, current_user: User
-) -> str:
-    documents = await NotebookDocument.find(
-        {"notebook_id": notebook.id, "user_id": current_user.id, "status": "indexed"},
-    ).sort(("filename", 1)).to_list()
+async def build_report_context(notebook: Notebook, current_user: User) -> str:
+    documents = (
+        await NotebookDocument.find(
+            {
+                "notebook_id": notebook.id,
+                "user_id": current_user.id,
+                "status": "indexed",
+            },
+        )
+        .sort(("filename", 1))
+        .to_list()
+    )
 
     if not documents:
         return ""
@@ -187,9 +186,11 @@ async def build_report_context(
     doc_map = {str(d.id): d.filename for d in documents}
     doc_ids = [d.id for d in documents]
 
-    chunks = await NotebookDocumentChunk.find(
-        In(NotebookDocumentChunk.document_id, doc_ids)
-    ).sort(("chunk_index", 1)).to_list()
+    chunks = (
+        await NotebookDocumentChunk.find({"document_id": {"$in": doc_ids}})
+        .sort(("chunk_index", 1))
+        .to_list()
+    )
 
     parts: list[str] = []
     total = 0
@@ -280,7 +281,9 @@ async def run_report_generation(
             if exc.status_code == 429:
                 report.error_message = "The AI provider rate limit was exceeded. Please wait a moment and try again."
             else:
-                report.error_message = "The AI provider failed to generate the report. Please try again."
+                report.error_message = (
+                    "The AI provider failed to generate the report. Please try again."
+                )
             report.updated_at = datetime.now(UTC)
             await report.save()
             await publish_report_event(report)

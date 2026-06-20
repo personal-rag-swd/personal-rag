@@ -7,7 +7,7 @@ from pydantic import Field
 
 
 class Notebook(Document):
-    id: UUID = Field(default_factory=uuid4)
+    id: UUID = Field(default_factory=uuid4) # type: ignore
     user_id: UUID
     name: str
     description: str = ""
@@ -40,7 +40,7 @@ class NotebookMessage(Document):
 
 
 class NotebookDocument(Document):
-    id: UUID = Field(default_factory=uuid4)
+    id: UUID = Field(default_factory=uuid4) # type: ignore
     notebook_id: UUID
     user_id: UUID
     s3_bucket: str | None = None
@@ -66,7 +66,7 @@ class NotebookDocument(Document):
 
 
 class NotebookDocumentChunk(Document):
-    id: UUID = Field(default_factory=uuid4)
+    id: UUID = Field(default_factory=uuid4) # type: ignore
     document_id: UUID
     notebook_id: UUID
     user_id: UUID

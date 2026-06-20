@@ -6,7 +6,7 @@ from pydantic import Field
 
 
 class User(Document):
-    id: UUID = Field(default_factory=uuid4)
+    id: UUID = Field(default_factory=uuid4) # type: ignore
     email: str
     hashed_password: str
     role: str = "user"
