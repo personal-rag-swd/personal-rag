@@ -6,6 +6,7 @@ from fastapi import HTTPException, status
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelRequest
 
+from app.core.event_bus import domain_event_bus
 from app.notebooks.agent.report_agents import (
     generate_blog_post,
     generate_briefing_doc,
@@ -15,7 +16,11 @@ from app.notebooks.agent.report_agents import (
     generate_quiz,
     generate_study_guide,
 )
-from app.notebooks.events import publish_report_event
+from app.notebooks.domain_events import (
+    ReportCompleted,
+    ReportFailed,
+    ReportGenerating,
+)
 from app.notebooks.memory import load_notebook_chat_history
 from app.notebooks.models import (
     Notebook,
@@ -221,7 +226,7 @@ async def run_report_generation(
     report.status = "generating"
     report.updated_at = datetime.now(UTC)
     await report.save()
-    await publish_report_event(report)
+    await domain_event_bus.emit(ReportGenerating(report))
 
     report = await NotebookReport.find_one({"_id": report_id})
     if report is None or report.status == "cancelled":
@@ -272,7 +277,7 @@ async def run_report_generation(
                 report.error_message = f"Unknown report type: {report_type}"
                 report.updated_at = datetime.now(UTC)
                 await report.save()
-                await publish_report_event(report)
+                await domain_event_bus.emit(ReportFailed(report))
                 return
     except ModelHTTPError as exc:
         report = await NotebookReport.find_one({"_id": report_id})
@@ -286,7 +291,7 @@ async def run_report_generation(
                 )
             report.updated_at = datetime.now(UTC)
             await report.save()
-            await publish_report_event(report)
+            await domain_event_bus.emit(ReportFailed(report))
         return
     except Exception:
         _logger.exception("Unexpected error during report generation")
@@ -298,7 +303,7 @@ async def run_report_generation(
             )
             report.updated_at = datetime.now(UTC)
             await report.save()
-            await publish_report_event(report)
+            await domain_event_bus.emit(ReportFailed(report))
         return
 
     report = await NotebookReport.find_one({"_id": report_id})
@@ -309,4 +314,4 @@ async def run_report_generation(
     report.content = report_content.model_dump()
     report.updated_at = datetime.now(UTC)
     await report.save()
-    await publish_report_event(report)
+    await domain_event_bus.emit(ReportCompleted(report))

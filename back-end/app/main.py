@@ -37,6 +37,7 @@ from scalar_fastapi import get_scalar_api_reference
 
 from app.auth.models import PendingRegistration, RefreshToken
 from app.auth.router import router as auth_router
+from app.event_listeners import register_default_event_listeners
 from app.file.router import router as file_router
 from app.notebooks.consumer import run_notebook_document_consumer
 from app.notebooks.models import (
@@ -143,6 +144,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     logger.info("  Chat Provider:      %s", settings.chat_provider.strip().upper())
     logger.info("  Chat Model:         %s", settings.chat_model)
     logger.info("============================================================")
+
+    # Wire domain-event listeners (SSE projection, audit, OTP email) before any
+    # producer runs so recovery and the ingestion consumer have somewhere to
+    # dispatch to.
+    register_default_event_listeners()
 
     consumer_task: asyncio.Task[None] | None = None
     if settings.rabbitmq_consumer_enabled:

@@ -29,11 +29,13 @@ from pydantic_ai.run import AgentRunResult
 from pydantic_ai.ui.ag_ui import AGUIAdapter
 
 from app.core.config import get_settings
+from app.core.event_bus import domain_event_bus
 from app.core.llm_provider import chat_provider_is_configured, resolve_chat_provider
 from app.notebooks.agent import (
     NotebookChatDeps,
     notebook_chat_agent,
 )
+from app.notebooks.domain_events import ReportCancelled
 from app.notebooks.events import (
     build_document_snapshots,
     build_report_snapshots,
@@ -551,6 +553,7 @@ async def cancel_notebook_report(
     report.status = "cancelled"
     report.updated_at = datetime.now(UTC)
     await report.save()
+    await domain_event_bus.emit(ReportCancelled(report))
     return report
 
 

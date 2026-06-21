@@ -7,8 +7,10 @@ from uuid import UUID
 import resend
 from fastapi import HTTPException, status
 
+from app.auth.domain_events import RegistrationRequested, RegistrationVerified
 from app.auth.models import PendingRegistration, RefreshToken
 from app.core.config import Settings
+from app.core.event_bus import domain_event_bus
 from app.core.security import create_access_token, hash_password, verify_password
 from app.users.models import User
 
@@ -70,7 +72,12 @@ async def start_registration(
         expires_at=datetime.now(UTC) + timedelta(minutes=settings.otp_expire_minutes),
     )
     try:
-        send_registration_otp(normalized_email, otp, settings)
+        # The OTP email is delivered by the (critical) RegistrationRequested
+        # listener; a delivery failure propagates here and is surfaced as a 502,
+        # so no pending registration is stored when the email cannot be sent.
+        await domain_event_bus.emit(
+            RegistrationRequested(email=normalized_email, otp=otp, settings=settings)
+        )
         await pending.insert()
     except Exception as exc:
         raise HTTPException(
@@ -124,6 +131,9 @@ async def verify_registration_otp(
     user = User(email=normalized_email, hashed_password=pending.hashed_password)
     await user.insert()
     await pending.delete()
+    await domain_event_bus.emit(
+        RegistrationVerified(user_id=user.id, email=normalized_email)
+    )
 
 
 async def authenticate_user(email: str, password: str) -> User:

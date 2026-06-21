@@ -10,8 +10,16 @@ from botocore.exceptions import ClientError
 from bson import Binary
 
 from app.core.config import Settings
+from app.core.event_bus import domain_event_bus
 from app.core.s3 import get_s3_client
-from app.notebooks.events import publish_document_event
+from app.notebooks.domain_events import (
+    DocumentFailed,
+    DocumentIndexed,
+    DocumentIndexing,
+    DocumentProcessing,
+    DocumentRegistered,
+    DocumentUploaded,
+)
 from app.notebooks.models import Notebook, NotebookDocument, NotebookDocumentChunk
 from app.notebooks.rag.document_chunker import ChunkingRequest, chunk_document
 from app.users.models import User
@@ -118,7 +126,7 @@ async def wait_for_atlas_vector_index(
     document.status = "indexing"
     document.updated_at = datetime.now(UTC)
     await document.save()
-    await publish_document_event(document)
+    await domain_event_bus.emit(DocumentIndexing(document))
 
     start_time = datetime.now(UTC)
     deadline = start_time + timedelta(seconds=wait_seconds)
@@ -173,7 +181,7 @@ async def _fail_stale_documents(
         doc.error_message = error_message
         doc.updated_at = now
         await doc.save()
-        await publish_document_event(doc)
+        await domain_event_bus.emit(DocumentFailed(doc))
     logger.warning(warning_log_template, len(stale_docs))
     return len(stale_docs)
 
@@ -223,7 +231,7 @@ async def register_pending_notebook_document(
         status="pending",
     )
     await document.insert()
-    await publish_document_event(document)
+    await domain_event_bus.emit(DocumentRegistered(document))
     return document
 
 
@@ -256,7 +264,7 @@ async def mark_pending_document_uploaded_if_object_exists(
     document.error_message = None
     document.updated_at = datetime.now(UTC)
     await document.save()
-    await publish_document_event(document)
+    await domain_event_bus.emit(DocumentUploaded(document))
     return True
 
 
@@ -322,7 +330,7 @@ async def claim_document_for_ingestion(
     if size is not None:
         document.size = size
     await document.save()
-    await publish_document_event(document, "document_update")
+    await domain_event_bus.emit(DocumentProcessing(document))
     return document
 
 
@@ -345,7 +353,7 @@ async def mark_document_upload_failed(
     )[:4000]
     document.updated_at = datetime.now(UTC)
     await document.save()
-    await publish_document_event(document)
+    await domain_event_bus.emit(DocumentFailed(document))
     return True
 
 
@@ -423,7 +431,7 @@ async def _run_document_ingestion(
     document.error_message = None
     document.updated_at = now
     await document.save()
-    await publish_document_event(document)
+    await domain_event_bus.emit(DocumentIndexed(document))
     logger.info(
         "Successfully ingested and indexed document %s (%d chunks).",
         document.filename,
@@ -464,7 +472,7 @@ async def ingest_document_by_id(
         document.error_message = None
         document.updated_at = datetime.now(UTC)
         await document.save()
-        await publish_document_event(document)
+        await domain_event_bus.emit(DocumentProcessing(document))
 
     try:
         client = s3_client or get_s3_client(settings)
@@ -480,7 +488,7 @@ async def ingest_document_by_id(
                 document.error_message = None
                 document.updated_at = datetime.now(UTC)
                 await document.save()
-                await publish_document_event(document)
+                await domain_event_bus.emit(DocumentUploaded(document))
             raise TransientIngestionError(str(exc)) from exc
         logger.exception("Notebook document ingestion failed for %s", document_id)
         document = await NotebookDocument.find_one({"_id": document_id})
@@ -489,4 +497,4 @@ async def ingest_document_by_id(
             document.error_message = str(exc)[:4000]
             document.updated_at = datetime.now(UTC)
             await document.save()
-            await publish_document_event(document)
+            await domain_event_bus.emit(DocumentFailed(document))

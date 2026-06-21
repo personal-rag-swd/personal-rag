@@ -22,6 +22,7 @@ from app.core.config import Settings, get_settings
 # Disable email sending in tests
 _auth_service.send_registration_otp = lambda *a, **kw: None
 from app.core.security import create_access_token
+from app.event_listeners import register_default_event_listeners
 from app.file.router import router as file_router
 from app.notebooks.models import (
     Notebook,
@@ -119,6 +120,7 @@ async def fixture_app(settings: Settings) -> AsyncGenerator[FastAPI]:
     )
     db = client.get_default_database()
     await init_beanie(database=db, document_models=DOCUMENT_MODELS)
+    register_default_event_listeners()
     app = make_test_app()
     app.dependency_overrides[get_settings] = lambda: settings
     yield app

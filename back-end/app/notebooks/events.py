@@ -165,21 +165,3 @@ class NotebookEventBus:
 
 
 event_bus = NotebookEventBus()
-
-# Backwards-compatible aliases for the bus's former name.
-DocumentEventBus = NotebookEventBus
-EventBus = NotebookEventBus
-
-
-async def publish_document_event(
-    document: Any, event_type: NotebookEventType = "document_update"
-) -> None:
-    await event_bus.publish(
-        document.user_id, build_document_event(document, event_type)
-    )
-
-
-async def publish_report_event(
-    report: Any, event_type: NotebookEventType = "report_update"
-) -> None:
-    await event_bus.publish(report.user_id, build_report_event(report, event_type))
