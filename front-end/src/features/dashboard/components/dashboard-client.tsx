@@ -41,6 +41,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   SearchIcon,
   PlusIcon,
   BookOpenIcon,
@@ -50,6 +57,7 @@ import {
   SparklesIcon,
   AlertCircleIcon,
   PencilIcon,
+  ChevronDownIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -132,21 +140,23 @@ export function DashboardClient() {
             />
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex h-10 items-center gap-1.5 rounded-xl border border-border bg-card/50 px-2.5 select-none">
-              <span className="shrink-0 text-xs font-medium text-muted-foreground">
-                Sort:
-              </span>
-              <select
-                className="cursor-pointer bg-transparent text-xs font-semibold text-foreground focus:outline-hidden"
-                value={sortBy}
-                onChange={(e) =>
-                  setSortBy(e.target.value as "lastActive" | "name")
-                }
+            <Select
+              value={sortBy}
+              onValueChange={(val) => setSortBy(val as "lastActive" | "name")}
+            >
+              <SelectTrigger
+                className="h-10 rounded-xl border border-border/80 bg-card/50 px-3.5 text-xs font-medium text-foreground hover:bg-muted/30 focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none"
               >
-                <option value="lastActive">Recently Active</option>
-                <option value="name">Alphabetical</option>
-              </select>
-            </div>
+                <div className="flex items-center gap-1 select-none">
+                  <span className="text-muted-foreground font-medium">Sort:</span>
+                  <SelectValue />
+                </div>
+              </SelectTrigger>
+              <SelectContent className="min-w-44" align="end">
+                <SelectItem value="lastActive">Recently Active</SelectItem>
+                <SelectItem value="name">Alphabetical</SelectItem>
+              </SelectContent>
+            </Select>
 
             <Button
               className="flex h-10 items-center gap-1.5 rounded-xl bg-primary px-4 font-semibold text-primary-foreground shadow-xs transition-all duration-300 hover:bg-primary/95 hover:shadow-md"

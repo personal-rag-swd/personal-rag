@@ -16,6 +16,9 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
+      watch: {
+        usePolling: true,
+      },
       proxy: {
         "/api/v1": {
           target: proxyTarget,

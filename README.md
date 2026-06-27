@@ -7,7 +7,7 @@ Personal RAG is a two-part application with a FastAPI backend and a Vite + React
 - FastAPI API with feature-oriented modules (`auth`, `users`, `file`, `notebooks`)
 - File upload flow with presigned URLs, MinIO object notifications, and in-app ingestion
 - React 19 frontend with Tailwind CSS and shadcn/ui components
-- Local dev stack with Postgres + pgvector and MinIO
+- Local dev stack with MongoDB, RabbitMQ, and MinIO
 
 ## How The App Is Organized
 
@@ -20,7 +20,7 @@ Personal RAG is a two-part application with a FastAPI backend and a Vite + React
 
 ```text
 .
-├── back-end/               # FastAPI, SQLModel, Alembic, pytest
+├── back-end/               # FastAPI, Beanie ODM (MongoDB), pytest
 │   ├── app/                # API application code
 │   │   ├── auth/           # Authentication flows
 │   │   ├── users/          # User management
@@ -30,7 +30,6 @@ Personal RAG is a two-part application with a FastAPI backend and a Vite + React
 │   │   ├── middleware/     # Request middleware
 │   │   └── utils/          # Shared helpers
 │   ├── tests/              # Pytest suites
-│   ├── alembic/            # Database migration environment and versions
 │   └── pyproject.toml      # Python dependencies and pytest config
 ├── front-end/              # Vite, React, TypeScript, Tailwind CSS
 │   ├── src/                # Application source code
@@ -44,7 +43,7 @@ Personal RAG is a two-part application with a FastAPI backend and a Vite + React
 │   │   └── App.tsx         # App shell
 │   ├── public/             # Static assets
 │   └── package.json        # Frontend scripts and dependencies
-├── docker-compose.yml      # Full local dev stack (Postgres, MinIO, backend, frontend)
+├── docker-compose.yml      # Full local dev stack (MongoDB, MinIO, RabbitMQ, backend, frontend)
 ├── docker-compose.prod.yml # Production compose stack
 ├── DOKPLOY_DEPLOYMENT.md   # Dokploy deployment notes
 └── AGENTS.md               # Contributor guide
@@ -58,11 +57,11 @@ Personal RAG is a two-part application with a FastAPI backend and a Vite + React
 
 ## Local Development
 
-The easiest way to run locally is Docker Compose. It brings up Postgres, MinIO,
+The easiest way to run locally is Docker Compose. It brings up MongoDB, MinIO, RabbitMQ,
 the FastAPI backend, and the Vite dev server in one command.
 
 If you want to run the backend and frontend on your host machine instead, keep
-Postgres and MinIO in Compose and start the services manually.
+MongoDB, RabbitMQ, and MinIO in Compose and start the services manually.
 
 ### Option A: Full Stack via Docker Compose (Recommended)
 
@@ -88,23 +87,22 @@ Service URLs:
 
 The stack includes:
 
-- Postgres with pgvector
+- MongoDB
 - MinIO + RabbitMQ + `mc` bootstrap (bucket + AMQP event configuration)
 - FastAPI backend in dev mode
 - Vite frontend dev server
 
 ### Option B: Host-Run Backend + Frontend
 
-If you prefer running the backend and frontend directly on your host, keep Postgres/MinIO in Compose:
+If you prefer running the backend and frontend directly on your host, keep MongoDB/RabbitMQ/MinIO in Compose:
 
 ```bash
 cp .env.example .env
-docker compose up -d postgres minio minio-mc
+docker compose up -d mongodb minio rabbitmq minio-mc
 
 cd back-end
 ln -sf ../.env .env
 uv sync
-uv run alembic upgrade head
 uv run fastapi dev app/main.py
 
 cd front-end
@@ -122,8 +120,7 @@ Backend commands should be run from `back-end/`:
 - `uv run pytest`: run backend tests.
 - `uv run ruff check`: lint backend code.
 - `uv run ruff format`: format backend code.
-- `uv run alembic revision --autogenerate -m "message"`: generate a migration from model changes.
-- `uv run alembic upgrade head`: apply migrations.
+- (MongoDB models use Beanie ODM and automatically initialize collections on startup)
 
 Frontend commands should be run from `front-end/`:
 
@@ -145,7 +142,7 @@ Key local storage settings for MinIO/S3-compatible integration:
 
 Production compose requirements (must be set when using `docker-compose.prod.yml`):
 
-- `POSTGRES_USER`, `POSTGRES_PASSWORD`
+- `DATABASE_URL`
 - `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`
 - `MINIO_BROWSER_REDIRECT_URL`, `MINIO_SERVER_URL`
 - `JWT_SECRET_KEY`

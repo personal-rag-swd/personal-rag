@@ -32,13 +32,25 @@ services:
       timeout: 5s
       retries: 20
 
+  mongodb:
+    image: mongo:7.0
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   backend:
     build: ./back-end
     command: >
       sh -c "fastapi dev app/main.py --host 0.0.0.0 --port 8000"
     environment:
       PYTHONDONTWRITEBYTECODE: "1"
-      DATABASE_URL: ${DATABASE_URL:-mongodb://mongodb:27017/personal-rag}
+      DATABASE_URL: mongodb://mongodb:27017/personal-rag
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-to-a-32-byte-dev-secret}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
@@ -87,6 +99,8 @@ services:
       minio:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      mongodb:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/ping')\""]
@@ -144,3 +158,4 @@ volumes:
   minio_data:
   rabbitmq_data:
   frontend_node_modules:
+  mongodb_data:
