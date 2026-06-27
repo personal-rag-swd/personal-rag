@@ -126,14 +126,9 @@ export function ChainOfThoughtStep({
       </div>
 
       {children != null && (
-        <>
-          <div className="flex justify-center py-1">
-            <div className="w-px grow bg-border" />
-          </div>
-          <div className="min-w-0 pt-1 pb-2 text-sm text-muted-foreground/90">
-            {children}
-          </div>
-        </>
+        <div className="col-start-2 min-w-0 pt-1 pb-2 text-sm text-muted-foreground/90">
+          {children}
+        </div>
       )}
     </div>
   )

@@ -60,47 +60,51 @@ async def _check_atlas_index_status() -> tuple[str, bool] | None:
 async def _is_document_vector_indexed(
     document: NotebookDocument,
 ) -> bool:
-    """Check if the first chunk of the document has been embedded and is searchable via vector search."""
-    first_chunk = await NotebookDocumentChunk.find_one(
+    """Check if every chunk of the document has been embedded and is searchable.
+
+    Atlas makes the index ACTIVE and queryable before all documents are
+    embedded, so we must verify each chunk individually rather than stopping
+    at the first hit.
+    """
+    chunks = await NotebookDocumentChunk.find(
         {"document_id": document.id},
         sort=[("chunk_index", 1)],
-    )
-    if first_chunk is None:
-        # No chunks to index
+    ).to_list()
+
+    if not chunks:
         return True
 
-    try:
-        pipeline = [
-            {
-                "$vectorSearch": {
-                    "index": ATLAS_VECTOR_INDEX_NAME,
-                    "path": "content",
-                    "query": first_chunk.content,
-                    "numCandidates": 10,
-                    "limit": 5,
-                    "similarity": "cosine",
-                    "filter": {
-                        "notebook_id": Binary.from_uuid(document.notebook_id),
-                        "user_id": Binary.from_uuid(document.user_id),
-                    },
+    for chunk in chunks:
+        try:
+            pipeline = [
+                {
+                    "$vectorSearch": {
+                        "index": ATLAS_VECTOR_INDEX_NAME,
+                        "path": "content",
+                        "query": chunk.content,
+                        "numCandidates": 20,
+                        "limit": 10,
+                        "similarity": "cosine",
+                        "filter": {
+                            "notebook_id": Binary.from_uuid(document.notebook_id),
+                            "user_id": Binary.from_uuid(document.user_id),
+                        },
+                    }
                 }
-            }
-        ]
-        results = await NotebookDocumentChunk.aggregate(pipeline).to_list()
-        for r in results:
-            if r.get("document_id") == document.id:
-                return True
-    except Exception as e:
-        logger.warning(
-            "Vector search query failed during indexing verification for document %s: %s",
-            document.id,
-            str(e),
-        )
-        # Treat query failures as "not indexed yet" so we do not promote the
-        # document to indexed while Atlas/server-side embedding is still catching up.
-        return False
+            ]
+            results = await NotebookDocumentChunk.aggregate(pipeline).to_list()
+            found = any(r.get("document_id") == document.id for r in results)
+            if not found:
+                return False
+        except Exception as e:
+            logger.warning(
+                "Vector search query failed during indexing verification for document %s: %s",
+                document.id,
+                str(e),
+            )
+            return False
 
-    return False
+    return True
 
 
 async def wait_for_atlas_vector_index(

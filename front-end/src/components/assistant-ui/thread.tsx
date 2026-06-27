@@ -5,8 +5,6 @@ import {
 import { MarkdownText } from "@/components/assistant-ui/markdown-text"
 import {
   ChainOfThought,
-  ChainOfThoughtSearchResult,
-  ChainOfThoughtSearchResults,
   ChainOfThoughtStep,
 } from "@/components/assistant-ui/chain-of-thought"
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button"
@@ -33,7 +31,6 @@ import {
   ChevronRightIcon,
   CopyIcon,
   DownloadIcon,
-  FileTextIcon,
   MoreHorizontalIcon,
   PencilIcon,
   RefreshCwIcon,
@@ -53,23 +50,9 @@ const ThoughtDot: FC<{ className?: string }> = ({ className }) => (
   </span>
 )
 
-/**
- * Pull the unique source filenames out of a `search_notebook_context` result.
- * The tool returns lines shaped like `SOURCE [filename=notes.pdf doc_id=… chunk=…]`.
- */
-const extractSearchSources = (result: unknown): string[] => {
-  if (typeof result !== "string") return []
-  const seen = new Set<string>()
-  for (const match of result.matchAll(/filename=([^\s\]]+)/g)) {
-    seen.add(match[1])
-  }
-  return [...seen]
-}
-
 type ChainOfThoughtToolPart = {
   toolName: string
   args?: { query?: string } | Record<string, unknown>
-  result?: unknown
   status?: { type?: string }
 }
 
@@ -77,7 +60,6 @@ type ChainOfThoughtToolPart = {
 const ChainOfThoughtToolStep: FC<ChainOfThoughtToolPart> = ({
   toolName,
   args,
-  result,
   status,
 }) => {
   const isRunning = status?.type === "running"
@@ -113,26 +95,7 @@ const ChainOfThoughtToolStep: FC<ChainOfThoughtToolPart> = ({
       ? `Searched the notebook for “${query}”`
       : "Searched the notebook"
 
-  const sources = isRunning ? [] : extractSearchSources(result)
-
-  return (
-    <ChainOfThoughtStep icon={SearchIcon} active={isRunning} label={label}>
-      {!isRunning &&
-        (sources.length > 0 ? (
-          <ChainOfThoughtSearchResults>
-            {sources.map((source) => (
-              <ChainOfThoughtSearchResult key={source} icon={FileTextIcon}>
-                {source}
-              </ChainOfThoughtSearchResult>
-            ))}
-          </ChainOfThoughtSearchResults>
-        ) : (
-          <span className="text-muted-foreground/70">
-            No matching sources.
-          </span>
-        ))}
-    </ChainOfThoughtStep>
-  )
+  return <ChainOfThoughtStep icon={SearchIcon} active={isRunning} label={label} />
 }
 
 export const Thread: FC<ThreadProps> = ({ hideScrollbar = false }) => {
