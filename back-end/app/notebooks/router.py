@@ -263,6 +263,7 @@ async def create_notebook_note(
     return document
 
 
+
 @router.post("/{notebook_id}/chat")
 async def chat_notebook_route(
     notebook_id: UUID,
@@ -292,9 +293,11 @@ async def chat_notebook_route(
 
     async def persist_chat_history(result: AgentRunResult[object]) -> None:
         new_messages = list(result.new_messages())
-        already_has_user_turn = bool(new_messages) and isinstance(
-            new_messages[0], ModelRequest
-        ) and any(isinstance(part, UserPromptPart) for part in new_messages[0].parts)
+        already_has_user_turn = (
+            bool(new_messages)
+            and isinstance(new_messages[0], ModelRequest)
+            and any(isinstance(part, UserPromptPart) for part in new_messages[0].parts)
+        )
         if new_user_message is not None and not already_has_user_turn:
             new_messages = [new_user_message, *new_messages]
         await append_notebook_chat_history(notebook, new_messages)

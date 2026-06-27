@@ -1,4 +1,5 @@
 import logging
+from urllib.parse import urlparse
 from uuid import UUID
 
 from bson import Binary
@@ -10,8 +11,29 @@ from app.core.llm_provider import (
     chat_provider_is_configured,
     resolve_chat_provider,
 )
+from app.core.s3 import generate_presigned_get_url, presign_endpoint_url
 from app.notebooks.models import Notebook, NotebookDocument, NotebookDocumentChunk
 from app.users.models import User
+
+# Hosts a remote LLM provider almost certainly cannot reach when handed an
+# image URL; used to warn once during retrieval.
+_INTERNAL_PRESIGN_HOSTS = {"localhost", "127.0.0.1", "minio"}
+_presign_warn_state = {"warned": False}
+
+
+def _warn_if_unreachable_presign_endpoint(settings: Settings) -> None:
+    """Warn once if image URLs are signed against an internally-only host."""
+    if _presign_warn_state["warned"]:
+        return
+    host = urlparse(presign_endpoint_url(settings) or "").hostname or ""
+    if host in _INTERNAL_PRESIGN_HOSTS:
+        _presign_warn_state["warned"] = True
+        logger.warning(
+            "Image presigned URLs are signed against %r, which a remote LLM "
+            "provider likely cannot reach. Set S3_PUBLIC_ENDPOINT_URL to a "
+            "publicly reachable host for image-grounded chat to work.",
+            host,
+        )
 
 
 class RetrievedChunk(BaseModel):
@@ -20,6 +42,8 @@ class RetrievedChunk(BaseModel):
     chunk_index: int
     content: str
     metadata: dict[str, object]
+    chunk_type: str = "text"
+    image_presigned_url: str | None = None
 
 
 logger = logging.getLogger(__name__)
@@ -98,9 +122,26 @@ async def search_notebook_chunks(
 
     doc_ids = {chunk.document_id for chunk in chunks}
     documents = await NotebookDocument.find({"_id": {"$in": list(doc_ids)}}).to_list()
-    filename_by_id = {document.id: document.filename for document in documents}
+    filename_by_id = {doc.id: doc.filename for doc in documents}
 
     for chunk in chunks:
         chunk.filename = filename_by_id.get(chunk.document_id, "unknown")
+        if chunk.metadata.get("chunk_type") != "image":
+            continue
+        chunk.chunk_type = "image"
+        s3_key = chunk.metadata.get("s3_key")
+        s3_bucket = chunk.metadata.get("s3_bucket")
+        if not (s3_key and s3_bucket):
+            continue
+        _warn_if_unreachable_presign_endpoint(settings)
+        try:
+            chunk.image_presigned_url = generate_presigned_get_url(
+                settings, bucket=str(s3_bucket), key=str(s3_key)
+            )
+        except Exception:
+            logger.warning(
+                "Failed to generate presigned URL for image chunk %s",
+                chunk.chunk_index,
+            )
 
     return chunks

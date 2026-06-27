@@ -66,7 +66,16 @@ import type { NotebookDocument } from "@/features/notebooks/types"
 import { cn } from "@/lib/utils"
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024
-const SUPPORTED_EXTENSIONS = [".pdf", ".docx", ".txt", ".md"]
+// Photos from modern devices routinely exceed the document limit.
+const MAX_IMAGE_FILE_SIZE = 25 * 1024 * 1024
+const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif"]
+const SUPPORTED_EXTENSIONS = [
+  ".pdf",
+  ".docx",
+  ".txt",
+  ".md",
+  ...IMAGE_EXTENSIONS,
+]
 
 type UploadState = "idle" | "uploading"
 
@@ -118,14 +127,15 @@ export function SourcesPanel({
     if (!isSupportedFile(file)) {
       toast.error("Unsupported source type", {
         description:
-          "Upload PDF, DOCX, TXT, or Markdown files for notebook ingestion.",
+          "Upload PDF, DOCX, TXT, Markdown, or image files (JPG, PNG, WEBP, GIF) for notebook ingestion.",
       })
       return
     }
 
-    if (file.size > MAX_FILE_SIZE) {
+    const maxSize = isImageFile(file) ? MAX_IMAGE_FILE_SIZE : MAX_FILE_SIZE
+    if (file.size > maxSize) {
       toast.error("File is too large", {
-        description: "Maximum file size is 10MB.",
+        description: `Maximum file size is ${maxSize / (1024 * 1024)}MB.`,
       })
       return
     }
@@ -334,7 +344,7 @@ export function SourcesPanel({
                   <EmptyDescription className="text-xs">
                     {documents.length > 0
                       ? "Try a different filename search."
-                      : "Click Add source above to upload PDF, DOCX, TXT, or Markdown files."}
+                      : "Click Add source above to upload PDF, DOCX, TXT, Markdown, or image files."}
                   </EmptyDescription>
                 </EmptyHeader>
                 {documents.length === 0 && (
@@ -495,6 +505,11 @@ function SourcesPlaceholder({
 function isSupportedFile(file: File) {
   const filename = file.name.toLowerCase()
   return SUPPORTED_EXTENSIONS.some((extension) => filename.endsWith(extension))
+}
+
+function isImageFile(file: File) {
+  const filename = file.name.toLowerCase()
+  return IMAGE_EXTENSIONS.some((extension) => filename.endsWith(extension))
 }
 
 function formatBytes(bytes: number | null) {

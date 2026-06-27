@@ -24,3 +24,28 @@ def get_s3_client(settings: Settings, *, endpoint_url: str | None = None) -> Bas
         client_kwargs["endpoint_url"] = resolved_endpoint
 
     return boto3.client(**client_kwargs)
+
+
+def presign_endpoint_url(settings: Settings) -> str | None:
+    """The endpoint presigned URLs should be signed against.
+
+    Prefers the publicly reachable endpoint so links work outside the internal
+    network (browsers, remote LLM providers), falling back to the internal one.
+    """
+    return settings.s3_public_endpoint_url or settings.s3_endpoint_url
+
+
+def generate_presigned_get_url(
+    settings: Settings,
+    *,
+    bucket: str,
+    key: str,
+    expires_in: int = 3600,
+) -> str:
+    """Generate a presigned GET URL for an object, signed against the public endpoint."""
+    client = get_s3_client(settings, endpoint_url=presign_endpoint_url(settings))
+    return client.generate_presigned_url(
+        ClientMethod="get_object",
+        Params={"Bucket": bucket, "Key": key},
+        ExpiresIn=expires_in,
+    )

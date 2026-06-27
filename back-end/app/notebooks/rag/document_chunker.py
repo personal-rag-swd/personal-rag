@@ -21,7 +21,11 @@ logger = logging.getLogger(__name__)
 
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
+# Extensions handled by chunk_document() (text-extraction engines below).
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
+# Image extensions are accepted for upload but routed to the async vision
+# pipeline in ingestion_service, not to chunk_document().
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
 
 @dataclass(frozen=True)

@@ -1,7 +1,6 @@
 "use client"
 
 import {
-  type CodeHeaderProps,
   type StreamdownTextComponents,
   StreamdownTextPrimitive,
   useIsStreamdownCodeBlock,
@@ -65,7 +64,7 @@ const preprocessCitations = (text: string) => {
     }
 
     // 2. Try to extract file=... or filename=...
-    const fileMatch = innerContent.match(/(?:file|filename)\s*=\s*([^,\s\]]+)/i)
+    const fileMatch = innerContent.match(/(?:file|filename)\s*=\s*([^,\]]+?)(?:\s*,|\s*\]|$)/i)
     if (fileMatch) {
       filename = fileMatch[1].trim()
     } else {
@@ -114,7 +113,7 @@ const MarkdownTextImpl = () => {
     <StreamdownTextPrimitive
       plugins={{ code, math, mermaid, cjk }}
       containerClassName="aui-md"
-      components={defaultComponents as StreamdownTextComponents}
+      components={defaultComponents as unknown as StreamdownTextComponents}
       preprocess={preprocessCitations}
     />
   )
@@ -448,22 +447,30 @@ function CitationPopover({
   )
 }
 
-const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
+type CodeBlockProps = Record<string, unknown> & {
+  language: string
+  code: string
+}
+
+const CodeBlock: FC<CodeBlockProps> = ({ language, code }) => {
   const { isCopied, copyToClipboard } = useCopyToClipboard()
-  const onCopy = () => {
-    if (!code || isCopied) return
-    copyToClipboard(code)
-  }
 
   return (
-    <div className="aui-code-header-root mt-2.5 flex items-center justify-between rounded-t-lg border border-b-0 border-border/50 bg-muted/50 px-3 py-1.5 text-xs">
-      <span className="aui-code-header-language font-medium text-muted-foreground lowercase">
-        {language}
-      </span>
-      <TooltipIconButton tooltip="Copy" onClick={onCopy}>
-        {!isCopied && <CopyIcon />}
-        {isCopied && <CheckIcon />}
-      </TooltipIconButton>
+    <div className="mt-2.5 overflow-hidden rounded-lg border border-border/50">
+      <div className="flex items-center justify-between border-b border-border/50 bg-muted/50 px-3 py-1.5 text-xs">
+        <span className="font-medium text-muted-foreground lowercase">{language}</span>
+        <TooltipIconButton
+          tooltip="Copy"
+          onClick={() => {
+            if (!isCopied) copyToClipboard(code)
+          }}
+        >
+          {isCopied ? <CheckIcon /> : <CopyIcon />}
+        </TooltipIconButton>
+      </div>
+      <pre className="overflow-x-auto bg-muted/30 p-3 text-xs leading-relaxed">
+        <code className="font-mono">{code}</code>
+      </pre>
     </div>
   )
 }
@@ -688,15 +695,6 @@ const defaultComponents = {
       {...props}
     />
   ),
-  pre: ({ className, ...props }: MarkdownNodeProps) => (
-    <pre
-      className={cn(
-        "aui-md-pre overflow-x-auto rounded-t-none rounded-b-lg border border-t-0 border-border/50 bg-muted/30 p-3 text-xs leading-relaxed",
-        className
-      )}
-      {...props}
-    />
-  ),
   code: function Code({ className, ...props }: MarkdownNodeProps) {
     const isCodeBlock = useIsStreamdownCodeBlock()
     return (
@@ -710,5 +708,5 @@ const defaultComponents = {
       />
     )
   },
-  CodeHeader,
+  SyntaxHighlighter: CodeBlock,
 }
