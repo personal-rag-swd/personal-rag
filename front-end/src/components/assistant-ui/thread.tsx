@@ -4,18 +4,9 @@ import {
 } from "@/components/assistant-ui/attachment"
 import { MarkdownText } from "@/components/assistant-ui/markdown-text"
 import {
-  Reasoning,
-  ReasoningContent,
-  ReasoningRoot,
-  ReasoningText,
-  ReasoningTrigger,
-} from "@/components/assistant-ui/reasoning"
-import {
-  ToolGroupContent,
-  ToolGroupRoot,
-  ToolGroupTrigger,
-} from "@/components/assistant-ui/tool-group"
-import { ToolFallback } from "@/components/assistant-ui/tool-fallback"
+  ChainOfThought,
+  ChainOfThoughtStep,
+} from "@/components/assistant-ui/chain-of-thought"
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -43,12 +34,68 @@ import {
   MoreHorizontalIcon,
   PencilIcon,
   RefreshCwIcon,
+  SearchIcon,
   SquareIcon,
 } from "lucide-react"
 import type { FC } from "react"
 
 type ThreadProps = {
   hideScrollbar?: boolean
+}
+
+/** Small filled dot used as the leading marker for reasoning steps. */
+const ThoughtDot: FC<{ className?: string }> = ({ className }) => (
+  <span className={cn("flex items-center justify-center", className)}>
+    <span className="size-1.5 rounded-full bg-current" />
+  </span>
+)
+
+type ChainOfThoughtToolPart = {
+  toolName: string
+  args?: { query?: string } | Record<string, unknown>
+  status?: { type?: string }
+}
+
+/** Renders a tool call as a chain-of-thought step with source chips. */
+const ChainOfThoughtToolStep: FC<ChainOfThoughtToolPart> = ({
+  toolName,
+  args,
+  status,
+}) => {
+  const isRunning = status?.type === "running"
+  const isSearch = toolName === "search_notebook_context"
+  const query =
+    typeof (args as { query?: unknown })?.query === "string"
+      ? (args as { query: string }).query
+      : undefined
+
+  if (!isSearch) {
+    return (
+      <ChainOfThoughtStep
+        icon={SearchIcon}
+        active={isRunning}
+        label={
+          isRunning ? (
+            <>Running {toolName}…</>
+          ) : (
+            <>
+              Used <span className="text-foreground">{toolName}</span>
+            </>
+          )
+        }
+      />
+    )
+  }
+
+  const label = isRunning
+    ? query
+      ? `Searching the notebook for “${query}”…`
+      : "Searching the notebook…"
+    : query
+      ? `Searched the notebook for “${query}”`
+      : "Searched the notebook"
+
+  return <ChainOfThoughtStep icon={SearchIcon} active={isRunning} label={label} />
 }
 
 export const Thread: FC<ThreadProps> = ({ hideScrollbar = false }) => {
@@ -266,42 +313,27 @@ const AssistantMessage: FC = () => {
       >
         <MessagePrimitive.GroupedParts
           groupBy={groupPartByType({
-            reasoning: ["group-chainOfThought", "group-reasoning"],
-            "tool-call": ["group-chainOfThought", "group-tool"],
+            reasoning: ["group-chainOfThought"],
+            "tool-call": ["group-chainOfThought"],
             "mcp-app": [],
           })}
         >
           {({ part, children }) => {
             switch (part.type) {
               case "group-chainOfThought":
-                return <div data-slot="aui_chain-of-thought">{children}</div>
-              case "group-reasoning": {
-                const running = part.status.type === "running"
                 return (
-                  <ReasoningRoot defaultOpen={running}>
-                    <ReasoningTrigger active={running} />
-                    <ReasoningContent aria-busy={running}>
-                      <ReasoningText>{children}</ReasoningText>
-                    </ReasoningContent>
-                  </ReasoningRoot>
-                )
-              }
-              case "group-tool":
-                return (
-                  <ToolGroupRoot>
-                    <ToolGroupTrigger
-                      count={part.indices.length}
-                      active={part.status.type === "running"}
-                    />
-                    <ToolGroupContent>{children}</ToolGroupContent>
-                  </ToolGroupRoot>
+                  <ChainOfThought isRunning={part.status.type === "running"}>
+                    {children}
+                  </ChainOfThought>
                 )
               case "text":
                 return <MarkdownText />
               case "reasoning":
-                return <Reasoning {...part} />
+                return (
+                  <ChainOfThoughtStep icon={ThoughtDot} label={<MarkdownText />} />
+                )
               case "tool-call":
-                return part.toolUI ?? <ToolFallback {...part} />
+                return <ChainOfThoughtToolStep {...part} />
               default:
                 return null
             }

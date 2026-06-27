@@ -1,58 +1,53 @@
+from __future__ import annotations
+
 import json
-import os
 from unittest.mock import patch
-from uuid import uuid4
 
-from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
-
-from app.core.config import Settings
-from app.notebooks.models import Notebook, NotebookDocument
-from app.notebooks.tools.ingestion import TransientIngestionError
-from app.users.models import User
-
-os.environ.setdefault("DATABASE_URL", "sqlite://")
+import pytest
 
 from app.notebooks.consumer import (
-    MessageOutcome,
     parse_minio_object_created_events,
     process_minio_notification_message,
     process_minio_notification_payload,
 )
+from app.notebooks.models import Notebook, NotebookDocument
+from app.notebooks.rag.ingestion_service import TransientIngestionError
+from app.users.models import User
+
+pytestmark = pytest.mark.anyio
 
 
-def make_session() -> Session:
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    SQLModel.metadata.create_all(engine)
-    return Session(engine)
+def make_settings() -> object:
+    from app.core.config import Settings
 
-
-def make_settings() -> Settings:
     return Settings(
-        database_url="sqlite://",
-        jwt_secret_key="test-secret-with-at-least-32-bytes",
+        database_url="mongodb://localhost:27017/test",
+        jwt_secret_key="test-secret-key",
         jwt_algorithm="HS256",
-        rabbitmq_consumer_enabled=False,
-        s3_bucket="test-bucket",
-        s3_region="us-east-1",
+        access_token_expire_minutes=30,
+        refresh_token_expire_days=30,
+        otp_expire_minutes=10,
+        otp_max_attempts=5,
+        log_level="DEBUG",
+        resend_api_key="",
+        cookie_secure=False,
+        notebook_chunk_size=100,
+        notebook_chunk_overlap=20,
+        embedding_dimension=1536,
+        embedding_model="text-embedding-3-small",
     )
 
 
-def make_document(session: Session, *, status: str = "pending") -> NotebookDocument:
+async def make_document(*, status: str = "pending") -> NotebookDocument:
     user = User(
-        id=uuid4(),
         email=f"{status}@example.com",
         hashed_password="hashed-password",
         role="user",
     )
-    notebook = Notebook(user_id=user.id, name="Notebook", description="", tags=[])
-    session.add(user)
-    session.add(notebook)
-    session.commit()
+    await user.insert()
+
+    notebook = Notebook(user_id=user.id, name="Notebook", description="")
+    await notebook.insert()
 
     document = NotebookDocument(
         notebook_id=notebook.id,
@@ -62,12 +57,11 @@ def make_document(session: Session, *, status: str = "pending") -> NotebookDocum
         filename="source.pdf",
         status=status,
     )
-    session.add(document)
-    session.commit()
+    await document.insert()
     return document
 
 
-def test_parse_minio_object_created_events_decodes_and_normalizes_keys() -> None:
+async def test_parse_minio_object_created_events_decodes_and_normalizes_keys() -> None:
     payload = {
         "Records": [
             {
@@ -91,7 +85,7 @@ def test_parse_minio_object_created_events_decodes_and_normalizes_keys() -> None
     assert events[0].size == 123
 
 
-def test_parse_minio_object_created_events_decodes_plus_as_space() -> None:
+async def test_parse_minio_object_created_events_decodes_plus_as_space() -> None:
     payload = {
         "Records": [
             {
@@ -113,7 +107,7 @@ def test_parse_minio_object_created_events_decodes_plus_as_space() -> None:
     assert events[0].key == "users/abc/Skill_Bridge (1).docx"
 
 
-def test_parse_minio_object_created_events_ignores_unrelated_events() -> None:
+async def test_parse_minio_object_created_events_ignores_unrelated_events() -> None:
     payload = {
         "Records": [
             {
@@ -129,9 +123,8 @@ def test_parse_minio_object_created_events_ignores_unrelated_events() -> None:
     assert parse_minio_object_created_events(payload) == []
 
 
-def test_process_minio_notification_payload_skips_unknown_key_safely() -> None:
+async def test_process_minio_notification_payload_skips_unknown_key_safely() -> None:
     settings = make_settings()
-    session = make_session()
     payload = {
         "Records": [
             {
@@ -144,16 +137,13 @@ def test_process_minio_notification_payload_skips_unknown_key_safely() -> None:
         ]
     }
 
-    with patch("app.notebooks.consumer.engine", session.get_bind()):
-        assert (
-            process_minio_notification_payload(payload, settings) is MessageOutcome.ACK
-        )
+    result = await process_minio_notification_payload(payload, settings)
+    assert result is True
 
 
-def test_process_minio_notification_payload_deduplicates_duplicate_deliveries() -> None:
+async def test_process_minio_notification_payload_deduplicates_duplicate_deliveries() -> None:
     settings = make_settings()
-    session = make_session()
-    document = make_document(session, status="pending")
+    document = await make_document(status="pending")
     payload = {
         "Records": [
             {
@@ -166,23 +156,17 @@ def test_process_minio_notification_payload_deduplicates_duplicate_deliveries() 
         ]
     }
 
-    with (
-        patch("app.notebooks.consumer.engine", session.get_bind()),
-        patch("app.notebooks.consumer.ingest_document_by_id") as mock_ingest,
-    ):
-        assert (
-            process_minio_notification_payload(payload, settings) is MessageOutcome.ACK
-        )
-        assert (
-            process_minio_notification_payload(payload, settings) is MessageOutcome.ACK
-        )
+    with patch(
+        "app.notebooks.consumer.ingest_document_by_id"
+    ) as mock_ingest:
+        assert await process_minio_notification_payload(payload, settings) is True
+        assert await process_minio_notification_payload(payload, settings) is True
         mock_ingest.assert_called_once()
 
 
-def test_process_minio_notification_payload_retries_transient_failures() -> None:
+async def test_process_minio_notification_payload_retries_transient_failures() -> None:
     settings = make_settings()
-    session = make_session()
-    document = make_document(session, status="pending")
+    document = await make_document(status="pending")
     payload = {
         "Records": [
             {
@@ -195,21 +179,15 @@ def test_process_minio_notification_payload_retries_transient_failures() -> None
         ]
     }
 
-    with (
-        patch("app.notebooks.consumer.engine", session.get_bind()),
-        patch(
-            "app.notebooks.consumer.ingest_document_by_id",
-            side_effect=TransientIngestionError("retry"),
-        ),
+    with patch(
+        "app.notebooks.consumer.ingest_document_by_id",
+        side_effect=TransientIngestionError("retry"),
     ):
-        assert (
-            process_minio_notification_payload(payload, settings)
-            is MessageOutcome.RETRY
-        )
+        assert await process_minio_notification_payload(payload, settings) is False
 
 
-def test_process_minio_notification_message_reads_real_json_shape() -> None:
-    session = make_session()
+async def test_process_minio_notification_message_reads_real_json_shape() -> None:
+    settings = make_settings()
     payload = {
         "Records": [
             {
@@ -223,8 +201,4 @@ def test_process_minio_notification_message_reads_real_json_shape() -> None:
     }
 
     body = json.dumps(payload).encode("utf-8")
-    with patch("app.notebooks.consumer.engine", session.get_bind()):
-        assert (
-            process_minio_notification_message(body, make_settings())
-            is MessageOutcome.ACK
-        )
+    assert await process_minio_notification_message(body, settings) is True

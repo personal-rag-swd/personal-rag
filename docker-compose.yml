@@ -1,20 +1,4 @@
 services:
-  postgres:
-    image: pgvector/pgvector:pg18
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
-      POSTGRES_DB: ${POSTGRES_DB:-personal_rag}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
@@ -51,11 +35,10 @@ services:
   backend:
     build: ./back-end
     command: >
-      sh -c "alembic upgrade head
-      && fastapi dev app/main.py --host 0.0.0.0 --port 8000"
+      sh -c "fastapi dev app/main.py --host 0.0.0.0 --port 8000"
     environment:
       PYTHONDONTWRITEBYTECODE: "1"
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-personal_rag}
+      DATABASE_URL: ${DATABASE_URL:-mongodb://mongodb:27017/personal-rag}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-to-a-32-byte-dev-secret}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
@@ -97,13 +80,10 @@ services:
       LOGFIRE_TOKEN: ${LOGFIRE_TOKEN:-}
     volumes:
       - ./back-end/app:/app/app
-      - ./back-end/alembic:/app/alembic
-      - ./back-end/alembic.ini:/app/alembic.ini
+
     ports:
       - "8000:8000"
     depends_on:
-      postgres:
-        condition: service_healthy
       minio:
         condition: service_healthy
       rabbitmq:
@@ -161,7 +141,6 @@ services:
         condition: service_started
 
 volumes:
-  postgres_data:
   minio_data:
   rabbitmq_data:
   frontend_node_modules:

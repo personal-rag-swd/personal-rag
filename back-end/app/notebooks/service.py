@@ -1,38 +1,63 @@
+import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelRequest
-from sqlalchemy.exc import SQLAlchemyError
-from sqlmodel import Session, delete, func, select
 
+from app.core.event_bus import domain_event_bus
+from app.notebooks.agent.report_agents import (
+    generate_blog_post,
+    generate_briefing_doc,
+    generate_custom_report,
+    generate_flashcards,
+    generate_mindmap,
+    generate_quiz,
+    generate_study_guide,
+)
+from app.notebooks.domain_events import (
+    ReportCompleted,
+    ReportFailed,
+    ReportGenerating,
+)
 from app.notebooks.memory import load_notebook_chat_history
 from app.notebooks.models import (
     Notebook,
     NotebookDocument,
     NotebookDocumentChunk,
+    NotebookMessage,
     NotebookReport,
 )
-from app.notebooks.schemas import NotebookCreate, NotebookUpdate
+from app.notebooks.schemas import (
+    BlogPostReport,
+    BriefingDocReport,
+    CustomReport,
+    FlashcardReport,
+    MindMapReport,
+    NotebookCreate,
+    NotebookPopulateRead,
+    NotebookUpdate,
+    QuizReport,
+    StudyGuideReport,
+)
 from app.users.models import User
 
+_logger = logging.getLogger(__name__)
 
-def list_notebooks(session: Session, current_user: User) -> list[Notebook]:
-    statement = (
-        select(Notebook)
-        .where(Notebook.user_id == current_user.id)
-        .order_by(Notebook.last_active_at.desc(), Notebook.created_at.desc())
+
+async def list_notebooks(current_user: User) -> list[Notebook]:
+    return (
+        await Notebook.find({"user_id": current_user.id})
+        .sort(("last_active_at", -1), ("created_at", -1))
+        .to_list()
     )
-    return list(session.exec(statement).all())
 
 
-def get_notebook(session: Session, notebook_id: UUID, current_user: User) -> Notebook:
-    notebook = session.exec(
-        select(Notebook).where(
-            Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
-        )
-    ).first()
+async def get_notebook(notebook_id: UUID, current_user: User) -> Notebook:
+    notebook = await Notebook.find_one(
+        {"_id": notebook_id, "user_id": current_user.id},
+    )
     if notebook is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Notebook not found"
@@ -40,156 +65,253 @@ def get_notebook(session: Session, notebook_id: UUID, current_user: User) -> Not
     return notebook
 
 
-def list_notebook_documents(
-    session: Session,
+async def list_notebook_documents(
     notebook_id: UUID,
     current_user: User,
 ) -> list[NotebookDocument]:
-    notebook = get_notebook(session, notebook_id, current_user)
-    statement = (
-        select(NotebookDocument)
-        .where(NotebookDocument.notebook_id == notebook.id)
-        .where(NotebookDocument.user_id == current_user.id)
-        .order_by(NotebookDocument.created_at.desc())
+    notebook = await get_notebook(notebook_id, current_user)
+    return (
+        await NotebookDocument.find(
+            {"notebook_id": notebook.id, "user_id": current_user.id},
+        )
+        .sort(("created_at", -1))
+        .to_list()
     )
-    return list(session.exec(statement).all())
 
 
-def delete_notebook_document(
-    session: Session,
+async def delete_notebook_document(
     notebook_id: UUID,
     document_id: UUID,
     current_user: User,
 ) -> None:
-    notebook = get_notebook(session, notebook_id, current_user)
-    document = session.exec(
-        select(NotebookDocument).where(
-            NotebookDocument.id == document_id,
-            NotebookDocument.notebook_id == notebook.id,
-            NotebookDocument.user_id == current_user.id,
-        )
-    ).first()
+    notebook = await get_notebook(notebook_id, current_user)
+    document = await NotebookDocument.find_one(
+        {"_id": document_id, "notebook_id": notebook.id, "user_id": current_user.id},
+    )
     if document is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
         )
 
-    try:
-        session.exec(
-            delete(NotebookDocumentChunk).where(
-                NotebookDocumentChunk.document_id == document.id
-            )
-        )
+    await NotebookDocumentChunk.find({"document_id": document.id}).delete()
 
-        # Delete any note reports referencing this document ID
-        note_reports = session.exec(
-            select(NotebookReport)
-            .where(NotebookReport.notebook_id == notebook.id)
-            .where(NotebookReport.user_id == current_user.id)
-            .where(NotebookReport.report_type == "note")
-        ).all()
-        for r in note_reports:
-            if isinstance(r.content, dict) and r.content.get("document_id") == str(
-                document.id
-            ):
-                session.delete(r)
+    note_reports = await NotebookReport.find(
+        {"notebook_id": notebook.id, "user_id": current_user.id, "report_type": "note"},
+    ).to_list()
+    for r in note_reports:
+        if isinstance(r.content, dict) and r.content.get("document_id") == str(
+            document.id
+        ):
+            await r.delete()
 
-        session.delete(document)
-        session.commit()
-    except SQLAlchemyError as exc:
-        session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
-        ) from exc
+    await document.delete()
 
 
-def create_notebook(
-    session: Session, payload: NotebookCreate, current_user: User
-) -> Notebook:
+async def create_notebook(payload: NotebookCreate, current_user: User) -> Notebook:
     notebook = Notebook(
         user_id=current_user.id,
         name=payload.name,
         description=payload.description,
         tags=payload.tags,
     )
-    try:
-        session.add(notebook)
-        session.commit()
-        session.refresh(notebook)
-    except SQLAlchemyError as exc:
-        session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
-        ) from exc
+    await notebook.insert()
     return notebook
 
 
-def update_notebook(
-    session: Session,
+async def update_notebook(
     notebook_id: UUID,
     payload: NotebookUpdate,
     current_user: User,
 ) -> Notebook:
-    notebook = get_notebook(session, notebook_id, current_user)
+    notebook = await get_notebook(notebook_id, current_user)
     updates = payload.model_dump(exclude_unset=True)
     for key, value in updates.items():
         setattr(notebook, key, value)
     notebook.updated_at = datetime.now(UTC)
-    try:
-        session.add(notebook)
-        session.commit()
-        session.refresh(notebook)
-    except SQLAlchemyError as exc:
-        session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
-        ) from exc
+    await notebook.save()
     return notebook
 
 
-def touch_notebook(session: Session, notebook_id: UUID, current_user: User) -> Notebook:
-    notebook = get_notebook(session, notebook_id, current_user)
+async def touch_notebook(notebook_id: UUID, current_user: User) -> Notebook:
+    notebook = await get_notebook(notebook_id, current_user)
     now = datetime.now(UTC)
     notebook.last_active_at = now
     notebook.updated_at = now
-    try:
-        session.add(notebook)
-        session.commit()
-        session.refresh(notebook)
-    except SQLAlchemyError as exc:
-        session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
-        ) from exc
+    await notebook.save()
     return notebook
 
 
-def populate_notebook_metrics(
-    session: Session, notebook_id: UUID, current_user: User
-) -> Notebook:
-    notebook = get_notebook(session, notebook_id, current_user)
-    doc_count = (
-        session.exec(
-            select(func.count(NotebookDocument.id))
-            .where(NotebookDocument.notebook_id == notebook.id)
-            .where(NotebookDocument.user_id == current_user.id)
-        ).one()
-        or 0
-    )
-    messages = load_notebook_chat_history(session, notebook)
+async def populate_notebook_metrics(
+    notebook_id: UUID, current_user: User
+) -> NotebookPopulateRead:
+    notebook = await get_notebook(notebook_id, current_user)
+    doc_count = await NotebookDocument.find(
+        {"notebook_id": notebook.id, "user_id": current_user.id},
+    ).count()
+    messages = await load_notebook_chat_history(notebook)
     query_count = sum(1 for message in messages if isinstance(message, ModelRequest))
-    notebook.__dict__["document_count"] = doc_count
-    notebook.__dict__["query_count"] = query_count
-    return notebook
+    metrics = NotebookPopulateRead.model_validate(notebook, from_attributes=True)
+    metrics.document_count = doc_count
+    metrics.query_count = query_count
+    return metrics
 
 
-def delete_notebook(session: Session, notebook_id: UUID, current_user: User) -> None:
-    notebook = get_notebook(session, notebook_id, current_user)
+async def _delete_notebook_child_documents(notebook_id: UUID) -> None:
+    await NotebookMessage.find({"notebook_id": notebook_id}).delete()
+    await NotebookDocument.find({"notebook_id": notebook_id}).delete()
+    await NotebookDocumentChunk.find({"notebook_id": notebook_id}).delete()
+    await NotebookReport.find({"notebook_id": notebook_id}).delete()
+
+
+async def delete_notebook(notebook_id: UUID, current_user: User) -> None:
+    notebook = await get_notebook(notebook_id, current_user)
+    await _delete_notebook_child_documents(notebook.id)
+    await notebook.delete()
+
+
+_REPORT_CONTEXT_CHAR_LIMIT = 120_000
+
+
+async def build_report_context(notebook: Notebook, current_user: User) -> str:
+    documents = (
+        await NotebookDocument.find(
+            {
+                "notebook_id": notebook.id,
+                "user_id": current_user.id,
+                "status": "indexed",
+            },
+        )
+        .sort(("filename", 1))
+        .to_list()
+    )
+
+    if not documents:
+        return ""
+
+    doc_map = {str(d.id): d.filename for d in documents}
+    doc_ids = [d.id for d in documents]
+
+    chunks = (
+        await NotebookDocumentChunk.find({"document_id": {"$in": doc_ids}})
+        .sort(("chunk_index", 1))
+        .to_list()
+    )
+
+    parts: list[str] = []
+    total = 0
+    for chunk in chunks:
+        filename = doc_map.get(str(chunk.document_id), "unknown")
+        header = f"[file={filename} chunk={chunk.chunk_index}]"
+        block = f"{header}\n{chunk.content}"
+        if total + len(block) > _REPORT_CONTEXT_CHAR_LIMIT:
+            break
+        parts.append(block)
+        total += len(block)
+
+    return "\n\n".join(parts)
+
+
+async def run_report_generation(
+    report_id: UUID,
+    report_type: str,
+    context: str,
+    instructions: str | None,
+    detail_level: str | None,
+    question_count: int | None = None,
+) -> None:
+    report = await NotebookReport.find_one({"_id": report_id})
+    if report is None or report.status == "cancelled":
+        return
+
+    report.status = "generating"
+    report.updated_at = datetime.now(UTC)
+    await report.save()
+    await domain_event_bus.emit(ReportGenerating(report))
+
+    report = await NotebookReport.find_one({"_id": report_id})
+    if report is None or report.status == "cancelled":
+        return
+
+    report_content: (
+        BriefingDocReport
+        | StudyGuideReport
+        | BlogPostReport
+        | CustomReport
+        | MindMapReport
+        | QuizReport
+        | FlashcardReport
+    )
     try:
-        session.delete(notebook)
-        session.commit()
-    except SQLAlchemyError as exc:
-        session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
-        ) from exc
+        match report_type:
+            case "briefing":
+                report_content = await generate_briefing_doc(context, instructions)
+            case "study_guide":
+                report_content = await generate_study_guide(context, instructions)
+            case "blog":
+                report_content = await generate_blog_post(context, instructions)
+            case "custom":
+                report_content = await generate_custom_report(
+                    context, instructions or ""
+                )
+            case "mindmap":
+                report_content = await generate_mindmap(
+                    context, detail_level, instructions
+                )
+            case "quiz":
+                report_content = await generate_quiz(
+                    context,
+                    count=question_count or 20,
+                    difficulty=detail_level,
+                    additional_instructions=instructions,
+                )
+            case "flashcards":
+                report_content = await generate_flashcards(
+                    context,
+                    count=question_count or 20,
+                    difficulty=detail_level,
+                    additional_instructions=instructions,
+                )
+            case _:
+                _logger.error("Unknown report type: %s", report_type)
+                report.status = "failed"
+                report.error_message = f"Unknown report type: {report_type}"
+                report.updated_at = datetime.now(UTC)
+                await report.save()
+                await domain_event_bus.emit(ReportFailed(report))
+                return
+    except ModelHTTPError as exc:
+        report = await NotebookReport.find_one({"_id": report_id})
+        if report is not None and report.status != "cancelled":
+            report.status = "failed"
+            if exc.status_code == 429:
+                report.error_message = "The AI provider rate limit was exceeded. Please wait a moment and try again."
+            else:
+                report.error_message = (
+                    "The AI provider failed to generate the report. Please try again."
+                )
+            report.updated_at = datetime.now(UTC)
+            await report.save()
+            await domain_event_bus.emit(ReportFailed(report))
+        return
+    except Exception:
+        _logger.exception("Unexpected error during report generation")
+        report = await NotebookReport.find_one({"_id": report_id})
+        if report is not None and report.status != "cancelled":
+            report.status = "failed"
+            report.error_message = (
+                "An unexpected error occurred during report generation."
+            )
+            report.updated_at = datetime.now(UTC)
+            await report.save()
+            await domain_event_bus.emit(ReportFailed(report))
+        return
+
+    report = await NotebookReport.find_one({"_id": report_id})
+    if report is None or report.status == "cancelled":
+        return
+
+    report.status = "completed"
+    report.content = report_content.model_dump()
+    report.updated_at = datetime.now(UTC)
+    await report.save()
+    await domain_event_bus.emit(ReportCompleted(report))

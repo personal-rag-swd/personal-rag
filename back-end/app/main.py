@@ -3,7 +3,10 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
-from app.core.config import get_settings, validate_rag_embedding_dimension
+from beanie import init_beanie
+
+from app.core.config import get_settings
+from app.core.database import init_db
 from app.core.telemetry import setup_telemetry
 
 # Configure logging and telemetry early
@@ -11,141 +14,146 @@ settings = get_settings()
 setup_telemetry(settings)
 
 log_level_name = settings.log_level.strip().upper()
-log_level_value = getattr(logging, log_level_name, logging.INFO)
+log_level_value = logging.getLevelNamesMapping().get(log_level_name, logging.INFO)
 
-# Standard logging configuration
 logging.basicConfig(
     level=log_level_value,
     format="%(levelname)s:     %(name)s - %(message)s",
     force=True,
 )
 
+# Suppress MongoDB driver's noisy heartbeat / topology logs
+for name in (
+    "pymongo.server",
+    "pymongo.topology",
+    "pymongo.heartbeat",
+    "pymongo.monitor",
+):
+    logging.getLogger(name).setLevel(logging.WARNING)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from scalar_fastapi import get_scalar_api_reference
 
+from app.auth.models import PendingRegistration, RefreshToken
 from app.auth.router import router as auth_router
+from app.event_listeners import register_default_event_listeners
 from app.file.router import router as file_router
 from app.notebooks.consumer import run_notebook_document_consumer
+from app.notebooks.models import (
+    Notebook,
+    NotebookDocument,
+    NotebookDocumentChunk,
+    NotebookMessage,
+    NotebookReport,
+)
 from app.notebooks.router import router as notebooks_router
+from app.notebooks.service import run_report_generation
+from app.users.models import User
 from app.users.router import router as users_router
 
 _recovered_tasks: set[asyncio.Task[None]] = set()
 
 
 async def _recover_pending_reports() -> None:
-    """Re-queue any pending or generating reports after a crash/restart."""
-    from sqlmodel import Session, select
-
-    from app.core.database import engine
-    from app.notebooks.models import Notebook, NotebookReport
-    from app.notebooks.router import _build_report_context, _run_report_generation
-    from app.users.models import User
-
     logger = logging.getLogger("app.startup")
 
     try:
-        with Session(engine) as session:
-            stuck_reports = list(
-                session.exec(
-                    select(NotebookReport).where(
-                        NotebookReport.status.in_(["pending", "generating"])
-                    )
-                ).all()
-            )
+        stuck_reports = await NotebookReport.find(
+            {"status": {"$in": ["pending", "generating"]}}
+        ).to_list()
 
-            if not stuck_reports:
-                return
+        if not stuck_reports:
+            return
 
-            logger.info(
-                "Recovering %d pending/generating report(s) after restart",
-                len(stuck_reports),
-            )
+        logger.info(
+            "Recovering %d pending/generating report(s) after restart",
+            len(stuck_reports),
+        )
 
-            for report in stuck_reports:
-                # Reset generating -> pending so the background task picks them up cleanly
-                if report.status == "generating":
-                    report.status = "pending"
-                    session.add(report)
-                    session.commit()
+        for report in stuck_reports:
+            if report.status == "generating":
+                report.status = "pending"
+                await report.save()
 
-                # Rebuild context from the notebook's indexed documents
-                notebook = session.get(Notebook, report.notebook_id)
-                user = session.get(User, report.user_id)
-                if notebook is None or user is None:
-                    logger.warning(
-                        "Skipping report %s: notebook or user not found",
-                        report.id,
-                    )
-                    report.status = "failed"
-                    report.error_message = (
-                        "Recovery failed: associated notebook or user no longer exists."
-                    )
-                    session.add(report)
-                    session.commit()
-                    continue
-
-                context = _build_report_context(session, notebook, user)
-                if not context:
-                    logger.warning(
-                        "Skipping report %s: no indexed documents available for context",
-                        report.id,
-                    )
-                    report.status = "failed"
-                    report.error_message = (
-                        "Recovery failed: no indexed documents found."
-                    )
-                    session.add(report)
-                    session.commit()
-                    continue
-
-                task = asyncio.create_task(
-                    _run_report_generation(
-                        report_id=report.id,
-                        report_type=report.report_type,
-                        context=context,
-                        instructions=report.additional_instructions,
-                        detail_level=report.detail_level,
-                        _engine=engine,
-                    )
+            notebook = await Notebook.find_one({"_id": report.notebook_id})
+            user = await User.find_one({"_id": report.user_id})
+            if notebook is None or user is None:
+                logger.warning(
+                    "Skipping report %s: notebook or user not found",
+                    report.id,
                 )
-                _recovered_tasks.add(task)
-                task.add_done_callback(_recovered_tasks.discard)
-                logger.info(
-                    "Re-queued report %s (type=%s)", report.id, report.report_type
+                report.status = "failed"
+                report.error_message = (
+                    "Recovery failed: associated notebook or user no longer exists."
                 )
+                await report.save()
+                continue
+
+            from app.notebooks.service import build_report_context
+
+            context = await build_report_context(notebook, user)
+            if not context:
+                logger.warning(
+                    "Skipping report %s: no indexed documents available for context",
+                    report.id,
+                )
+                report.status = "failed"
+                report.error_message = "Recovery failed: no indexed documents found."
+                await report.save()
+                continue
+
+            task = asyncio.create_task(
+                run_report_generation(
+                    report_id=report.id,
+                    report_type=report.report_type,
+                    context=context,
+                    instructions=report.additional_instructions,
+                    detail_level=report.detail_level,
+                )
+            )
+            _recovered_tasks.add(task)
+            task.add_done_callback(_recovered_tasks.discard)
+            logger.info("Re-queued report %s (type=%s)", report.id, report.report_type)
     except Exception:
         logger.exception("Failed to recover pending reports")
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    settings = get_settings()
-    validate_rag_embedding_dimension(settings)
+    mongo_client = await init_db()
 
-    # Resolve Chat Model & Provider
-    chat_prov = settings.chat_provider.strip().lower()
-    chat_model = settings.chat_model
+    document_models = [
+        User,
+        PendingRegistration,
+        RefreshToken,
+        Notebook,
+        NotebookMessage,
+        NotebookDocument,
+        NotebookDocumentChunk,
+        NotebookReport,
+    ]
 
-    # Resolve Embedding Model & Provider
-    embed_prov = settings.embedding_provider.strip().lower()
-    if embed_prov == "auto":
-        embed_prov = "gemini" if settings.embedding_api_key else "openai_compatible"
-    embed_model = settings.embedding_model
+    # Use the default database from the connection string
+    db = mongo_client.get_default_database()
+    await init_beanie(database=db, document_models=document_models)
 
     logger = logging.getLogger("app.startup")
     logger.info("============================================================")
-    logger.info("Application starting up with the following configuration:")
-    logger.info("  Chat Provider:      %s", chat_prov.upper())
-    logger.info("  Chat Model:         %s", chat_model)
-    logger.info("  Embedding Provider: %s", embed_prov.upper())
-    logger.info("  Embedding Model:    %s", embed_model)
+    logger.info("Application starting up with MongoDB")
+    logger.info("  Chat Provider:      %s", settings.chat_provider.strip().upper())
+    logger.info("  Chat Model:         %s", settings.chat_model)
     logger.info("============================================================")
+
+    # Wire domain-event listeners (SSE projection, audit, OTP email) before any
+    # producer runs so recovery and the ingestion consumer have somewhere to
+    # dispatch to.
+    register_default_event_listeners()
+
     consumer_task: asyncio.Task[None] | None = None
     if settings.rabbitmq_consumer_enabled:
         consumer_task = asyncio.create_task(run_notebook_document_consumer(settings))
 
-    # Recover any report tasks that were in-flight when the app last stopped
     await _recover_pending_reports()
 
     try:
@@ -155,6 +163,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             consumer_task.cancel()
             with suppress(asyncio.CancelledError):
                 await consumer_task
+        mongo_client.close()
 
 
 app = FastAPI(title="Aviary", docs_url=None, redoc_url=None, lifespan=lifespan)

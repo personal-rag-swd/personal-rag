@@ -1,14 +1,20 @@
-from collections.abc import Generator
+import logging
 
-from sqlmodel import Session, create_engine
+from pymongo import AsyncMongoClient
 
-from app.core.config import get_database_url
-from app.core.telemetry import setup_db_logging
+from app.core.config import get_settings
 
-engine = create_engine(get_database_url(), pool_pre_ping=True)
-setup_db_logging(engine)
+logger = logging.getLogger(__name__)
 
 
-def get_session() -> Generator[Session]:
-    with Session(engine) as session:
-        yield session
+async def init_db() -> AsyncMongoClient:
+    settings = get_settings()
+    logger.info("Connecting to MongoDB at %s", settings.database_url)
+    client = AsyncMongoClient(
+        settings.database_url,
+        serverSelectionTimeoutMS=5000,
+    )
+    # Ping to verify connection
+    await client.admin.command("ping")
+    logger.info("MongoDB connection established")
+    return client

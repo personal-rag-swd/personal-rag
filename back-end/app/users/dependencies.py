@@ -3,11 +3,8 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy.exc import SQLAlchemyError
-from sqlmodel import Session, select
 
 from app.core.config import Settings, get_settings
-from app.core.database import get_session
 from app.core.security import decode_access_token
 from app.users.models import User
 
@@ -26,9 +23,8 @@ def get_access_token(request: Request) -> str | None:
     return None
 
 
-def get_current_user(
+async def get_current_user(
     request: Request,
-    session: Annotated[Session, Depends(get_session)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> User:
     token = get_access_token(request)
@@ -50,13 +46,7 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
 
-    try:
-        user = session.exec(select(User).where(User.id == user_id)).first()
-    except SQLAlchemyError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
-        ) from exc
-
+    user = await User.find_one({"_id": user_id})
     if user is None or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
