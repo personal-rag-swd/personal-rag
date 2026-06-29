@@ -4,6 +4,7 @@ import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Annotated
+from urllib.parse import quote
 from uuid import UUID, uuid4
 
 from fastapi import (
@@ -31,6 +32,7 @@ from pydantic_ai.ui.ag_ui import AGUIAdapter
 from app.core.config import get_settings
 from app.core.event_bus import domain_event_bus
 from app.core.llm_provider import chat_provider_is_configured, resolve_chat_provider
+from app.core.s3 import get_s3_client
 from app.notebooks.agent import (
     NotebookChatDeps,
     notebook_chat_agent,
@@ -56,6 +58,7 @@ from app.notebooks.rag.ingestion_service import ingest_document_by_id
 from app.notebooks.schemas import (
     NotebookChatHistoryMessage,
     NotebookCreate,
+    NotebookDocumentPreviewRead,
     NotebookDocumentRead,
     NotebookPopulateRead,
     NotebookRead,
@@ -177,6 +180,66 @@ async def read_notebook_documents(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> list:
     return await list_notebook_documents(notebook_id, current_user)
+
+
+@router.get(
+    "/{notebook_id}/documents/{document_id}/preview",
+    response_model=NotebookDocumentPreviewRead,
+)
+async def read_notebook_document_preview(
+    notebook_id: UUID,
+    document_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> NotebookDocumentPreviewRead:
+    document = await NotebookDocument.find_one(
+        {
+            "_id": document_id,
+            "notebook_id": notebook_id,
+            "user_id": current_user.id,
+        }
+    )
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found",
+        )
+
+    if document.content is not None:
+        return NotebookDocumentPreviewRead(
+            filename=document.filename,
+            content_type=document.content_type,
+            size=document.size,
+            content=document.content,
+            preview_type="text",
+        )
+
+    if not document.s3_key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document content is not available",
+        )
+
+    settings = get_settings()
+    presign_endpoint = settings.s3_public_endpoint_url or settings.s3_endpoint_url
+    s3_client = get_s3_client(settings, endpoint_url=presign_endpoint)
+    disposition = f"inline; filename*=UTF-8''{quote(document.filename)}"
+    url = s3_client.generate_presigned_url(
+        ClientMethod="get_object",
+        Params={
+            "Bucket": document.s3_bucket or settings.s3_bucket,
+            "Key": document.s3_key,
+            "ResponseContentDisposition": disposition,
+        },
+        ExpiresIn=3600,
+        HttpMethod="GET",
+    )
+    return NotebookDocumentPreviewRead(
+        filename=document.filename,
+        content_type=document.content_type,
+        size=document.size,
+        url=url,
+        preview_type="url",
+    )
 
 
 def _run_background_note_ingestion(

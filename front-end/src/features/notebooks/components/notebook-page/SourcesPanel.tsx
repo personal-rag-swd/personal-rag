@@ -1,7 +1,10 @@
 import * as React from "react"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   AlertCircleIcon,
+  DownloadIcon,
+  ExternalLinkIcon,
+  EyeIcon,
   FileTextIcon,
   Loader2Icon,
   MoreVerticalIcon,
@@ -34,6 +37,14 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
   Empty,
   EmptyContent,
   EmptyDescription,
@@ -58,11 +69,15 @@ import {
 } from "@/components/ui/tooltip"
 import { getPresignedUploadUrl, reportUploadFailed } from "@/features/files/api"
 import {
+  getNotebookDocumentPreview,
   useNotebookDocumentEvents,
   useDeleteNotebookDocumentMutation,
   useNotebookDocumentsQuery,
 } from "@/features/notebooks/api"
-import type { NotebookDocument } from "@/features/notebooks/types"
+import type {
+  NotebookDocument,
+  NotebookDocumentPreview,
+} from "@/features/notebooks/types"
 import { cn } from "@/lib/utils"
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -215,32 +230,9 @@ export function SourcesPanel({
           {documents.length > 0 && (
             <ScrollArea className="min-h-0 w-full flex-1">
               <div className="flex flex-col items-center gap-2.5 px-2 pb-4">
-                {documents.map((document) => {
-                  const status = getDocumentStatus(document.status)
-                  return (
-                    <Tooltip key={document.id}>
-                      <TooltipTrigger
-                        className="flex size-8 shrink-0 items-center justify-center rounded-2xl border bg-muted text-muted-foreground transition-all duration-200 hover:scale-105 hover:text-foreground"
-                        aria-label={document.filename}
-                      >
-                        <FileTextIcon className="size-4" />
-                      </TooltipTrigger>
-                      <TooltipContent
-                        side="right"
-                        className="max-w-xs break-all"
-                      >
-                        <div className="space-y-0.5">
-                          <p className="text-xs leading-tight font-medium">
-                            {document.filename}
-                          </p>
-                          <p className="text-[10px] leading-normal text-muted-foreground">
-                            {formatBytes(document.size)} / {status.label}
-                          </p>
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  )
-                })}
+                {documents.map((document) => (
+                  <CollapsedSourceItem key={document.id} document={document} />
+                ))}
               </div>
             </ScrollArea>
           )}
@@ -362,6 +354,7 @@ export function SourcesPanel({
 
 function SourceItem({ document }: { document: NotebookDocument }) {
   const status = getDocumentStatus(document.status)
+  const [isPreviewOpen, setIsPreviewOpen] = React.useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false)
   const deleteDocumentMutation = useDeleteNotebookDocumentMutation()
 
@@ -386,85 +379,238 @@ function SourceItem({ document }: { document: NotebookDocument }) {
   }
 
   return (
-    <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-      <Card size="sm" className="h-auto w-full self-start py-0">
-        <CardContent className="px-2 py-1.5">
-          <div className="flex items-center gap-2.5">
-            <div className="min-w-0 flex-1">
-              <p
-                className="truncate text-xs font-medium text-foreground"
-                title={document.filename}
+    <>
+      <AlertDialog
+        open={isDeleteDialogOpen}
+        onOpenChange={setIsDeleteDialogOpen}
+      >
+        <Card size="sm" className="h-auto w-full self-start py-0">
+          <CardContent className="px-2 py-1.5">
+            <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                className="min-w-0 flex-1 rounded-xl px-1 py-1 text-left transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
+                onClick={() => setIsPreviewOpen(true)}
               >
-                {document.filename}
-              </p>
-              <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
-                <span>{formatBytes(document.size)}</span>
-                <span aria-hidden="true">/</span>
-                <Badge variant={status.variant}>{status.label}</Badge>
-              </div>
-              {document.status === "failed" && document.errorMessage ? (
-                <p className="mt-2 line-clamp-2 text-[11px] leading-relaxed text-destructive">
-                  {document.errorMessage}
-                </p>
-              ) : null}
+                <span
+                  className="block truncate text-xs font-medium text-foreground"
+                  title={document.filename}
+                >
+                  {document.filename}
+                </span>
+                <span className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+                  <span>{formatBytes(document.size)}</span>
+                  <span aria-hidden="true">/</span>
+                  <Badge variant={status.variant}>{status.label}</Badge>
+                </span>
+                {document.status === "failed" && document.errorMessage ? (
+                  <span className="mt-2 line-clamp-2 text-[11px] leading-relaxed text-destructive">
+                    {document.errorMessage}
+                  </span>
+                ) : null}
+              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      className="self-center text-muted-foreground"
+                      aria-label={`Open actions for ${document.filename}`}
+                    />
+                  }
+                >
+                  <MoreVerticalIcon />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-36" align="end">
+                  <DropdownMenuGroup>
+                    <DropdownMenuItem onClick={() => setIsPreviewOpen(true)}>
+                      <EyeIcon data-icon="inline-start" />
+                      <span>Preview</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onClick={() => setIsDeleteDialogOpen(true)}
+                      disabled={deleteDocumentMutation.isPending}
+                    >
+                      <Trash2Icon data-icon="inline-start" />
+                      <span>Delete</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger
+          </CardContent>
+        </Card>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete source?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes "{document.filename}" from the notebook context. This
+              action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteDocumentMutation.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deleteDocumentMutation.isPending}
+              onClick={handleDeleteSource}
+            >
+              {deleteDocumentMutation.isPending ? (
+                <Loader2Icon data-icon="inline-start" className="animate-spin" />
+              ) : (
+                <Trash2Icon data-icon="inline-start" />
+              )}
+              Delete source
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <SourcePreviewDialog
+        document={document}
+        open={isPreviewOpen}
+        onOpenChange={setIsPreviewOpen}
+      />
+    </>
+  )
+}
+
+function CollapsedSourceItem({ document }: { document: NotebookDocument }) {
+  const status = getDocumentStatus(document.status)
+  const [isPreviewOpen, setIsPreviewOpen] = React.useState(false)
+
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger
+          onClick={() => setIsPreviewOpen(true)}
+          className="flex size-8 shrink-0 items-center justify-center rounded-2xl border bg-muted text-muted-foreground transition-all duration-200 hover:scale-105 hover:text-foreground"
+          aria-label={`Preview ${document.filename}`}
+        >
+          <FileTextIcon className="size-4" />
+        </TooltipTrigger>
+        <TooltipContent side="right" className="max-w-xs break-all">
+          <div className="space-y-0.5">
+            <p className="text-xs leading-tight font-medium">
+              {document.filename}
+            </p>
+            <p className="text-[10px] leading-normal text-muted-foreground">
+              {formatBytes(document.size)} / {status.label}
+            </p>
+          </div>
+        </TooltipContent>
+      </Tooltip>
+      <SourcePreviewDialog
+        document={document}
+        open={isPreviewOpen}
+        onOpenChange={setIsPreviewOpen}
+      />
+    </>
+  )
+}
+
+function SourcePreviewDialog({
+  document,
+  open,
+  onOpenChange,
+}: {
+  document: NotebookDocument
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const {
+    data: preview = null,
+    error,
+    isLoading,
+  } = useQuery({
+    queryKey: [
+      "notebooks",
+      document.notebookId,
+      "documents",
+      document.id,
+      "preview",
+    ],
+    queryFn: () => getNotebookDocumentPreview(document.notebookId, document.id),
+    enabled: open,
+    staleTime: 55 * 60 * 1000,
+  })
+
+  const canRenderInline = preview ? canRenderPreviewInline(preview) : false
+  const sourceUrl = preview?.url ?? null
+  const errorMessage =
+    error instanceof Error ? error.message : "The document could not be opened."
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[92dvh] gap-4 overflow-hidden sm:max-w-5xl">
+        <DialogHeader className="pr-10">
+          <DialogTitle className="truncate" title={document.filename}>
+            {document.filename}
+          </DialogTitle>
+          <DialogDescription>
+            {formatBytes(document.size)} / {getDocumentStatus(document.status).label}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="min-h-[55dvh] overflow-hidden rounded-2xl border bg-muted/30">
+          {isLoading ? (
+            <div className="flex h-[55dvh] items-center justify-center text-sm text-muted-foreground">
+              <Loader2Icon className="mr-2 size-4 animate-spin" />
+              Loading preview
+            </div>
+          ) : error ? (
+            <div className="flex h-[55dvh] flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
+              <AlertCircleIcon className="size-5 text-destructive" />
+              <p>{errorMessage}</p>
+            </div>
+          ) : preview?.previewType === "text" ? (
+            <ScrollArea className="h-[55dvh]">
+              <pre className="whitespace-pre-wrap break-words p-4 font-mono text-xs leading-relaxed text-foreground">
+                {preview.content}
+              </pre>
+            </ScrollArea>
+          ) : sourceUrl && canRenderInline ? (
+            <iframe
+              title={preview.filename}
+              src={sourceUrl}
+              className="h-[55dvh] w-full bg-background"
+            />
+          ) : (
+            <div className="flex h-[55dvh] flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
+              <FileTextIcon className="size-8" />
+              <p>Preview is available as a separate document view.</p>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          {sourceUrl ? (
+            <>
+              <Button
+                variant="outline"
                 render={
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    className="self-center text-muted-foreground"
-                    aria-label={`Open actions for ${document.filename}`}
-                  />
+                  <a href={sourceUrl} target="_blank" rel="noreferrer" />
                 }
               >
-                <MoreVerticalIcon />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent className="w-36" align="end">
-                <DropdownMenuGroup>
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onClick={() => setIsDeleteDialogOpen(true)}
-                    disabled={deleteDocumentMutation.isPending}
-                  >
-                    <Trash2Icon data-icon="inline-start" />
-                    <span>Delete</span>
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </CardContent>
-      </Card>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete source?</AlertDialogTitle>
-          <AlertDialogDescription>
-            This removes "{document.filename}" from the notebook context. This
-            action cannot be undone.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={deleteDocumentMutation.isPending}>
-            Cancel
-          </AlertDialogCancel>
-          <AlertDialogAction
-            variant="destructive"
-            disabled={deleteDocumentMutation.isPending}
-            onClick={handleDeleteSource}
-          >
-            {deleteDocumentMutation.isPending ? (
-              <Loader2Icon data-icon="inline-start" className="animate-spin" />
-            ) : (
-              <Trash2Icon data-icon="inline-start" />
-            )}
-            Delete source
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+                <ExternalLinkIcon data-icon="inline-start" />
+                Open
+              </Button>
+              <Button
+                variant="outline"
+                render={<a href={sourceUrl} download={preview?.filename} />}
+              >
+                <DownloadIcon data-icon="inline-start" />
+                Download
+              </Button>
+            </>
+          ) : null}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -543,6 +689,19 @@ function getDocumentStatus(status: string) {
         variant: "outline" as const,
       }
   }
+}
+
+function canRenderPreviewInline(preview: NotebookDocumentPreview) {
+  const contentType = preview.contentType?.toLowerCase() ?? ""
+  const filename = preview.filename.toLowerCase()
+
+  return (
+    contentType.includes("pdf") ||
+    contentType.startsWith("text/") ||
+    filename.endsWith(".pdf") ||
+    filename.endsWith(".txt") ||
+    filename.endsWith(".md")
+  )
 }
 
 async function uploadNotebookSource(

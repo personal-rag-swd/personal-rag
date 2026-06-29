@@ -108,6 +108,24 @@ export type NotebookDocumentApiPayload = {
   updated_at: string
 }
 
+export type NotebookDocumentPreview = {
+  filename: string
+  contentType: string | null
+  size: number | null
+  url: string | null
+  content: string | null
+  previewType: "url" | "text"
+}
+
+export type NotebookDocumentPreviewApiPayload = {
+  filename: string
+  content_type: string | null
+  size: number | null
+  url: string | null
+  content: string | null
+  preview_type: "url" | "text"
+}
+
 // ─── Reports ────────────────────────────────────────────────────────────────
 
 export type ReportType =
