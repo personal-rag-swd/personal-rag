@@ -57,7 +57,6 @@ import {
   SparklesIcon,
   AlertCircleIcon,
   PencilIcon,
-  ChevronDownIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
