@@ -6,10 +6,28 @@ import { useAuth } from "@/features/auth/store/auth-store"
 import { LoginForm } from "@/features/auth/components/LoginForm"
 import { RegisterForm } from "@/features/auth/components/RegisterForm"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
-import { AppSidebar } from "@/features/dashboard/components/app-sidebar"
-import { SiteHeader } from "@/features/dashboard/components/site-header"
-import { DashboardClient } from "@/features/dashboard/components/dashboard-client"
-import { NotebookPage } from "@/features/notebooks/components/NotebookPage"
+import { LandingPage } from "@/features/landing/LandingPage"
+
+const AppSidebar = React.lazy(() =>
+  import("@/features/dashboard/components/app-sidebar").then((module) => ({
+    default: module.AppSidebar,
+  }))
+)
+const SiteHeader = React.lazy(() =>
+  import("@/features/dashboard/components/site-header").then((module) => ({
+    default: module.SiteHeader,
+  }))
+)
+const DashboardClient = React.lazy(() =>
+  import("@/features/dashboard/components/dashboard-client").then((module) => ({
+    default: module.DashboardClient,
+  }))
+)
+const NotebookPage = React.lazy(() =>
+  import("@/features/notebooks/components/NotebookPage").then((module) => ({
+    default: module.NotebookPage,
+  }))
+)
 
 // Premium, beautifully animated full-screen loader
 function FullPageSpinner() {
@@ -68,30 +86,34 @@ function AuthLayout({ children }: { children: React.ReactNode }) {
 // Protected Dashboard Layout
 function DashboardLayout() {
   return (
-    <SidebarProvider
-      defaultOpen={true}
-      style={
-        {
-          "--sidebar-width": "calc(var(--spacing) * 72)",
-          "--header-height": "calc(var(--spacing) * 12)",
-        } as React.CSSProperties
-      }
-    >
-      <AppSidebar variant="inset" />
-      <SidebarInset>
-        <SiteHeader />
-        <DashboardClient />
-      </SidebarInset>
-    </SidebarProvider>
+    <React.Suspense fallback={<FullPageSpinner />}>
+      <SidebarProvider
+        defaultOpen={true}
+        style={
+          {
+            "--sidebar-width": "calc(var(--spacing) * 72)",
+            "--header-height": "calc(var(--spacing) * 12)",
+          } as React.CSSProperties
+        }
+      >
+        <AppSidebar variant="inset" />
+        <SidebarInset>
+          <SiteHeader />
+          <DashboardClient />
+        </SidebarInset>
+      </SidebarProvider>
+    </React.Suspense>
   )
 }
 
 // Notebook full-page layout (no dashboard sidebar)
 function NotebookLayout() {
   return (
-    <main className="h-dvh overflow-hidden bg-background">
-      <NotebookPage />
-    </main>
+    <React.Suspense fallback={<FullPageSpinner />}>
+      <main className="h-dvh overflow-hidden bg-background">
+        <NotebookPage />
+      </main>
+    </React.Suspense>
   )
 }
 
@@ -99,6 +121,7 @@ export function AppRoutes() {
   return (
     <Routes>
       {/* Public Pages */}
+      <Route path="/" element={<LandingPage />} />
       <Route
         path="/login"
         element={
@@ -139,7 +162,6 @@ export function AppRoutes() {
       />
 
       {/* Fallbacks */}
-      <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   )

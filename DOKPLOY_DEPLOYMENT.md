@@ -32,9 +32,7 @@ Go to the **Environment** tab of the Compose service and add the following requi
 
 | Variable | Recommended Production Value | Description |
 | :--- | :--- | :--- |
-| `POSTGRES_USER` | `rag_admin` (custom name) | Postgres database username |
-| `POSTGRES_PASSWORD` | *Strong Random String (e.g., 32+ chars)* | Postgres database password |
-| `POSTGRES_DB` | `personal_rag` | Postgres database name |
+| `DATABASE_URL` | `mongodb+srv://user:pass@cluster.mongodb.net/personal-rag` | MongoDB connection string (e.g. Atlas or self-hosted) |
 | `MINIO_ROOT_USER` | `minio_admin` (custom name) | MinIO admin dashboard username |
 | `MINIO_ROOT_PASSWORD` | *Strong Random String (e.g., 32+ chars)* | MinIO admin dashboard password |
 | `JWT_SECRET_KEY` | *Generate secure token (`openssl rand -hex 32`)* | Backend authentication key |
@@ -70,10 +68,9 @@ Click **Deploy** in the top-right corner. Dokploy will pull the code, build the 
 
 If you want to manage backups, scale services, and monitor resource metrics separately, you can split them into individual native Dokploy services.
 
-### 1. Database (PostgreSQL with `pgvector`)
-1. In Dokploy, click **Create Service** and select **Database** -> **PostgreSQL**.
-2. **Crucial**: By default, standard PostgreSQL does not include the vector extension. Under advanced settings, configure the image to be `pgvector/pgvector:pg18` instead of standard `postgres:latest`.
-3. Dokploy will auto-generate your connection details. Save them.
+### 1. Database (MongoDB)
+1. In Dokploy, click **Create Service** and select **Database** -> **MongoDB** (or use a cloud-managed service like MongoDB Atlas).
+2. If self-hosting via Dokploy Database: Dokploy will auto-generate your connection details. Save them. Note that Atlas Vector Search features are only available in Atlas, but standard querying and indexing work in standard MongoDB.
 
 ### 2. MinIO (Object Storage)
 1. Click **Create Service** -> **Application**.
@@ -150,4 +147,4 @@ If you choose to configure the AMQP notification manually via the `mc` CLI:
 
 > [!TIP]
 > **Data Persistence**
-> Verify that the Dokploy volumes (such as `postgres_prod_data` and `minio_prod_data` in Compose, or native volumes under individual applications) are persistent. Avoid using ephemeral server directories to ensure your users' notebooks, files, and logins survive server restarts or container builds.
+> Verify that the Dokploy volumes (such as `mongodb_data` and `minio_prod_data` in Compose, or native volumes under individual applications) are persistent. Avoid using ephemeral server directories to ensure your users' notebooks, files, and logins survive server restarts or container builds.
