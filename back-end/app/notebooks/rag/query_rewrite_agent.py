@@ -20,13 +20,13 @@ query_rewrite_agent = Agent(
 )
 
 
-def rewrite_query_text(query: str, settings: Settings) -> str:
+async def rewrite_query_text(query: str, settings: Settings) -> str:
     if not settings.enable_query_rewrite or not chat_provider_is_configured():
         return query
 
     try:
         model = resolve_chat_provider()
-        result = query_rewrite_agent.run_sync(query, model=model)
+        result = await query_rewrite_agent.run(query, model=model)
         rewritten = result.output.strip()
         if rewritten:
             logger.info("Rewrote RAG query: %r -> %r", query, rewritten)

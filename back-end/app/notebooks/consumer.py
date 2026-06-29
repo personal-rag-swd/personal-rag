@@ -186,7 +186,7 @@ async def _process_message(body: bytes, settings: Settings) -> None:
     """
     try:
         payload = json.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+    except UnicodeDecodeError, json.JSONDecodeError:
         logger.warning("Skipping non-JSON RabbitMQ message body")
         return
 
@@ -239,22 +239,36 @@ async def run_notebook_document_consumer(settings: Settings) -> None:
         async with message.process(requeue=True):
             await _process_message(message.body, settings)
 
-    connection = await aio_pika.connect_robust(settings.rabbitmq_url)
-    async with connection:
-        channel = await connection.channel()
-        await channel.set_qos(prefetch_count=settings.rabbitmq_prefetch_count)
-        queue = await _declare_topology(channel, settings)
+    # Supervised loop: connect_robust only auto-reconnects AFTER a first
+    # successful connect, so a startup/broker race on the initial connect would
+    # otherwise kill this (fire-and-forget) task permanently. Retry with backoff.
+    while True:
+        try:
+            connection = await aio_pika.connect_robust(settings.rabbitmq_url)
+            async with connection:
+                channel = await connection.channel()
+                await channel.set_qos(prefetch_count=settings.rabbitmq_prefetch_count)
+                queue = await _declare_topology(channel, settings)
 
-        stale_stats = await recover_stale_notebook_documents(settings)
-        if any(stale_stats.values()):
-            logger.info("Recovered stale notebook documents: %s", stale_stats)
+                stale_stats = await recover_stale_notebook_documents(settings)
+                if any(stale_stats.values()):
+                    logger.info("Recovered stale notebook documents: %s", stale_stats)
 
-        await queue.consume(on_message)
-        logger.info(
-            "RabbitMQ consumer ready queue=%s exchange=%s routing_key=%s prefetch=%s",
-            settings.rabbitmq_queue_name,
-            settings.rabbitmq_exchange_name,
-            settings.rabbitmq_routing_key,
-            settings.rabbitmq_prefetch_count,
-        )
-        await asyncio.Future()  # run until task is cancelled
+                await queue.consume(on_message)
+                logger.info(
+                    "RabbitMQ consumer ready queue=%s exchange=%s routing_key=%s prefetch=%s",
+                    settings.rabbitmq_queue_name,
+                    settings.rabbitmq_exchange_name,
+                    settings.rabbitmq_routing_key,
+                    settings.rabbitmq_prefetch_count,
+                )
+                await asyncio.Future()  # run until cancelled or the connection drops
+        except asyncio.CancelledError:
+            logger.info("Notebook document RabbitMQ consumer stopped")
+            raise
+        except Exception:
+            logger.exception(
+                "RabbitMQ consumer loop failed; retrying in %ss",
+                settings.rabbitmq_reconnect_delay_seconds,
+            )
+            await asyncio.sleep(settings.rabbitmq_reconnect_delay_seconds)

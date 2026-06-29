@@ -28,9 +28,10 @@ from pydantic_ai.messages import (
 from pydantic_ai.run import AgentRunResult
 from pydantic_ai.ui.ag_ui import AGUIAdapter
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.event_bus import domain_event_bus
 from app.core.llm_provider import chat_provider_is_configured, resolve_chat_provider
+from app.core.s3 import generate_presigned_get_url
 from app.notebooks.agent import (
     NotebookChatDeps,
     notebook_chat_agent,
@@ -452,6 +453,47 @@ async def read_single_chunk(
         "content": chunk.content,
         "metadata": chunk.chunk_metadata,
     }
+
+
+@router.get("/{notebook_id}/documents/{document_id}/chunks/{chunk_index}/image-url")
+async def get_chunk_image_url(
+    notebook_id: UUID,
+    document_id: UUID,
+    chunk_index: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, str]:
+    notebook = await get_notebook(notebook_id, current_user)
+    document = await NotebookDocument.find_one(
+        {"_id": document_id, "notebook_id": notebook.id, "user_id": current_user.id},
+    )
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
+        )
+
+    chunk = await NotebookDocumentChunk.find_one(
+        {"document_id": document.id, "chunk_index": chunk_index},
+    )
+    if not chunk:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Chunk not found"
+        )
+
+    if chunk.chunk_metadata.get("chunk_type") != "image":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Chunk is not an image"
+        )
+
+    s3_key = chunk.chunk_metadata.get("s3_key")
+    s3_bucket = chunk.chunk_metadata.get("s3_bucket") or settings.s3_bucket
+    if not s3_key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Image not found"
+        )
+
+    url = generate_presigned_get_url(settings, bucket=str(s3_bucket), key=str(s3_key))
+    return {"url": url}
 
 
 @router.delete("/{notebook_id}", status_code=status.HTTP_204_NO_CONTENT)

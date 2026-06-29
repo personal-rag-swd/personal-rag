@@ -6,7 +6,11 @@ from botocore.exceptions import ClientError
 from fastapi import HTTPException, status
 
 from app.core.config import Settings
-from app.core.s3 import get_s3_client
+from app.core.s3 import (
+    generate_presigned_get_url,
+    get_s3_client,
+    presign_endpoint_url,
+)
 from app.file.schemas import PresignedUrlRequest, PresignedUrlResponse
 from app.notebooks.models import NotebookDocument
 from app.users.models import User
@@ -56,9 +60,10 @@ async def generate_presigned_url_service(
         s3_key = request.filename
 
     try:
-        presign_endpoint = settings.s3_public_endpoint_url or settings.s3_endpoint_url
-        s3_client = get_s3_client(settings, endpoint_url=presign_endpoint)
         if operation == "upload":
+            s3_client = get_s3_client(
+                settings, endpoint_url=presign_endpoint_url(settings)
+            )
             params: dict = {"Bucket": settings.s3_bucket, "Key": s3_key}
             if request.content_type:
                 params["ContentType"] = request.content_type
@@ -69,11 +74,11 @@ async def generate_presigned_url_service(
                 HttpMethod="PUT",
             )
         else:
-            presigned_url = s3_client.generate_presigned_url(
-                ClientMethod="get_object",
-                Params={"Bucket": settings.s3_bucket, "Key": s3_key},
-                ExpiresIn=request.expires_in,
-                HttpMethod="GET",
+            presigned_url = generate_presigned_get_url(
+                settings,
+                bucket=settings.s3_bucket,
+                key=s3_key,
+                expires_in=request.expires_in,
             )
     except ClientError as exc:
         logger.exception("Failed to generate S3 presigned URL")

@@ -6,9 +6,8 @@ from unittest.mock import patch
 import pytest
 
 from app.notebooks.consumer import (
+    _process_message,
     parse_minio_object_created_events,
-    process_minio_notification_message,
-    process_minio_notification_payload,
 )
 from app.notebooks.models import Notebook, NotebookDocument
 from app.notebooks.rag.ingestion_service import TransientIngestionError
@@ -36,6 +35,21 @@ def make_settings() -> object:
         embedding_dimension=1536,
         embedding_model="text-embedding-3-small",
     )
+
+
+def make_message_body(*, bucket: str, key: str, size: int = 123) -> bytes:
+    payload = {
+        "Records": [
+            {
+                "eventName": "s3:ObjectCreated:Put",
+                "s3": {
+                    "bucket": {"name": bucket},
+                    "object": {"key": key, "size": size},
+                },
+            }
+        ]
+    }
+    return json.dumps(payload).encode("utf-8")
 
 
 async def make_document(*, status: str = "pending") -> NotebookDocument:
@@ -123,82 +137,48 @@ async def test_parse_minio_object_created_events_ignores_unrelated_events() -> N
     assert parse_minio_object_created_events(payload) == []
 
 
-async def test_process_minio_notification_payload_skips_unknown_key_safely() -> None:
+async def test_process_message_skips_non_json_body() -> None:
     settings = make_settings()
-    payload = {
-        "Records": [
-            {
-                "eventName": "s3:ObjectCreated:Put",
-                "s3": {
-                    "bucket": {"name": "test-bucket"},
-                    "object": {"key": "users/abc/unknown.pdf", "size": 123},
-                },
-            }
-        ]
-    }
-
-    result = await process_minio_notification_payload(payload, settings)
-    assert result is True
+    # Should ack (return without raising) rather than requeue garbage forever.
+    await _process_message(b"\xff\xfenot json", settings)
 
 
-async def test_process_minio_notification_payload_deduplicates_duplicate_deliveries() -> None:
+async def test_process_message_skips_unknown_key_safely() -> None:
+    settings = make_settings()
+    body = make_message_body(bucket="test-bucket", key="users/abc/unknown.pdf")
+
+    with patch("app.notebooks.consumer.ingest_document_by_id") as mock_ingest:
+        # No matching document → no ingestion, no raise (ack).
+        await _process_message(body, settings)
+        mock_ingest.assert_not_called()
+
+
+async def test_process_message_claims_and_ingests_once_for_duplicate_deliveries() -> (
+    None
+):
     settings = make_settings()
     document = await make_document(status="pending")
-    payload = {
-        "Records": [
-            {
-                "eventName": "s3:ObjectCreated:Put",
-                "s3": {
-                    "bucket": {"name": document.s3_bucket},
-                    "object": {"key": document.s3_key, "size": 123},
-                },
-            }
-        ]
-    }
+    body = make_message_body(bucket=document.s3_bucket, key=document.s3_key)
 
-    with patch(
-        "app.notebooks.consumer.ingest_document_by_id"
-    ) as mock_ingest:
-        assert await process_minio_notification_payload(payload, settings) is True
-        assert await process_minio_notification_payload(payload, settings) is True
+    with patch("app.notebooks.consumer.ingest_document_by_id") as mock_ingest:
+        await _process_message(body, settings)
+        # Second delivery: the document is already claimed (status="processing"),
+        # so the atomic claim returns None and ingestion is not re-triggered.
+        await _process_message(body, settings)
         mock_ingest.assert_called_once()
 
 
-async def test_process_minio_notification_payload_retries_transient_failures() -> None:
+async def test_process_message_propagates_transient_failures() -> None:
     settings = make_settings()
     document = await make_document(status="pending")
-    payload = {
-        "Records": [
-            {
-                "eventName": "s3:ObjectCreated:Put",
-                "s3": {
-                    "bucket": {"name": document.s3_bucket},
-                    "object": {"key": document.s3_key, "size": 123},
-                },
-            }
-        ]
-    }
+    body = make_message_body(bucket=document.s3_bucket, key=document.s3_key)
 
-    with patch(
-        "app.notebooks.consumer.ingest_document_by_id",
-        side_effect=TransientIngestionError("retry"),
+    # Propagating the error lets message.process(requeue=True) nack + requeue.
+    with (
+        patch(
+            "app.notebooks.consumer.ingest_document_by_id",
+            side_effect=TransientIngestionError("retry"),
+        ),
+        pytest.raises(TransientIngestionError),
     ):
-        assert await process_minio_notification_payload(payload, settings) is False
-
-
-async def test_process_minio_notification_message_reads_real_json_shape() -> None:
-    settings = make_settings()
-    payload = {
-        "Records": [
-            {
-                "eventName": "s3:ObjectCreated:Put",
-                "s3": {
-                    "bucket": {"name": "test-bucket"},
-                    "object": {"key": "users%2Fabc%2Ffile.pdf", "size": 5},
-                },
-            }
-        ]
-    }
-
-    body = json.dumps(payload).encode("utf-8")
-    assert await process_minio_notification_message(body, settings) is True
+        await _process_message(body, settings)

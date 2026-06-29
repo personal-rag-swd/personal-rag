@@ -125,6 +125,21 @@ def build_user_message_from_agui_payload(
     return None
 
 
+def _tool_return_to_text(content: object) -> str:
+    """Coerce a ToolReturnPart's content to the searchable context string.
+
+    ``search_notebook_context`` returns ``list[str | BinaryContent]`` (text
+    block + image bytes), which pydantic-ai persists as a raw list; older
+    messages stored a plain string. Join the string parts and drop binaries so
+    the SOURCE-block regex sees real text rather than a list ``repr``.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(item for item in content if isinstance(item, str))
+    return ""
+
+
 def parse_chunks_from_context_block(block: str) -> list[dict[str, object]]:
     """Parse SOURCE blocks from a RAG context tool-return string.
 
@@ -138,9 +153,10 @@ def parse_chunks_from_context_block(block: str) -> list[dict[str, object]]:
 
     Returns:
         List of dicts, each with ``filename``, ``document_id``,
-        ``chunk_index``, and ``content`` keys.
+        ``chunk_index``, ``content``, and ``metadata`` keys (the latter carries
+        ``chunk_type`` when the source header declares one, e.g. images).
     """
-    pattern = r"SOURCE \[filename=(?P<filename>.*?) doc_id=(?P<doc_id>[a-f0-9\-]+) chunk=(?P<chunk>\d+)\]\n(?P<content>.*?)(?=\n+SOURCE \[filename=|\Z)"
+    pattern = r"SOURCE \[filename=(?P<filename>.*?) doc_id=(?P<doc_id>[a-f0-9\-]+) chunk=(?P<chunk>\d+)(?: chunk_type=(?P<chunk_type>\w+))?\]\n(?P<content>.*?)(?=\n+SOURCE \[filename=|\Z)"
     matches = re.finditer(pattern, block, re.DOTALL)
     return [
         {
@@ -148,6 +164,7 @@ def parse_chunks_from_context_block(block: str) -> list[dict[str, object]]:
             "document_id": match.group("doc_id"),
             "chunk_index": int(match.group("chunk")),
             "content": match.group("content").strip(),
+            "metadata": {"chunk_type": match.group("chunk_type") or "text"},
         }
         for match in matches
     ]
@@ -277,7 +294,7 @@ async def extract_notebook_chat_transcript(
                                 isinstance(part, ToolReturnPart)
                                 and part.tool_name == "search_notebook_context"
                             ):
-                                content_str = str(part.content)
+                                content_str = _tool_return_to_text(part.content)
                                 sources.extend(
                                     parse_chunks_from_context_block(content_str)
                                 )
@@ -338,6 +355,7 @@ async def extract_notebook_chat_transcript(
                             "document_id": doc_id,
                             "chunk_index": chunk_index,
                             "content": source["content"],
+                            "metadata": source.get("metadata", {}),
                         }
                     )
 

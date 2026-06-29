@@ -8,6 +8,7 @@ from typing import Any
 from uuid import UUID
 
 import pymupdf
+from beanie.odm.queries.update import UpdateResponse
 from botocore.exceptions import ClientError
 from bson import Binary
 from langchain_core.documents import Document
@@ -205,7 +206,9 @@ image_description_agent = Agent(
 
 def _image_media_type(filename: str) -> str:
     """Map a filename to a valid image MIME type, defaulting to image/jpeg."""
-    return _IMAGE_MEDIA_TYPES.get(Path(filename).suffix.lstrip(".").lower(), "image/jpeg")
+    return _IMAGE_MEDIA_TYPES.get(
+        Path(filename).suffix.lstrip(".").lower(), "image/jpeg"
+    )
 
 
 async def _describe_image(image_bytes: bytes, label: str, media_type: str) -> str:
@@ -226,6 +229,11 @@ async def _describe_image(image_bytes: bytes, label: str, media_type: str) -> st
 # Embedded images smaller than this (in either dimension, px) are almost always
 # logos, icons, bullets, or spacers — not worth a vision call or an index entry.
 _MIN_EMBEDDED_IMAGE_DIMENSION = 64
+
+# Cap concurrent vision-LLM calls so an image-heavy PDF doesn't fan out hundreds
+# of simultaneous requests (provider rate limits / 429s / ingestion timeout).
+_PDF_IMAGE_VISION_CONCURRENCY = 5
+
 
 def _extract_pdf_image_bytes(
     pdf_doc: pymupdf.Document, xref: int
@@ -267,41 +275,53 @@ async def _extract_pdf_images(
     — rather than rendering every page.
     """
     key_prefix = document.s3_key.rsplit("/", 1)[0]
-    pdf_doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
 
     seen_xrefs: set[int] = set()
     images: list[tuple[str, bytes, str, str]] = []  # (s3_key, bytes, media_type, label)
-    for page_index in range(len(pdf_doc)):
-        for img in pdf_doc[page_index].get_images():
-            xref = img[0]
-            if xref in seen_xrefs:
-                continue
-            seen_xrefs.add(xref)
+    pdf_doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        for page_index in range(len(pdf_doc)):
+            for img in pdf_doc[page_index].get_images():
+                xref = img[0]
+                if xref in seen_xrefs:
+                    continue
+                seen_xrefs.add(xref)
 
-            extracted = _extract_pdf_image_bytes(pdf_doc, xref)
-            if extracted is None:
-                continue
-            image_bytes, ext, media_type = extracted
+                extracted = _extract_pdf_image_bytes(pdf_doc, xref)
+                if extracted is None:
+                    continue
+                image_bytes, ext, media_type = extracted
 
-            image_key = f"{key_prefix}/images/img_{xref}.{ext}"
-            s3_client.put_object(
-                Bucket=document.s3_bucket,
-                Key=image_key,
-                Body=image_bytes,
-                ContentType=media_type,
-            )
-            label = f"image on page {page_index + 1} of {document.filename}"
-            images.append((image_key, image_bytes, media_type, label))
+                image_key = f"{key_prefix}/images/img_{xref}.{ext}"
+                # boto3 put_object is blocking; keep it off the event loop.
+                await asyncio.to_thread(
+                    s3_client.put_object,
+                    Bucket=document.s3_bucket,
+                    Key=image_key,
+                    Body=image_bytes,
+                    ContentType=media_type,
+                )
+                label = f"image on page {page_index + 1} of {document.filename}"
+                images.append((image_key, image_bytes, media_type, label))
+    finally:
+        pdf_doc.close()
 
     if not images:
         logger.info("No embedded images found in PDF %s", document.filename)
         return []
 
-    # Describe every image concurrently — sequential vision calls on an
-    # image-heavy PDF can exceed the ingestion processing timeout.
+    # Describe images concurrently but bounded — sequential vision calls on an
+    # image-heavy PDF can exceed the ingestion timeout, while an unbounded
+    # gather can hammer the provider into rate limits.
+    semaphore = asyncio.Semaphore(_PDF_IMAGE_VISION_CONCURRENCY)
+
+    async def _describe_bounded(data: bytes, label: str, media_type: str) -> str:
+        async with semaphore:
+            return await _describe_image(data, label, media_type)
+
     descriptions = await asyncio.gather(
         *(
-            _describe_image(data, label, media_type)
+            _describe_bounded(data, label, media_type)
             for _, data, media_type, label in images
         )
     )
@@ -494,17 +514,21 @@ async def claim_document_for_ingestion(
     *,
     size: int | None = None,
 ) -> NotebookDocument | None:
+    set_fields: dict[str, Any] = {
+        "status": "processing",
+        "error_message": None,
+        "updated_at": datetime.now(UTC),
+    }
+    if size is not None:
+        set_fields["size"] = size
+    # Atomic claim: only the caller whose find-and-update matches a CLAIMABLE
+    # status wins, so concurrent deliveries for the same object can't both
+    # claim it (queue.consume dispatches handlers concurrently when prefetch>1).
     document = await NotebookDocument.find_one(
         {"_id": document_id, "status": {"$in": list(CLAIMABLE_DOCUMENT_STATUSES)}},
-    )
+    ).update({"$set": set_fields}, response_type=UpdateResponse.NEW_DOCUMENT)
     if document is None:
         return None
-    document.status = "processing"
-    document.error_message = None
-    document.updated_at = datetime.now(UTC)
-    if size is not None:
-        document.size = size
-    await document.save()
     await domain_event_bus.emit(DocumentProcessing(document))
     return document
 
@@ -587,8 +611,10 @@ async def _run_document_ingestion(
             ),
             settings,
         )
-        if suffix == ".pdf" and document.s3_bucket:
-            split_docs = split_docs + await _extract_pdf_images(document, body, s3_client)
+        if suffix == ".pdf" and document.s3_bucket and document.s3_key:
+            split_docs = split_docs + await _extract_pdf_images(
+                document, body, s3_client
+            )
 
     # Drop blank chunks so they are never inserted/embedded — an empty chunk
     # would stall index verification (its vector-search query never matches).
