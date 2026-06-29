@@ -183,14 +183,16 @@ class TransientIngestionError(RuntimeError):
     """A retryable ingestion error that should trigger message requeue."""
 
 
-# Canonical IANA image MIME types. ``image/jpg`` is NOT valid — vision
-# providers reject it — so ``.jpg`` must map to ``image/jpeg``.
+# Canonical IANA image MIME types keyed by bare extension (no leading dot).
+# ``image/jpg`` is NOT valid — vision providers reject it — so ``jpg`` maps
+# to ``image/jpeg``. Both ``_image_media_type`` (filename-based) and
+# ``_extract_pdf_image_bytes`` (PyMuPDF ext-based) use this single source.
 _IMAGE_MEDIA_TYPES = {
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".webp": "image/webp",
-    ".gif": "image/gif",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "webp": "image/webp",
+    "gif": "image/gif",
 }
 
 image_description_agent = Agent(
@@ -203,7 +205,7 @@ image_description_agent = Agent(
 
 def _image_media_type(filename: str) -> str:
     """Map a filename to a valid image MIME type, defaulting to image/jpeg."""
-    return _IMAGE_MEDIA_TYPES.get(Path(filename).suffix.lower(), "image/jpeg")
+    return _IMAGE_MEDIA_TYPES.get(Path(filename).suffix.lstrip(".").lower(), "image/jpeg")
 
 
 async def _describe_image(image_bytes: bytes, label: str, media_type: str) -> str:
@@ -225,17 +227,6 @@ async def _describe_image(image_bytes: bytes, label: str, media_type: str) -> st
 # logos, icons, bullets, or spacers — not worth a vision call or an index entry.
 _MIN_EMBEDDED_IMAGE_DIMENSION = 64
 
-# Native encodings a vision provider and the browser can consume directly. Any
-# other format (CMYK JPEG, JPX, JBIG2, …) is normalized to PNG via a Pixmap.
-_PDF_IMAGE_MEDIA_TYPES = {
-    "png": "image/png",
-    "jpeg": "image/jpeg",
-    "jpg": "image/jpeg",
-    "webp": "image/webp",
-    "gif": "image/gif",
-}
-
-
 def _extract_pdf_image_bytes(
     pdf_doc: pymupdf.Document, xref: int
 ) -> tuple[bytes, str, str] | None:
@@ -254,7 +245,7 @@ def _extract_pdf_image_bytes(
         return None
 
     ext = base["ext"].lower()
-    media_type = _PDF_IMAGE_MEDIA_TYPES.get(ext)
+    media_type = _IMAGE_MEDIA_TYPES.get(ext)
     if media_type is not None:
         return base["image"], ext, media_type
 
@@ -586,18 +577,6 @@ async def _run_document_ingestion(
                 },
             )
         ]
-    elif suffix == ".pdf" and document.s3_bucket:
-        text_docs = chunk_document(
-            ChunkingRequest(
-                content=body,
-                filename=document.filename,
-                source=source_key,
-                document_id=str(document.id),
-            ),
-            settings,
-        )
-        image_docs = await _extract_pdf_images(document, body, s3_client)
-        split_docs = text_docs + image_docs
     else:
         split_docs = chunk_document(
             ChunkingRequest(
@@ -608,6 +587,8 @@ async def _run_document_ingestion(
             ),
             settings,
         )
+        if suffix == ".pdf" and document.s3_bucket:
+            split_docs = split_docs + await _extract_pdf_images(document, body, s3_client)
 
     # Drop blank chunks so they are never inserted/embedded — an empty chunk
     # would stall index verification (its vector-search query never matches).

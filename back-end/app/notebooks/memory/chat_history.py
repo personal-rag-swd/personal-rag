@@ -3,6 +3,7 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
+from beanie.odm.enums import SortDirection
 from pydantic_ai import ModelMessage, ModelMessagesTypeAdapter
 from pydantic_ai.messages import (
     ModelRequest,
@@ -28,9 +29,17 @@ CITATION_PATTERN = re.compile(
 async def load_notebook_chat_history(
     notebook: Notebook,
 ) -> list[ModelMessage]:
+    """Load the full chat history for a notebook from the database.
+
+    Args:
+        notebook: The notebook whose message history to fetch.
+
+    Returns:
+        Ordered list of pydantic-ai model messages, sorted by sequence number.
+    """
     messages = (
         await NotebookMessage.find({"notebook_id": notebook.id})
-        .sort(("seq", 1))
+        .sort(("seq", SortDirection.ASCENDING))
         .to_list()
     )
     rows = [msg.message for msg in messages]
@@ -41,6 +50,19 @@ async def append_notebook_chat_history(
     notebook: Notebook,
     new_messages: list[ModelMessage],
 ) -> Notebook:
+    """Persist new messages to a notebook's chat history.
+
+    Assigns sequential sequence numbers continuing from the last stored
+    message, then updates the notebook's ``last_active_at`` and
+    ``updated_at`` timestamps.
+
+    Args:
+        notebook: The notebook to append messages to.
+        new_messages: pydantic-ai messages produced by the latest agent run.
+
+    Returns:
+        The updated notebook document.
+    """
     if not new_messages:
         return notebook
 
@@ -49,7 +71,7 @@ async def append_notebook_chat_history(
 
     last = (
         await NotebookMessage.find({"notebook_id": notebook.id})
-        .sort(("seq", -1))
+        .sort(("seq", SortDirection.DESCENDING))
         .first_or_none()
     )
     max_seq = last.seq if last else 0
@@ -70,12 +92,13 @@ def build_user_message_from_agui_payload(
 ) -> ModelRequest | None:
     """Extract the latest user turn from an AG-UI chat request body.
 
-    The AG-UI adapter passes incoming messages to the agent as ``message_history``
-    rather than as a fresh prompt, so they are excluded from
-    ``AgentRunResult.new_messages()``. We therefore reconstruct the user's new
-    message from the request payload so it can be persisted alongside the
-    assistant response. Returns ``None`` when no user text is present (e.g. an
-    empty ``messages`` array).
+    Args:
+        payload: The raw AG-UI request body, expected to be a dict with a
+            ``messages`` list.
+
+    Returns:
+        A ``ModelRequest`` containing the latest user text, or ``None`` when
+        no user text is present (e.g. an empty ``messages`` array).
     """
     if not isinstance(payload, dict):
         return None
@@ -103,6 +126,20 @@ def build_user_message_from_agui_payload(
 
 
 def parse_chunks_from_context_block(block: str) -> list[dict[str, object]]:
+    """Parse SOURCE blocks from a RAG context tool-return string.
+
+    Each block has the form::
+
+        SOURCE [filename=<name> doc_id=<uuid> chunk=<n>]
+        <content>
+
+    Args:
+        block: Raw string returned by the ``search_notebook_context`` tool.
+
+    Returns:
+        List of dicts, each with ``filename``, ``document_id``,
+        ``chunk_index``, and ``content`` keys.
+    """
     pattern = r"SOURCE \[filename=(?P<filename>.*?) doc_id=(?P<doc_id>[a-f0-9\-]+) chunk=(?P<chunk>\d+)\]\n(?P<content>.*?)(?=\n+SOURCE \[filename=|\Z)"
     matches = re.finditer(pattern, block, re.DOTALL)
     return [
@@ -121,6 +158,25 @@ async def extract_notebook_chat_transcript(
     *,
     include_reasoning: bool = False,
 ) -> list[dict[str, object]]:
+    """Build a structured transcript from a notebook's raw message history.
+
+    Converts pydantic-ai ``ModelMessage`` objects into a frontend-friendly
+    format, resolving tool calls to their results and mapping inline citations
+    to their source chunks.
+
+    Args:
+        notebook: The notebook to extract the transcript from.
+        include_reasoning: When ``True``, include ``ThinkingPart`` content as
+            ``reasoning`` parts in assistant turns.
+
+    Returns:
+        List of turn dicts. Each user turn has ``role="user"`` and a
+        ``parts`` list with a single text entry. Each assistant turn has
+        ``role="assistant"``, a ``parts`` list (text, reasoning, and/or
+        tool-call entries), a ``sources`` list of all retrieved chunks, and a
+        ``references`` list of de-duplicated citations found in the assistant
+        text.
+    """
     messages = await load_notebook_chat_history(notebook)
     transcript: list[dict[str, object]] = []
 

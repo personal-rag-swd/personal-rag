@@ -4,6 +4,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from beanie.odm.enums import SortDirection
 from httpx import AsyncClient
 from starlette.responses import JSONResponse
 
@@ -167,7 +168,7 @@ async def test_notebook_message_stores_and_retrieves_history() -> None:
         await NotebookMessage.find(
             {"notebook_id": notebook_id}
         )
-        .sort(("seq", 1))
+        .sort(("seq", SortDirection.ASCENDING))
         .to_list()
     )
     assert len(stored) == 2
@@ -216,7 +217,7 @@ async def test_notebook_chat_persists_messages_in_db(
         await response.aread()
 
     # Now verify that NotebookMessages were inserted in MongoDB
-    messages = await NotebookMessage.find({"notebook_id": notebook.id}).sort(("seq", 1)).to_list()
+    messages = await NotebookMessage.find({"notebook_id": notebook.id}).sort(("seq", SortDirection.ASCENDING)).to_list()
     print("MESSAGES IN DB:")
     for m in messages:
         print(f"  seq={m.seq}: {m.message}")

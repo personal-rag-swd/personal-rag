@@ -263,7 +263,6 @@ async def create_notebook_note(
     return document
 
 
-
 @router.post("/{notebook_id}/chat")
 async def chat_notebook_route(
     notebook_id: UUID,
@@ -274,16 +273,13 @@ async def chat_notebook_route(
     message_history = await load_notebook_chat_history(notebook)
     settings = get_settings()
 
-    # The AG-UI adapter forwards the incoming user message as part of
-    # ``message_history`` (not as a fresh prompt), so it is excluded from
-    # ``result.new_messages()``. Capture it from the raw request body here so it
-    # can be persisted alongside the assistant response; otherwise user turns are
-    # lost and disappear from the chat history on reload.
     try:
         request_payload = json.loads(await request.body() or b"{}")
     except (ValueError, TypeError):
         request_payload = None
     new_user_message = build_user_message_from_agui_payload(request_payload)
+    if new_user_message is not None:
+        await append_notebook_chat_history(notebook, [new_user_message])
 
     deps = NotebookChatDeps(
         notebook=notebook,
@@ -292,15 +288,7 @@ async def chat_notebook_route(
     )
 
     async def persist_chat_history(result: AgentRunResult[object]) -> None:
-        new_messages = list(result.new_messages())
-        already_has_user_turn = (
-            bool(new_messages)
-            and isinstance(new_messages[0], ModelRequest)
-            and any(isinstance(part, UserPromptPart) for part in new_messages[0].parts)
-        )
-        if new_user_message is not None and not already_has_user_turn:
-            new_messages = [new_user_message, *new_messages]
-        await append_notebook_chat_history(notebook, new_messages)
+        await append_notebook_chat_history(notebook, result.new_messages())
 
     async def keep_recent(messages: list[ModelMessage]) -> list[ModelMessage]:
         system_prompts = []

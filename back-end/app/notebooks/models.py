@@ -25,7 +25,7 @@ class Notebook(Document):
 
 
 class NotebookMessage(Document):
-    id: UUID = Field(default_factory=uuid4)
+    id: UUID = Field(default_factory=uuid4) # type: ignore
     notebook_id: UUID
     seq: int
     message: dict[str, Any]
@@ -87,7 +87,7 @@ class NotebookDocumentChunk(Document):
 
 
 class NotebookReport(Document):
-    id: UUID = Field(default_factory=uuid4)
+    id: UUID = Field(default_factory=uuid4) # type: ignore
     notebook_id: UUID
     user_id: UUID
     report_type: str

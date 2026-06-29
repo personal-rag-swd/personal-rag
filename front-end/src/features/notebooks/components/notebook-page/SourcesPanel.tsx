@@ -502,14 +502,17 @@ function SourcesPlaceholder({
   )
 }
 
-function isSupportedFile(file: File) {
+function hasExtension(file: File, extensions: string[]) {
   const filename = file.name.toLowerCase()
-  return SUPPORTED_EXTENSIONS.some((extension) => filename.endsWith(extension))
+  return extensions.some((ext) => filename.endsWith(ext))
+}
+
+function isSupportedFile(file: File) {
+  return hasExtension(file, SUPPORTED_EXTENSIONS)
 }
 
 function isImageFile(file: File) {
-  const filename = file.name.toLowerCase()
-  return IMAGE_EXTENSIONS.some((extension) => filename.endsWith(extension))
+  return hasExtension(file, IMAGE_EXTENSIONS)
 }
 
 function formatBytes(bytes: number | null) {
