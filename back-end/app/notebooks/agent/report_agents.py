@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import TypeVar
 
 import logfire
 from pydantic_ai import Agent
@@ -35,6 +35,8 @@ from app.notebooks.schemas import (
     QuizReport,
     StudyGuideReport,
 )
+
+OutputT = TypeVar("OutputT")
 
 # Statically defined report agents
 briefing_agent = Agent(
@@ -74,12 +76,12 @@ flashcards_agent = Agent(
 
 
 async def _run_agent_with_retry(
-    agent: Agent,
+    agent: Agent[None, OutputT],
     user_msg: str,
     model: Model,
     max_retries: int = 4,
     initial_delay: float = 2.0,
-) -> AgentRunResult[Any]:
+) -> AgentRunResult[OutputT]:
     delay = initial_delay
     for attempt in range(max_retries):
         try:
