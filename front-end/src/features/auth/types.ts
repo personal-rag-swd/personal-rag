@@ -35,9 +35,33 @@ export const verificationSchema = z.object({
     .regex(/^\d{6}$/, "Enter the 6-digit code."),
 })
 
+export const forgotPasswordSchema = z.object({
+  email: emailSchema,
+})
+
+export const resetPasswordSchema = z
+  .object({
+    otp: z
+      .string()
+      .trim()
+      .regex(/^\d{6}$/, "Enter the 6-digit code."),
+    newPassword: z
+      .string()
+      .trim()
+      .min(8, "Password must be at least 8 characters.")
+      .max(128, "Password must be 128 characters or fewer."),
+    confirmNewPassword: z.string().trim().min(1, "Please confirm your password."),
+  })
+  .refine((data) => data.newPassword === data.confirmNewPassword, {
+    message: "Passwords do not match.",
+    path: ["confirmNewPassword"],
+  })
+
 export type LoginValues = z.input<typeof loginSchema>
 export type RegistrationValues = z.input<typeof registrationSchema>
 export type VerificationValues = z.input<typeof verificationSchema>
+export type ForgotPasswordValues = z.input<typeof forgotPasswordSchema>
+export type ResetPasswordValues = z.input<typeof resetPasswordSchema>
 
 export type ApiErrorPayload = {
   detail?: string | Array<{ msg?: string; loc?: Array<string | number> }>

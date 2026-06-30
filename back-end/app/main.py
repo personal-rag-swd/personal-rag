@@ -36,7 +36,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from scalar_fastapi import get_scalar_api_reference
 
-from app.auth.models import PendingRegistration, RefreshToken
+from app.auth.models import PasswordResetRequest, PendingRegistration, RefreshToken
 from app.auth.router import router as auth_router
 from app.core.exceptions import AppError
 from app.event_listeners import register_default_event_listeners
@@ -128,6 +128,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     document_models = [
         User,
         PendingRegistration,
+        PasswordResetRequest,
         RefreshToken,
         Notebook,
         NotebookMessage,

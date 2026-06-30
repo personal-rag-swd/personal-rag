@@ -30,8 +30,8 @@ These are non-obvious and cause silent failures if violated:
 - For id lookups use `{"_id": value}`, **not** `{"id": value}` — Beanie maps Python `id` → Mongo `_id`.
 - Document models all use `id: UUID = Field(default_factory=uuid4)`. UUIDs are stored as BSON `Binary`; when building `$vectorSearch` filters on UUID fields, wrap with `Binary.from_uuid(...)` (see `rag/search_service.py`).
 - `$vectorSearch` uses client-side embeddings: pass `queryVector` (a `list[float]`) on the `embedding` path, not `query`. Embeddings are generated via OpenRouter (`app/core/embedding_provider.py`). Index name is `notebook_chunks_vector_index`. The Atlas index must be defined as `type: vector`, `path: embedding`, `numDimensions: 1536`, `similarity: cosine`.
-- Tests use `mongomock-motor`; `conftest.py` patches `list_collection_names` to drop the `authorizedCollections` kwarg for compatibility.
-- All Document models register in `app/main.py` `lifespan()` via `init_beanie(document_models=[...])` — new models must be added there.
+- Tests run against **real MongoDB** (`personal-rag-test` database) and **real MinIO** (`personal-rag-test` bucket). CI provides both via service containers. Locally, start MongoDB on 27017 and MinIO on 9000 with `minioadmin`/`minioadmin` credentials before running `uv run pytest`.
+- All Document models register in **both** `app/main.py` `lifespan()` and `tests/conftest.py` `DOCUMENT_MODELS` via `init_beanie(document_models=[...])` — new models must be added to both.
 
 ## Backend architecture
 

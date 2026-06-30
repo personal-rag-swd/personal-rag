@@ -6,6 +6,23 @@ from beanie import Document
 from pydantic import Field
 
 
+class PasswordResetRequest(Document):
+    id: UUID = Field(default_factory=uuid4)  # type: ignore[override]
+    email: str
+    hashed_otp: str
+    otp_attempts: int = 0
+    expires_at: datetime
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    class Settings:
+        name = "password_reset_requests"
+        use_state_management = True
+        indexes: ClassVar[list[list[tuple[str, int]]]] = [
+            [("email", 1)],
+        ]
+
+
 class PendingRegistration(Document):
     id: UUID = Field(default_factory=uuid4)  # type: ignore[override]
     email: str

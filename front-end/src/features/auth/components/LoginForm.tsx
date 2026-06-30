@@ -134,6 +134,12 @@ export function LoginForm({
                 <Field data-invalid={isInvalid}>
                   <div className="flex items-center justify-between">
                     <FieldLabel htmlFor={field.name}>Password</FieldLabel>
+                    <Link
+                      to="/forgot-password"
+                      className="text-sm underline underline-offset-4 hover:text-primary"
+                    >
+                      Forgot password?
+                    </Link>
                   </div>
                   <InputGroup>
                     <InputGroupInput

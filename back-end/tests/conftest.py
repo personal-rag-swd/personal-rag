@@ -16,13 +16,14 @@ from pymongo import AsyncMongoClient
 from scalar_fastapi import get_scalar_api_reference
 
 import app.auth.service as _auth_service
-from app.auth.models import PendingRegistration, RefreshToken
+from app.auth.models import PasswordResetRequest, PendingRegistration, RefreshToken
 from app.auth.router import router as auth_router
 from app.core.config import Settings, get_settings
 from app.core.exceptions import AppError
 
 # Disable email sending in tests
 _auth_service.send_registration_otp = lambda *a, **kw: None
+_auth_service.send_password_reset_otp = lambda *a, **kw: None
 from app.core.security import create_access_token
 from app.event_listeners import register_default_event_listeners
 from app.file.router import router as file_router
@@ -42,6 +43,7 @@ password_hash = PasswordHash.recommended()
 DOCUMENT_MODELS = [
     User,
     PendingRegistration,
+    PasswordResetRequest,
     RefreshToken,
     Notebook,
     NotebookDocument,
@@ -119,6 +121,15 @@ async def fixture_settings() -> Settings:
         notebook_chunk_overlap=20,
         embedding_dimension=1536,
         embedding_model="text-embedding-3-small",
+        s3_bucket=os.environ.get("S3_BUCKET", "personal-rag-test"),
+        s3_region="us-east-1",
+        s3_endpoint_url=os.environ.get("S3_ENDPOINT_URL", "http://localhost:9000"),
+        s3_public_endpoint_url=os.environ.get(
+            "S3_PUBLIC_ENDPOINT_URL",
+            os.environ.get("S3_ENDPOINT_URL", "http://localhost:9000"),
+        ),
+        aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", "minioadmin"),
+        aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", "minioadmin"),
     )
 
 

@@ -6,15 +6,21 @@ from uuid import UUID
 
 import resend
 
-from app.auth.domain_events import RegistrationRequested, RegistrationVerified
+from app.auth.domain_events import (
+    PasswordResetCompleted,
+    PasswordResetRequested,
+    RegistrationRequested,
+    RegistrationVerified,
+)
 from app.auth.exceptions import (
     EmailAlreadyRegisteredError,
     InvalidCredentialsError,
     InvalidOrExpiredCodeError,
     InvalidRefreshTokenError,
+    PasswordResetEmailFailedError,
     RegistrationEmailFailedError,
 )
-from app.auth.models import PendingRegistration, RefreshToken
+from app.auth.models import PasswordResetRequest, PendingRegistration, RefreshToken
 from app.core.config import Settings
 from app.core.event_bus import domain_event_bus
 from app.core.security import create_access_token, hash_password, verify_password
@@ -37,6 +43,21 @@ def generate_otp() -> str:
 
 def hash_refresh_token(token: str) -> str:
     return sha256(token.encode("utf-8")).hexdigest()
+
+
+def send_password_reset_otp(email: str, otp: str, settings: Settings) -> None:
+    if not settings.resend_api_key:
+        raise RuntimeError("RESEND_API_KEY must be set to send password reset email.")
+
+    resend.api_key = settings.resend_api_key
+    resend.Emails.send(
+        {
+            "from": settings.resend_from_email,
+            "to": [email],
+            "subject": "Your password reset code",
+            "html": f"<p>Your password reset code is <strong>{otp}</strong>.</p>",
+        }
+    )
 
 
 def send_registration_otp(email: str, otp: str, settings: Settings) -> None:
@@ -208,3 +229,75 @@ async def logout_session(raw_refresh_token: str) -> None:
         raise InvalidRefreshTokenError()
 
     await revoke_token_family(refresh_token.family_id)
+
+
+async def revoke_all_user_sessions(user_id: UUID) -> None:
+    now = datetime.now(UTC)
+    tokens = await RefreshToken.find({"user_id": user_id, "revoked_at": None}).to_list()
+    for token in tokens:
+        token.revoked_at = now
+        await token.save()
+
+
+async def request_password_reset(email: str, settings: Settings) -> None:
+    normalized_email = normalize_email(email)
+    user = await User.find_one({"email": normalized_email})
+    if user is None or not user.is_active:
+        # Silently succeed to avoid leaking account existence
+        return
+
+    existing = await PasswordResetRequest.find_one({"email": normalized_email})
+    if existing is not None:
+        await existing.delete()
+
+    otp = generate_otp()
+    reset_request = PasswordResetRequest(
+        email=normalized_email,
+        hashed_otp=hash_password(otp),
+        expires_at=datetime.now(UTC) + timedelta(minutes=settings.otp_expire_minutes),
+    )
+    try:
+        await domain_event_bus.emit(
+            PasswordResetRequested(email=normalized_email, otp=otp, settings=settings)
+        )
+        await reset_request.insert()
+    except Exception as exc:
+        raise PasswordResetEmailFailedError() from exc
+
+
+async def complete_password_reset(
+    email: str, otp: str, new_password: str, settings: Settings
+) -> None:
+    normalized_email = normalize_email(email)
+    reset_request = await PasswordResetRequest.find_one({"email": normalized_email})
+    if reset_request is None:
+        raise InvalidOrExpiredCodeError()
+
+    if (
+        as_utc(reset_request.expires_at) <= datetime.now(UTC)
+        or reset_request.otp_attempts >= settings.otp_max_attempts
+    ):
+        await reset_request.delete()
+        raise InvalidOrExpiredCodeError()
+
+    if not verify_password(otp, reset_request.hashed_otp):
+        reset_request.otp_attempts += 1
+        reset_request.updated_at = datetime.now(UTC)
+        if reset_request.otp_attempts >= settings.otp_max_attempts:
+            await reset_request.delete()
+        else:
+            await reset_request.save()
+        raise InvalidOrExpiredCodeError()
+
+    user = await User.find_one({"email": normalized_email})
+    if user is None or not user.is_active:
+        await reset_request.delete()
+        raise InvalidOrExpiredCodeError()
+
+    user.hashed_password = hash_password(new_password)
+    user.updated_at = datetime.now(UTC)
+    await user.save()
+
+    await revoke_all_user_sessions(user.id)
+    await reset_request.delete()
+    await domain_event_bus.emit(PasswordResetCompleted(user_id=user.id, email=normalized_email))

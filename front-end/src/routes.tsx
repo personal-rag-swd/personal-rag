@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom"
 import { Loader2 } from "lucide-react"
 
 import { useAuth } from "@/features/auth/store/auth-store"
+import { ForgotPasswordForm } from "@/features/auth/components/ForgotPasswordForm"
 import { LoginForm } from "@/features/auth/components/LoginForm"
 import { RegisterForm } from "@/features/auth/components/RegisterForm"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
@@ -138,6 +139,16 @@ export function AppRoutes() {
           <PublicRoute>
             <AuthLayout>
               <RegisterForm />
+            </AuthLayout>
+          </PublicRoute>
+        }
+      />
+      <Route
+        path="/forgot-password"
+        element={
+          <PublicRoute>
+            <AuthLayout>
+              <ForgotPasswordForm />
             </AuthLayout>
           </PublicRoute>
         }

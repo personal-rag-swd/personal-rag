@@ -22,6 +22,12 @@ interface AuthStore {
     password: string
   ) => Promise<{ step: "otp" | "details" }>
   verifyRegistration: (email: string, otp: string) => Promise<void>
+  requestPasswordReset: (email: string) => Promise<void>
+  completePasswordReset: (
+    email: string,
+    otp: string,
+    newPassword: string
+  ) => Promise<void>
   logout: () => Promise<void>
 }
 
@@ -91,6 +97,16 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     await apiClient.post("/api/v1/auth/email-verifications", {
       email,
       otp,
+    })
+  },
+  requestPasswordReset: async (email) => {
+    await apiClient.post("/api/v1/auth/password-resets", { email })
+  },
+  completePasswordReset: async (email, otp, newPassword) => {
+    await apiClient.post("/api/v1/auth/password-resets/verify", {
+      email,
+      otp,
+      new_password: newPassword,
     })
   },
   logout: async () => {

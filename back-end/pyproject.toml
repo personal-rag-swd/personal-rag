@@ -37,7 +37,6 @@ addopts = "-p no:anyio"
 [dependency-groups]
 dev = [
     "ruff>=0.15.14",
-    "mongomock-motor>=0.0.36",
 ]
 
 [tool.ruff]

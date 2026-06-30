@@ -50,3 +50,11 @@ class RefreshTokenCookieMissingError(AppError):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token cookie missing",
         )
+
+
+class PasswordResetEmailFailedError(AppError):
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not send password reset email",
+        )

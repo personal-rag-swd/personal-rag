@@ -6,14 +6,18 @@ from fastapi.security import OAuth2PasswordRequestForm
 from app.auth.exceptions import RefreshTokenCookieMissingError
 from app.auth.schemas import (
     EmailVerificationCreate,
+    PasswordResetCreate,
+    PasswordResetVerify,
     RegistrationCreate,
     TokenResponse,
     VerificationResponse,
 )
 from app.auth.service import (
+    complete_password_reset,
     create_session,
     logout_session,
     refresh_session,
+    request_password_reset,
     start_registration,
     verify_registration_otp,
 )
@@ -130,6 +134,26 @@ async def create_token_refresh(
     tokens = await refresh_session(refresh_token, settings)
     set_session_cookies(response, request, tokens, settings)
     return tokens
+
+
+@router.post(
+    "/password-resets", status_code=status.HTTP_202_ACCEPTED, response_class=Response
+)
+async def create_password_reset(
+    body: PasswordResetCreate,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> Response:
+    await request_password_reset(body.email, settings)
+    return Response(status_code=status.HTTP_202_ACCEPTED)
+
+
+@router.post("/password-resets/verify", response_model=VerificationResponse)
+async def verify_password_reset(
+    body: PasswordResetVerify,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> VerificationResponse:
+    await complete_password_reset(body.email, body.otp, body.new_password, settings)
+    return VerificationResponse(success=True)
 
 
 @router.delete(

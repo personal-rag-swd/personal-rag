@@ -6,7 +6,7 @@ import logging
 import os
 
 from app.auth import service as auth_service
-from app.auth.domain_events import RegistrationRequested
+from app.auth.domain_events import PasswordResetRequested, RegistrationRequested
 from app.core.event_bus import DomainEventBus, domain_event_bus
 
 logger = logging.getLogger("app.auth")
@@ -27,6 +27,21 @@ async def send_registration_email(event: RegistrationRequested) -> None:
             raise
 
 
+async def send_password_reset_email(event: PasswordResetRequested) -> None:
+    try:
+        auth_service.send_password_reset_otp(event.email, event.otp, event.settings)
+    except Exception:
+        logger.warning(
+            "Could not send password reset email via Resend (RESEND_API_KEY may be missing). "
+            "Local dev bypass OTP for %s is: %s",
+            event.email,
+            event.otp,
+        )
+        if os.getenv("RESEND_API_KEY"):
+            raise
+
+
 def register_auth_event_listeners(bus: DomainEventBus = domain_event_bus) -> None:
     """Wire the auth listeners onto ``bus`` (idempotent)."""
     bus.subscribe(RegistrationRequested, send_registration_email, critical=True)
+    bus.subscribe(PasswordResetRequested, send_password_reset_email, critical=True)

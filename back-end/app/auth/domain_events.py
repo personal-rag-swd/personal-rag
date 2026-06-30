@@ -27,3 +27,20 @@ class RegistrationVerified(DomainEvent):
 
     user_id: UUID
     email: str
+
+
+@dataclass(frozen=True, eq=False)
+class PasswordResetRequested(DomainEvent):
+    """A user requested a password reset; a verification OTP must be delivered."""
+
+    email: str
+    otp: str
+    settings: Settings
+
+
+@dataclass(frozen=True, eq=False)
+class PasswordResetCompleted(DomainEvent):
+    """A password reset was verified and the user's password updated."""
+
+    user_id: UUID
+    email: str
