@@ -157,13 +157,13 @@ export function DashboardClient() {
                   size="sm"
                   onClick={() => {
                     selectNotebook(notebook.id);
-                    void navigate(`/notebook/${notebook.id}`);
+                    navigate(`/notebook/${notebook.id}`);
                   }}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
                       selectNotebook(notebook.id);
-                      void navigate(`/notebook/${notebook.id}`);
+                      navigate(`/notebook/${notebook.id}`);
                     }
                   }}
                   role="button"
@@ -310,7 +310,7 @@ export function DashboardClient() {
             onOpenChange={(open) => !open && setNotebookToUpdate(null)}
             notebook={notebookToUpdate}
             onSuccess={(updatedNotebook) => {
-              updateNotebook(updatedNotebook.id, updatedNotebook);
+              updateNotebook();
               toast.success("Notebook updated", {
                 description: `"${updatedNotebook.name}" was updated successfully.`,
               });
@@ -377,12 +377,12 @@ function CreateNotebookDialogContent({
       <form
         onInvalidCapture={(e) => {
           e.preventDefault();
-          void form.validate("submit");
+          form.validate("submit");
         }}
         onSubmit={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          void form.handleSubmit();
+          form.handleSubmit();
         }}
         className="py-2"
       >

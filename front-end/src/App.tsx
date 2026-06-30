@@ -13,7 +13,7 @@ function AuthSessionEffect() {
   const initializeSession = useAuthStore((state) => state.initializeSession)
 
   React.useEffect(() => {
-    void initializeSession()
+    initializeSession()
   }, [initializeSession])
 
   return null

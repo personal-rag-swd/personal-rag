@@ -163,7 +163,7 @@ export function useCreateNotebookMutation() {
       return mapNotebook(data)
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["notebooks"] })
+      queryClient.invalidateQueries({ queryKey: ["notebooks"] })
     },
   })
 }
@@ -194,7 +194,7 @@ export function useUpdateNotebookMutation() {
       return mapNotebook(data)
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["notebooks"] })
+      queryClient.invalidateQueries({ queryKey: ["notebooks"] })
     },
   })
 }
@@ -208,7 +208,7 @@ export function useDeleteNotebookMutation() {
       })
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["notebooks"] })
+      queryClient.invalidateQueries({ queryKey: ["notebooks"] })
     },
   })
 }
@@ -464,13 +464,13 @@ export function useDeleteNotebookDocumentMutation() {
       )
     },
     onSuccess: (_data, variables) => {
-      void queryClient.invalidateQueries({
+      queryClient.invalidateQueries({
         queryKey: ["notebooks", variables.notebookId, "documents"],
       })
-      void queryClient.invalidateQueries({
+      queryClient.invalidateQueries({
         queryKey: ["notebooks", variables.notebookId, "reports"],
       })
-      void queryClient.invalidateQueries({ queryKey: ["notebooks"] })
+      queryClient.invalidateQueries({ queryKey: ["notebooks"] })
     },
   })
 }
@@ -488,7 +488,7 @@ export function useTouchNotebookMutation() {
       return mapNotebook(data)
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["notebooks"] })
+      queryClient.invalidateQueries({ queryKey: ["notebooks"] })
     },
   })
 }
@@ -594,7 +594,7 @@ export function useCancelNotebookReportMutation(
       )
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({
+      queryClient.invalidateQueries({
         queryKey: ["notebooks", notebookId, "reports"],
       })
     },
@@ -613,13 +613,13 @@ export function useDeleteNotebookReportMutation(
       })
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({
+      queryClient.invalidateQueries({
         queryKey: ["notebooks", notebookId, "reports"],
       })
-      void queryClient.invalidateQueries({
+      queryClient.invalidateQueries({
         queryKey: ["notebooks", notebookId, "documents"],
       })
-      void queryClient.invalidateQueries({ queryKey: ["notebooks"] })
+      queryClient.invalidateQueries({ queryKey: ["notebooks"] })
     },
   })
 }

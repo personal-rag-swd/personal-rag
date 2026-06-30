@@ -368,7 +368,7 @@ export function NotebookPage() {
             description: `"${notebook.name}" was deleted successfully.`,
           })
           setIsDeleteOpen(false)
-          void navigate("/dashboard")
+          navigate("/dashboard")
         }}
         onClose={() => setIsDeleteOpen(false)}
       />

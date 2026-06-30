@@ -37,7 +37,7 @@ export function NavNotebooks() {
               <SidebarMenuButton
                 onClick={() => {
                   selectNotebook(notebook.id)
-                  void navigate(`/notebook/${notebook.id}`)
+                  navigate(`/notebook/${notebook.id}`)
                 }}
                 className="transition-all duration-200"
               >
@@ -65,7 +65,7 @@ export function NavNotebooks() {
                   <DropdownMenuItem
                     onClick={() => {
                       selectNotebook(notebook.id)
-                      void navigate(`/notebook/${notebook.id}`)
+                      navigate(`/notebook/${notebook.id}`)
                     }}
                   >
                     <FolderIcon className="mr-2 size-4" />

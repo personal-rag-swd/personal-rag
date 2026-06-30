@@ -19,7 +19,7 @@ export interface NotebookHookValue {
   selectNotebook: (id: string) => void
   addNotebook: (notebook: Notebook) => void
   deleteNotebook: (id: string) => void
-  updateNotebook: (id: string, updates: Partial<Notebook>) => void
+  updateNotebook: () => void
 }
 
 export const useNotebookUiStore = create<NotebookUiStore>((set) => ({
@@ -63,10 +63,8 @@ export function useNotebooks(): NotebookHookValue {
         },
       })
     },
-    updateNotebook: (id, updates) => {
+    updateNotebook: () => {
       // React Query invalidation in api.ts refetches notebooks after mutation.
-      void id
-      void updates
     },
   }
 }
