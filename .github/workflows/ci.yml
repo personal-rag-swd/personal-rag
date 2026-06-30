@@ -10,6 +10,24 @@ jobs:
   backend:
     name: Backend Test
     runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 })'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: mongodb://127.0.0.1:27017/personal-rag
+      CHAT_API_KEY: test-openrouter-key
+      OPENROUTER_API_KEY: test-openrouter-key
+      AWS_ACCESS_KEY_ID: test-access-key
+      AWS_SECRET_ACCESS_KEY: test-secret-key
+      S3_ENDPOINT_URL: http://localhost:9000
+      S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
     defaults:
       run:
         working-directory: back-end

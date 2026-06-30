@@ -21,6 +21,7 @@ from pydantic_ai.ui.ag_ui import AGUIAdapter
 
 from app.core.config import Settings, get_settings
 from app.core.llm_provider import resolve_chat_provider
+from app.core.s3 import generate_presigned_get_url
 from app.notebooks.agent import (
     NotebookChatDeps,
     notebook_chat_agent,
@@ -30,6 +31,7 @@ from app.notebooks.events import (
     build_report_snapshots,
     event_bus,
 )
+from app.notebooks.exceptions import DocumentNotFoundError
 from app.notebooks.memory import (
     append_notebook_chat_history,
     build_user_message_from_agui_payload,
@@ -37,11 +39,12 @@ from app.notebooks.memory import (
     keep_recent_messages,
     load_notebook_chat_history,
 )
-from app.notebooks.models import Notebook
+from app.notebooks.models import Notebook, NotebookDocument
 from app.notebooks.rag.ingestion_service import ingest_document_by_id
 from app.notebooks.schemas import (
     NotebookChatHistoryMessage,
     NotebookCreate,
+    NotebookDocumentPreviewRead,
     NotebookDocumentRead,
     NotebookPopulateRead,
     NotebookRead,
@@ -184,6 +187,54 @@ async def read_notebook_documents(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> list:
     return await list_notebook_documents(notebook_id, current_user)
+
+
+@router.get(
+    "/{notebook_id}/documents/{document_id}/preview",
+    response_model=NotebookDocumentPreviewRead,
+)
+async def read_notebook_document_preview(
+    notebook_id: UUID,
+    document_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> NotebookDocumentPreviewRead:
+    document = await NotebookDocument.find_one(
+        {
+            "_id": document_id,
+            "notebook_id": notebook_id,
+            "user_id": current_user.id,
+        }
+    )
+    if document is None:
+        raise DocumentNotFoundError()
+
+    if document.content is not None:
+        return NotebookDocumentPreviewRead(
+            filename=document.filename,
+            content_type=document.content_type,
+            size=document.size,
+            url=None,
+            content=document.content,
+            preview_type="text",
+        )
+
+    if not document.s3_key:
+        raise DocumentNotFoundError()
+
+    url = generate_presigned_get_url(
+        settings,
+        key=document.s3_key,
+        expires_in=3600,
+    )
+    return NotebookDocumentPreviewRead(
+        filename=document.filename,
+        content_type=document.content_type,
+        size=document.size,
+        url=url,
+        content=None,
+        preview_type="url",
+    )
 
 
 @router.delete(

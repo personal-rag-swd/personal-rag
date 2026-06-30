@@ -58,11 +58,34 @@ class TestFilePresignedURL:
         key = response.json()["key"]
 
         doc = await NotebookDocument.find_one(
-            NotebookDocument.s3_key == key,
+            {"s3_key": key},
         )
         assert doc is not None
         assert doc.filename == "test.txt"
         assert doc.status == "pending"
+
+    async def test_get_presigned_url_rejects_unsafe_notebook_content_type(
+        self,
+        client: AsyncClient,
+        settings: Any,
+    ) -> None:
+        user = await create_user(role="user")
+        headers = auth_headers(user, settings)
+        notebook = await create_notebook(user)
+
+        response = await client.post(
+            "/api/v1/file/presigned-url",
+            json={
+                "filename": "payload.txt",
+                "content_type": "text/html",
+                "operation": "upload",
+                "notebook_id": str(notebook.id),
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Unsupported notebook source content type"
 
     async def test_report_upload_failed(
         self,

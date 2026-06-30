@@ -99,6 +99,8 @@ def make_test_app() -> FastAPI:
 
 @pytest_asyncio.fixture(name="settings")
 async def fixture_settings() -> Settings:
+    os.environ.setdefault("CHAT_API_KEY", "test-openrouter-key")
+    os.environ.setdefault("OPENROUTER_API_KEY", "test-openrouter-key")
     raw_url = os.environ.get(
         "DATABASE_URL",
         "mongodb://localhost:27017/personal-rag",
@@ -135,6 +137,7 @@ async def fixture_settings() -> Settings:
 
 @pytest_asyncio.fixture(name="app")
 async def fixture_app(settings: Settings) -> AsyncGenerator[FastAPI]:
+    get_settings.cache_clear()
     client = AsyncMongoClient(
         settings.database_url,
         serverSelectionTimeoutMS=5000,
@@ -146,6 +149,7 @@ async def fixture_app(settings: Settings) -> AsyncGenerator[FastAPI]:
     app.dependency_overrides[get_settings] = lambda: settings
     yield app
     await client.close()
+    get_settings.cache_clear()
 
 
 @pytest_asyncio.fixture(name="client")

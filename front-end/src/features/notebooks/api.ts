@@ -19,6 +19,24 @@ import {
   type ReportStatus,
 } from "./types"
 
+export type NotebookDocumentPreview = {
+  filename: string
+  contentType: string | null
+  size: number | null
+  url: string | null
+  content: string | null
+  previewType: "url" | "text"
+}
+
+type NotebookDocumentPreviewApiPayload = {
+  filename: string
+  content_type: string | null
+  size: number | null
+  url: string | null
+  content: string | null
+  preview_type: "url" | "text"
+}
+
 function buildApiUrl(path: string): string {
   const base = import.meta.env.VITE_API_URL
   if (!base || base === "/") {
@@ -131,6 +149,19 @@ function mapNotebookDocument(
     errorMessage: payload.error_message,
     createdAt: payload.created_at,
     updatedAt: payload.updated_at,
+  }
+}
+
+function mapNotebookDocumentPreview(
+  payload: NotebookDocumentPreviewApiPayload
+): NotebookDocumentPreview {
+  return {
+    filename: payload.filename,
+    contentType: payload.content_type,
+    size: payload.size,
+    url: payload.url,
+    content: payload.content,
+    previewType: payload.preview_type,
   }
 }
 
@@ -473,6 +504,16 @@ export function useDeleteNotebookDocumentMutation() {
       void queryClient.invalidateQueries({ queryKey: ["notebooks"] })
     },
   })
+}
+
+export async function getNotebookDocumentPreview(
+  notebookId: string,
+  documentId: string
+) {
+  const data = await apiFetch<NotebookDocumentPreviewApiPayload>(
+    `/api/v1/notebooks/${notebookId}/documents/${documentId}/preview`
+  )
+  return mapNotebookDocumentPreview(data)
 }
 
 export function useTouchNotebookMutation() {
