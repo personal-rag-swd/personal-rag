@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import { create } from "zustand"
 import type { ThreadMessage } from "@assistant-ui/core"
-import { apiFetch } from "@/lib/api-client"
+import { apiClient, apiFetch } from "@/lib/api-client"
 import {
   type Notebook,
   type NotebookApiPayload,
@@ -514,6 +514,17 @@ export async function getNotebookDocumentPreview(
     `/api/v1/notebooks/${notebookId}/documents/${documentId}/preview`
   )
   return mapNotebookDocumentPreview(data)
+}
+
+export async function getNotebookDocumentDownloadBlob(
+  notebookId: string,
+  documentId: string
+) {
+  const response = await apiClient.request<Blob>({
+    url: `/api/v1/notebooks/${notebookId}/documents/${documentId}/download`,
+    responseType: "blob",
+  })
+  return response.data
 }
 
 export function useTouchNotebookMutation() {
