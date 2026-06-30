@@ -1,6 +1,5 @@
 import { Link, useLocation } from "react-router-dom"
 
-import { Button } from "@/components/ui/button"
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -8,7 +7,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
-import { CirclePlusIcon, MailIcon, LayoutDashboardIcon, ChartBarIcon } from "lucide-react"
+import { CirclePlusIcon, LayoutDashboardIcon, ChartBarIcon } from "lucide-react"
 
 export function NavMain({
   items,
@@ -36,14 +35,6 @@ export function NavMain({
               <CirclePlusIcon />
               <span>Quick Create</span>
             </SidebarMenuButton>
-            <Button
-              size="icon"
-              className="size-8 group-data-[collapsible=icon]:opacity-0"
-              variant="outline"
-            >
-              <MailIcon />
-              <span className="sr-only">Inbox</span>
-            </Button>
           </SidebarMenuItem>
         </SidebarMenu>
         <SidebarMenu>
