@@ -22,6 +22,10 @@ async def test_vector_index_verification_treats_search_errors_as_not_ready(
     async def fake_find_one(*args: object, **kwargs: object) -> object:
         return SimpleNamespace(content="chunk text")
 
+    class FakeFindResult:
+        async def to_list(self) -> list[object]:
+            return [SimpleNamespace(id=uuid4(), content="chunk text")]
+
     def raise_vector_search_error(*args: object, **kwargs: object) -> object:
         raise RuntimeError("vector search unavailable")
 
@@ -29,6 +33,7 @@ async def test_vector_index_verification_treats_search_errors_as_not_ready(
         ingestion_service,
         "NotebookDocumentChunk",
         SimpleNamespace(
+            find=lambda *args, **kwargs: FakeFindResult(),
             find_one=fake_find_one,
             aggregate=raise_vector_search_error,
         ),

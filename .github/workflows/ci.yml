@@ -22,6 +22,12 @@ jobs:
           --health-retries 20
     env:
       DATABASE_URL: mongodb://127.0.0.1:27017/personal-rag
+      CHAT_API_KEY: test-openrouter-key
+      OPENROUTER_API_KEY: test-openrouter-key
+      AWS_ACCESS_KEY_ID: test-access-key
+      AWS_SECRET_ACCESS_KEY: test-secret-key
+      S3_ENDPOINT_URL: http://localhost:9000
+      S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
     defaults:
       run:
         working-directory: back-end

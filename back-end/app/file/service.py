@@ -13,10 +13,22 @@ from app.users.models import User
 
 logger = logging.getLogger(__name__)
 
+SAFE_NOTEBOOK_UPLOAD_CONTENT_TYPES = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "text/plain",
+    "text/markdown",
+    "text/x-markdown",
+}
+
 
 def sanitize_filename(filename: str) -> str:
     base = Path(filename).name
     return base.replace("/", "").replace("\\", "")
+
+
+def normalize_content_type(content_type: str | None) -> str:
+    return (content_type or "").split(";", maxsplit=1)[0].strip().lower()
 
 
 async def generate_presigned_url_service(
@@ -44,6 +56,13 @@ async def generate_presigned_url_service(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Filename cannot be empty after sanitization",
             )
+        if request.notebook_id is not None:
+            content_type = normalize_content_type(request.content_type)
+            if content_type and content_type not in SAFE_NOTEBOOK_UPLOAD_CONTENT_TYPES:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Unsupported notebook source content type",
+                )
         unique_id = str(uuid.uuid4())
         s3_key = f"users/{current_user.id}/{unique_id}/{cleaned_name}"
     else:

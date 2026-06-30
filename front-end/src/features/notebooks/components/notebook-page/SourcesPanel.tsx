@@ -82,6 +82,19 @@ import { cn } from "@/lib/utils"
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 const SUPPORTED_EXTENSIONS = [".pdf", ".docx", ".txt", ".md"]
+const SAFE_UPLOAD_CONTENT_TYPES = new Set([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "text/plain",
+  "text/markdown",
+  "text/x-markdown",
+])
+const SAFE_INLINE_PREVIEW_CONTENT_TYPES = new Set([
+  "application/pdf",
+  "text/plain",
+  "text/markdown",
+  "text/x-markdown",
+])
 
 type UploadState = "idle" | "uploading"
 
@@ -134,6 +147,14 @@ export function SourcesPanel({
       toast.error("Unsupported source type", {
         description:
           "Upload PDF, DOCX, TXT, or Markdown files for notebook ingestion.",
+      })
+      return
+    }
+
+    if (!isSafeUploadContentType(file)) {
+      toast.error("Unsupported source content", {
+        description:
+          "Only PDF, DOCX, plain text, or Markdown content can be uploaded.",
       })
       return
     }
@@ -577,6 +598,7 @@ function SourcePreviewDialog({
             <iframe
               title={preview.filename}
               src={sourceUrl}
+              sandbox=""
               className="h-[55dvh] w-full bg-background"
             />
           ) : (
@@ -643,6 +665,14 @@ function isSupportedFile(file: File) {
   return SUPPORTED_EXTENSIONS.some((extension) => filename.endsWith(extension))
 }
 
+function isSafeUploadContentType(file: File) {
+  const contentType = normalizeContentType(file.type)
+  if (!contentType) {
+    return true
+  }
+  return SAFE_UPLOAD_CONTENT_TYPES.has(contentType)
+}
+
 function formatBytes(bytes: number | null) {
   if (!bytes) {
     return "Size pending"
@@ -692,16 +722,21 @@ function getDocumentStatus(status: string) {
 }
 
 function canRenderPreviewInline(preview: NotebookDocumentPreview) {
-  const contentType = preview.contentType?.toLowerCase() ?? ""
+  const contentType = normalizeContentType(preview.contentType)
   const filename = preview.filename.toLowerCase()
+  if (contentType) {
+    return SAFE_INLINE_PREVIEW_CONTENT_TYPES.has(contentType)
+  }
 
   return (
-    contentType.includes("pdf") ||
-    contentType.startsWith("text/") ||
     filename.endsWith(".pdf") ||
     filename.endsWith(".txt") ||
     filename.endsWith(".md")
   )
+}
+
+function normalizeContentType(contentType: string | null | undefined) {
+  return contentType?.split(";")[0]?.trim().toLowerCase() ?? ""
 }
 
 async function uploadNotebookSource(
