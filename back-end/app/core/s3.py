@@ -1,29 +1,43 @@
-import boto3
-from botocore.client import BaseClient
-from botocore.config import Config
+from __future__ import annotations
+
+from datetime import timedelta
+from typing import TYPE_CHECKING
+
+import obstore
+import obstore.store
 
 from app.core.config import Settings
 
+if TYPE_CHECKING:
+    from obstore.store import ClientConfig, S3Config, S3Store
 
-def get_s3_client(settings: Settings, *, endpoint_url: str | None = None) -> BaseClient:
-    s3_config = Config(
-        signature_version="s3v4",
-        retries={"max_attempts": 3},
-    )
-    client_kwargs: dict[str, object] = {
-        "service_name": "s3",
-        "region_name": settings.s3_region,
-        "config": s3_config,
+
+def _build_s3_store(settings: Settings, *, endpoint_url: str | None = None) -> S3Store:
+    config: S3Config = {
+        "bucket": settings.s3_bucket,
+        "region": settings.s3_region,
     }
     if settings.aws_access_key_id:
-        client_kwargs["aws_access_key_id"] = settings.aws_access_key_id
+        config["access_key_id"] = settings.aws_access_key_id
     if settings.aws_secret_access_key:
-        client_kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
+        config["secret_access_key"] = settings.aws_secret_access_key
     resolved_endpoint = endpoint_url or settings.s3_endpoint_url
     if resolved_endpoint:
-        client_kwargs["endpoint_url"] = resolved_endpoint
+        config["endpoint"] = resolved_endpoint
 
-    return boto3.client(**client_kwargs)
+    client_options: ClientConfig = {}
+    if resolved_endpoint and resolved_endpoint.startswith("http://"):
+        client_options["allow_http"] = True
+
+    return obstore.store.S3Store(
+        config=config,
+        client_options=client_options or None,
+        retry_config={"max_retries": 3},
+    )
+
+
+def get_s3_store(settings: Settings) -> S3Store:
+    return _build_s3_store(settings)
 
 
 def presign_endpoint_url(settings: Settings) -> str | None:
@@ -38,14 +52,9 @@ def presign_endpoint_url(settings: Settings) -> str | None:
 def generate_presigned_get_url(
     settings: Settings,
     *,
-    bucket: str,
     key: str,
     expires_in: int = 3600,
 ) -> str:
     """Generate a presigned GET URL for an object, signed against the public endpoint."""
-    client = get_s3_client(settings, endpoint_url=presign_endpoint_url(settings))
-    return client.generate_presigned_url(
-        ClientMethod="get_object",
-        Params={"Bucket": bucket, "Key": key},
-        ExpiresIn=expires_in,
-    )
+    store = _build_s3_store(settings, endpoint_url=presign_endpoint_url(settings))
+    return obstore.sign(store, "GET", key, timedelta(seconds=expires_in))

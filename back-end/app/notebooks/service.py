@@ -599,8 +599,7 @@ async def build_chunk_image_url(
     if chunk.chunk_metadata.get("chunk_type") != "image":
         raise ChunkNotAnImageError()
     s3_key = chunk.chunk_metadata.get("s3_key")
-    s3_bucket = chunk.chunk_metadata.get("s3_bucket") or settings.s3_bucket
     if not s3_key:
         raise ImageNotFoundError()
-    url = generate_presigned_get_url(settings, bucket=str(s3_bucket), key=str(s3_key))
+    url = generate_presigned_get_url(settings, key=str(s3_key))
     return {"url": url}

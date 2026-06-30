@@ -1,15 +1,17 @@
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
-from botocore.exceptions import ClientError
+import obstore
+import obstore.exceptions
 
 from app.core.config import Settings
+from app.core.event_bus import domain_event_bus
 from app.core.s3 import (
+    _build_s3_store,
     generate_presigned_get_url,
-    get_s3_client,
     presign_endpoint_url,
 )
 from app.file.exceptions import (
@@ -24,6 +26,7 @@ from app.file.schemas import (
     PresignedUrlResponse,
     UploadFailedRequest,
 )
+from app.notebooks.domain_events import DocumentFailed
 from app.notebooks.models import NotebookDocument
 from app.users.models import User
 
@@ -62,26 +65,22 @@ async def generate_presigned_url_service(
 
     try:
         if operation == "upload":
-            s3_client = get_s3_client(
+            store = _build_s3_store(
                 settings, endpoint_url=presign_endpoint_url(settings)
             )
-            params: dict = {"Bucket": settings.s3_bucket, "Key": s3_key}
-            if request.content_type:
-                params["ContentType"] = request.content_type
-            presigned_url = s3_client.generate_presigned_url(
-                ClientMethod="put_object",
-                Params=params,
-                ExpiresIn=request.expires_in,
-                HttpMethod="PUT",
+            presigned_url = obstore.sign(
+                store,
+                "PUT",
+                s3_key,
+                timedelta(seconds=request.expires_in),
             )
         else:
             presigned_url = generate_presigned_get_url(
                 settings,
-                bucket=settings.s3_bucket,
                 key=s3_key,
                 expires_in=request.expires_in,
             )
-    except ClientError as exc:
+    except obstore.exceptions.BaseError as exc:
         logger.exception("Failed to generate S3 presigned URL")
         raise PresignedUrlGenerationFailedError() from exc
 
@@ -117,4 +116,5 @@ async def mark_upload_failed(
     )[:4000]
     document.updated_at = datetime.now(UTC)
     await document.save()
+    await domain_event_bus.emit(DocumentFailed(document))
     return {"status": "ok", "updated": True}

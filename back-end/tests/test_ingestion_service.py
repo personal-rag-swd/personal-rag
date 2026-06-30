@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
 
+from app.notebooks.models import NotebookDocument
 from app.notebooks.rag import ingestion_service
 
 pytestmark = pytest.mark.anyio
@@ -17,12 +19,12 @@ async def test_run_document_ingestion_embeds_chunks(
     """embed_texts is called with the chunk texts and vectors land on the chunks."""
     fake_vector = [0.1, 0.2, 0.3]
 
-    inserted: list[object] = []
+    inserted: list[Any] = []
 
     async def fake_embed_texts(texts: list[str]) -> list[list[float]]:
         return [fake_vector for _ in texts]
 
-    async def fake_insert_many(chunks: list[object]) -> None:
+    async def fake_insert_many(chunks: list[Any]) -> None:
         inserted.extend(chunks)
 
     async def fake_delete() -> None:
@@ -67,7 +69,9 @@ async def test_run_document_ingestion_embeds_chunks(
             embedding_model="openai/text-embedding-3-small",
             embedding_dimension=3,
         )
-        await ingestion_service._run_document_ingestion(document, settings, None)
+        await ingestion_service._run_document_ingestion(
+            cast(NotebookDocument, document), settings, None
+        )
 
     assert len(inserted) >= 1
     for chunk in inserted:

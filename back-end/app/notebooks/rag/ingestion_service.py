@@ -2,14 +2,14 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
+import obstore
+import obstore.exceptions
 import pymupdf
 from beanie import SortDirection
 from beanie.odm.queries.update import UpdateResponse
-from botocore.client import BaseClient
-from botocore.exceptions import ClientError
 from langchain_core.documents import Document
 from pydantic_ai import Agent
 from pydantic_ai.messages import BinaryContent
@@ -18,7 +18,7 @@ from app.core.config import Settings
 from app.core.embedding_provider import embed_texts
 from app.core.event_bus import domain_event_bus
 from app.core.llm_provider import chat_provider_is_configured, resolve_chat_provider
-from app.core.s3 import get_s3_client
+from app.core.s3 import get_s3_store
 from app.notebooks.domain_events import (
     DocumentFailed,
     DocumentIndexed,
@@ -35,6 +35,9 @@ from app.notebooks.rag.document_chunker import (
     chunk_document,
 )
 from app.users.models import User
+
+if TYPE_CHECKING:
+    from obstore.store import S3Store
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +102,9 @@ _MIN_EMBEDDED_IMAGE_DIMENSION = 64
 
 # Cap concurrent vision-LLM calls so an image-heavy PDF doesn't fan out hundreds
 # of simultaneous requests (provider rate limits / 429s / ingestion timeout).
+# Module-level semaphore so the cap applies across all concurrent ingestion tasks.
 _PDF_IMAGE_VISION_CONCURRENCY = 5
+_pdf_image_vision_semaphore = asyncio.Semaphore(_PDF_IMAGE_VISION_CONCURRENCY)
 
 
 def _extract_pdf_image_bytes(
@@ -126,7 +131,7 @@ def _extract_pdf_image_bytes(
 async def _extract_pdf_images(
     document: NotebookDocument,
     pdf_bytes: bytes,
-    s3_client: BaseClient,
+    store: S3Store,
 ) -> list[Document]:
     """Extract embedded images from a PDF, upload them to S3, and describe them.
 
@@ -162,13 +167,11 @@ async def _extract_pdf_images(
 
                 image_bytes, ext, media_type = _extract_pdf_image_bytes(pdf_doc, xref)
                 image_key = f"{key_prefix}/images/img_{xref}.{ext}"
-                # boto3 put_object is blocking; keep it off the event loop.
-                await asyncio.to_thread(
-                    s3_client.put_object,
-                    Bucket=document.s3_bucket,
-                    Key=image_key,
-                    Body=image_bytes,
-                    ContentType=media_type,
+                await obstore.put_async(
+                    store,
+                    image_key,
+                    image_bytes,
+                    attributes={"Content-Type": media_type},
                 )
                 label = f"image on page {page_index + 1} of {document.filename}"
                 images.append((image_key, image_bytes, media_type, label))
@@ -181,11 +184,10 @@ async def _extract_pdf_images(
 
     # Describe images concurrently but bounded — sequential vision calls on an
     # image-heavy PDF can exceed the ingestion timeout, while an unbounded
-    # gather can hammer the provider into rate limits.
-    semaphore = asyncio.Semaphore(_PDF_IMAGE_VISION_CONCURRENCY)
-
+    # gather can hammer the provider into rate limits. The module-level semaphore
+    # caps concurrency across all concurrent ingestion tasks, not just within one PDF.
     async def _bounded(data: bytes, label: str, media_type: str) -> str:
-        async with semaphore:
+        async with _pdf_image_vision_semaphore:
             return await _describe_image(data, label, media_type)
 
     descriptions = await asyncio.gather(
@@ -282,36 +284,28 @@ async def register_pending_notebook_document(
     return document
 
 
-def _is_missing_object_error(exc: ClientError) -> bool:
-    code = str(exc.response.get("Error", {}).get("Code", "")).lower()
-    status_code = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-    return status_code == 404 or code in {"404", "nosuchkey", "notfound"}
-
-
 async def mark_pending_document_uploaded_if_object_exists(
     document: NotebookDocument,
     settings: Settings,
     *,
-    s3_client: BaseClient | None,
+    store: S3Store | None,
 ) -> bool:
     if document.status != "pending":
         return document.status == "uploaded"
 
-    s3_client = s3_client or get_s3_client(settings)
+    resolved_store = store or get_s3_store(settings)
     if not document.s3_bucket or not document.s3_key:
         raise ValueError(
             "Cannot check S3 object existence for a pending document without bucket/key"
         )
     try:
-        metadata = s3_client.head_object(Bucket=document.s3_bucket, Key=document.s3_key)
-    except ClientError as exc:
-        if _is_missing_object_error(exc):
-            logger.debug("Notebook document upload is not visible yet: %s", document.id)
-            return False
-        raise
+        metadata = await obstore.head_async(resolved_store, document.s3_key)
+    except FileNotFoundError:
+        logger.debug("Notebook document upload is not visible yet: %s", document.id)
+        return False
 
     document.status = "uploaded"
-    document.size = metadata.get("ContentLength")
+    document.size = metadata["size"]
     document.error_message = None
     document.updated_at = datetime.now(UTC)
     await document.save()
@@ -355,7 +349,7 @@ async def process_unprocessed_notebook_documents(
     )
 
     documents = uploaded_docs + pending_docs
-    s3_client = get_s3_client(settings) if documents else None
+    store = get_s3_store(settings) if documents else None
 
     for document in documents:
         stats["checked"] += 1
@@ -363,13 +357,13 @@ async def process_unprocessed_notebook_documents(
             if not await mark_pending_document_uploaded_if_object_exists(
                 document,
                 settings,
-                s3_client=s3_client,
+                store=store,
             ):
                 stats["skipped"] += 1
                 continue
             stats["uploaded"] += 1
 
-        await ingest_document_by_id(document.id, settings, s3_client=s3_client)
+        await ingest_document_by_id(document.id, settings, store=store)
         stats["ingested"] += 1
 
     return stats
@@ -425,7 +419,7 @@ async def mark_document_upload_failed(
 async def _run_document_ingestion(
     document: NotebookDocument,
     settings: Settings,
-    s3_client: BaseClient,
+    store: S3Store | None,
 ) -> None:
     if document.content is not None:
         body = document.content.encode("utf-8")
@@ -441,15 +435,15 @@ async def _run_document_ingestion(
             document.s3_bucket,
             document.s3_key,
         )
-        if not s3_client:
-            raise ValueError("S3 client must be provided for S3-based ingestion")
+        if not store:
+            raise ValueError("S3 store must be provided for S3-based ingestion")
         if not document.s3_bucket or not document.s3_key:
             raise ValueError(
                 "Cannot fetch document from S3 without bucket/key for ingestion"
             )
 
-        obj = s3_client.get_object(Bucket=document.s3_bucket, Key=document.s3_key)
-        body = obj["Body"].read()
+        result = await obstore.get_async(store, document.s3_key)
+        body = bytes(await result.bytes_async())
         source_key = document.s3_key
 
     logger.info(
@@ -480,10 +474,8 @@ async def _run_document_ingestion(
             ),
             settings,
         )
-        if suffix == ".pdf" and document.s3_bucket and document.s3_key:
-            split_docs = split_docs + await _extract_pdf_images(
-                document, body, s3_client
-            )
+        if suffix == ".pdf" and document.s3_bucket and document.s3_key and store:
+            split_docs = split_docs + await _extract_pdf_images(document, body, store)
 
     split_docs = [doc for doc in split_docs if doc.page_content.strip()]
     if not split_docs:
@@ -504,6 +496,11 @@ async def _run_document_ingestion(
         document.filename,
     )
     embeddings = await embed_texts(chunk_texts)
+    if len(embeddings) != len(chunk_texts):
+        raise ValueError(
+            f"Embedding provider returned {len(embeddings)} embeddings for "
+            f"{len(chunk_texts)} chunks in document {document.filename!r}"
+        )
 
     logger.info(
         "Indexing %d chunks in database for %s...", len(split_docs), document.filename
@@ -568,7 +565,7 @@ async def ingest_document_by_id(
     document_id: UUID,
     settings: Settings,
     *,
-    s3_client: BaseClient | None = None,
+    store: S3Store | None = None,
     require_processing_status: bool = False,
 ) -> None:
     document = await NotebookDocument.find_one({"_id": document_id})
@@ -598,12 +595,19 @@ async def ingest_document_by_id(
         document.updated_at = datetime.now(UTC)
         await document.save()
         await domain_event_bus.emit(DocumentProcessing(document))
+    elif document.status != "processing":
+        logger.info(
+            "Skipping ingestion for document %s: status '%s' is not claimable",
+            document_id,
+            document.status,
+        )
+        return
 
     try:
-        client = s3_client or get_s3_client(settings)
-        await _run_document_ingestion(document, settings, client)
+        resolved_store = store or get_s3_store(settings)
+        await _run_document_ingestion(document, settings, resolved_store)
     except Exception as exc:
-        if isinstance(exc, ClientError):
+        if isinstance(exc, obstore.exceptions.BaseError):
             logger.exception(
                 "Notebook document ingestion hit a transient error for %s", document_id
             )
@@ -620,6 +624,7 @@ async def ingest_document_by_id(
             status="failed",
             error_message=str(exc)[:4000],
             event=DocumentFailed,
+            only_if_processing=True,
         )
     except BaseException:
         # CancelledError (and other BaseException subclasses) must not leave the

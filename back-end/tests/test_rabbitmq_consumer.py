@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
+from app.core.config import Settings
 from app.notebooks.consumer import (
     _process_message,
     parse_minio_object_created_events,
@@ -16,9 +17,7 @@ from app.users.models import User
 pytestmark = pytest.mark.anyio
 
 
-def make_settings() -> object:
-    from app.core.config import Settings
-
+def make_settings() -> Settings:
     return Settings(
         database_url="mongodb://localhost:27017/test",
         jwt_secret_key="test-secret-key",
@@ -158,6 +157,8 @@ async def test_process_message_claims_and_ingests_once_for_duplicate_deliveries(
 ):
     settings = make_settings()
     document = await make_document(status="pending")
+    assert document.s3_bucket is not None
+    assert document.s3_key is not None
     body = make_message_body(bucket=document.s3_bucket, key=document.s3_key)
 
     with patch("app.notebooks.consumer.ingest_document_by_id") as mock_ingest:
@@ -171,6 +172,8 @@ async def test_process_message_claims_and_ingests_once_for_duplicate_deliveries(
 async def test_process_message_propagates_transient_failures() -> None:
     settings = make_settings()
     document = await make_document(status="pending")
+    assert document.s3_bucket is not None
+    assert document.s3_key is not None
     body = make_message_body(bucket=document.s3_bucket, key=document.s3_key)
 
     # Propagating the error lets message.process(requeue=True) nack + requeue.
