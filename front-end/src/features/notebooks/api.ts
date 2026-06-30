@@ -37,7 +37,7 @@ type NotebookDocumentPreviewApiPayload = {
   preview_type: "url" | "text"
 }
 
-function buildApiUrl(path: string): string {
+export function buildApiUrl(path: string): string {
   const base = import.meta.env.VITE_API_URL
   if (!base || base === "/") {
     return path

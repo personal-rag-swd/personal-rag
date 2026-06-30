@@ -4,8 +4,10 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from typing import Annotated
+from urllib.parse import quote
 from uuid import UUID
 
+import obstore
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -21,7 +23,7 @@ from pydantic_ai.ui.ag_ui import AGUIAdapter
 
 from app.core.config import Settings, get_settings
 from app.core.llm_provider import resolve_chat_provider
-from app.core.s3 import generate_presigned_get_url
+from app.core.s3 import generate_presigned_get_url, get_s3_store
 from app.notebooks.agent import (
     NotebookChatDeps,
     notebook_chat_agent,
@@ -84,6 +86,31 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/notebooks", tags=["Notebooks"])
 
 SSE_PING_SECONDS = 30.0
+
+
+async def _get_owned_notebook_document(
+    notebook_id: UUID,
+    document_id: UUID,
+    current_user: User,
+) -> NotebookDocument:
+    document = await NotebookDocument.find_one(
+        {
+            "_id": document_id,
+            "notebook_id": notebook_id,
+            "user_id": current_user.id,
+        }
+    )
+    if document is None:
+        raise DocumentNotFoundError()
+    return document
+
+
+def _safe_pdf_filename(filename: str) -> str:
+    safe_name = filename.replace("\\", "_").replace("/", "_").replace('"', "'")
+    safe_name = safe_name.strip() or "document.pdf"
+    if not safe_name.lower().endswith(".pdf"):
+        safe_name = f"{safe_name}.pdf"
+    return safe_name
 
 
 async def _notebook_event_generator(current_user: User) -> AsyncIterator[str]:
@@ -199,15 +226,11 @@ async def read_notebook_document_preview(
     current_user: Annotated[User, Depends(get_current_user)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> NotebookDocumentPreviewRead:
-    document = await NotebookDocument.find_one(
-        {
-            "_id": document_id,
-            "notebook_id": notebook_id,
-            "user_id": current_user.id,
-        }
+    document = await _get_owned_notebook_document(
+        notebook_id,
+        document_id,
+        current_user,
     )
-    if document is None:
-        raise DocumentNotFoundError()
 
     if document.content is not None:
         return NotebookDocumentPreviewRead(
@@ -234,6 +257,44 @@ async def read_notebook_document_preview(
         url=url,
         content=None,
         preview_type="url",
+    )
+
+
+@router.get("/{notebook_id}/documents/{document_id}/pdf-inline")
+async def read_notebook_document_pdf_inline(
+    notebook_id: UUID,
+    document_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> StreamingResponse:
+    document = await _get_owned_notebook_document(
+        notebook_id,
+        document_id,
+        current_user,
+    )
+    if not document.s3_key:
+        raise DocumentNotFoundError()
+
+    try:
+        result = await obstore.get_async(get_s3_store(settings), document.s3_key)
+    except FileNotFoundError as exc:
+        raise DocumentNotFoundError() from exc
+    pdf_bytes = bytes(await result.bytes_async())
+    safe_filename = _safe_pdf_filename(document.filename)
+
+    async def stream_pdf() -> AsyncIterator[bytes]:
+        yield pdf_bytes
+
+    return StreamingResponse(
+        stream_pdf(),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                f"inline; filename=\"{safe_filename}\"; "
+                f"filename*=UTF-8''{quote(safe_filename)}"
+            ),
+            "Cache-Control": "private, max-age=3600",
+        },
     )
 
 

@@ -69,6 +69,7 @@ import {
 } from "@/components/ui/tooltip"
 import { getPresignedUploadUrl, reportUploadFailed } from "@/features/files/api"
 import {
+  buildApiUrl,
   getNotebookDocumentPreview,
   type NotebookDocumentPreview,
   useNotebookDocumentEvents,
@@ -575,6 +576,15 @@ function SourcePreviewDialog({
 
   const canRenderInline = preview ? canRenderPreviewInline(preview) : false
   const sourceUrl = preview?.url ?? null
+  const isPdfPreview = preview ? isPdfDocument(preview) : false
+  // Production blocked embedded cross-origin MinIO presigned PDFs, so PDF iframe
+  // preview uses a same-origin backend proxy while Open/Download keep the URL.
+  const iframeUrl =
+    isPdfPreview && preview
+      ? buildApiUrl(
+          `/api/v1/notebooks/${document.notebookId}/documents/${document.id}/pdf-inline`
+        )
+      : sourceUrl
   const errorMessage =
     error instanceof Error ? error.message : "The document could not be opened."
 
@@ -607,11 +617,10 @@ function SourcePreviewDialog({
                 {preview.content}
               </pre>
             </ScrollArea>
-          ) : sourceUrl && canRenderInline ? (
+          ) : iframeUrl && canRenderInline ? (
             <iframe
               title={preview?.filename ?? "Document"}
-              src={sourceUrl}
-              sandbox=""
+              src={iframeUrl}
               className="h-[55dvh] w-full bg-background"
             />
           ) : (
@@ -754,6 +763,13 @@ function canRenderPreviewInline(preview: NotebookDocumentPreview) {
     filename.endsWith(".txt") ||
     filename.endsWith(".md") ||
     IMAGE_EXTENSIONS.some((ext) => filename.endsWith(ext))
+  )
+}
+
+function isPdfDocument(preview: NotebookDocumentPreview) {
+  return (
+    normalizeContentType(preview.contentType) === "application/pdf" ||
+    preview.filename.toLowerCase().endsWith(".pdf")
   )
 }
 
