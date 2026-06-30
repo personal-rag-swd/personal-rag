@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -130,7 +131,7 @@ class TestAuthEmailVerification:
             email="expired@example.com",
             hashed_password=password_hash.hash("StrongPass1!"),
             hashed_otp=password_hash.hash("123456"),
-            expires_at="2020-01-01T00:00:00Z",
+            expires_at=datetime(2020, 1, 1, tzinfo=UTC),
         )
         await pending.insert()
 

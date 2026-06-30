@@ -1,12 +1,16 @@
+import asyncio
 import logging
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fastapi import HTTPException, status
+from beanie import SortDirection
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelRequest
 
+from app.core.config import Settings, get_settings
 from app.core.event_bus import domain_event_bus
+from app.core.llm_provider import chat_provider_is_configured
+from app.core.s3 import generate_presigned_get_url
 from app.notebooks.agent.report_agents import (
     generate_blog_post,
     generate_briefing_doc,
@@ -17,9 +21,22 @@ from app.notebooks.agent.report_agents import (
     generate_study_guide,
 )
 from app.notebooks.domain_events import (
+    ReportCancelled,
     ReportCompleted,
     ReportFailed,
     ReportGenerating,
+)
+from app.notebooks.exceptions import (
+    CannotCancelReportError,
+    ChunkNotAnImageError,
+    ChunkNotFoundError,
+    CustomReportMissingInstructionsError,
+    DocumentNotFoundError,
+    ImageNotFoundError,
+    LLMNotConfiguredError,
+    NoIndexedDocumentsError,
+    NotebookNotFoundError,
+    ReportNotFoundError,
 )
 from app.notebooks.memory import load_notebook_chat_history
 from app.notebooks.models import (
@@ -38,7 +55,9 @@ from app.notebooks.schemas import (
     NotebookCreate,
     NotebookPopulateRead,
     NotebookUpdate,
+    NoteCreate,
     QuizReport,
+    ReportGenerateRequest,
     StudyGuideReport,
 )
 from app.users.models import User
@@ -49,7 +68,10 @@ _logger = logging.getLogger(__name__)
 async def list_notebooks(current_user: User) -> list[Notebook]:
     return (
         await Notebook.find({"user_id": current_user.id})
-        .sort(("last_active_at", -1), ("created_at", -1))
+        .sort(
+            ("last_active_at", SortDirection.DESCENDING),
+            ("created_at", SortDirection.DESCENDING),
+        )
         .to_list()
     )
 
@@ -59,9 +81,7 @@ async def get_notebook(notebook_id: UUID, current_user: User) -> Notebook:
         {"_id": notebook_id, "user_id": current_user.id},
     )
     if notebook is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Notebook not found"
-        )
+        raise NotebookNotFoundError()
     return notebook
 
 
@@ -74,7 +94,7 @@ async def list_notebook_documents(
         await NotebookDocument.find(
             {"notebook_id": notebook.id, "user_id": current_user.id},
         )
-        .sort(("created_at", -1))
+        .sort(("created_at", SortDirection.DESCENDING))
         .to_list()
     )
 
@@ -89,9 +109,7 @@ async def delete_notebook_document(
         {"_id": document_id, "notebook_id": notebook.id, "user_id": current_user.id},
     )
     if document is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
-        )
+        raise DocumentNotFoundError()
 
     await NotebookDocumentChunk.find({"document_id": document.id}).delete()
 
@@ -181,7 +199,7 @@ async def build_report_context(notebook: Notebook, current_user: User) -> str:
                 "status": "indexed",
             },
         )
-        .sort(("filename", 1))
+        .sort(("filename", SortDirection.ASCENDING))
         .to_list()
     )
 
@@ -193,7 +211,7 @@ async def build_report_context(notebook: Notebook, current_user: User) -> str:
 
     chunks = (
         await NotebookDocumentChunk.find({"document_id": {"$in": doc_ids}})
-        .sort(("chunk_index", 1))
+        .sort(("chunk_index", SortDirection.ASCENDING))
         .to_list()
     )
 
@@ -315,3 +333,273 @@ async def run_report_generation(
     report.updated_at = datetime.now(UTC)
     await report.save()
     await domain_event_bus.emit(ReportCompleted(report))
+
+
+_QUESTION_COUNT_MAP = {"fewer": 10, "standard": 20, "more": 30}
+
+
+def _serialize_chunk(c: NotebookDocumentChunk) -> dict[str, object]:
+    return {
+        "id": str(c.id),
+        "document_id": str(c.document_id),
+        "chunk_index": c.chunk_index,
+        "content": c.content,
+        "metadata": c.chunk_metadata,
+    }
+
+
+async def _fetch_and_serialize_chunks(
+    document: NotebookDocument,
+) -> list[dict[str, object]]:
+    chunks = (
+        await NotebookDocumentChunk.find({"document_id": document.id})
+        .sort(("chunk_index", SortDirection.ASCENDING))
+        .to_list()
+    )
+    return [_serialize_chunk(c) for c in chunks]
+
+
+async def get_notebook_document(
+    notebook: Notebook, document_id: UUID, current_user: User
+) -> NotebookDocument:
+    document = await NotebookDocument.find_one(
+        {"_id": document_id, "notebook_id": notebook.id, "user_id": current_user.id},
+    )
+    if document is None:
+        raise DocumentNotFoundError()
+    return document
+
+
+async def get_notebook_report(
+    notebook: Notebook, report_id: UUID, current_user: User
+) -> NotebookReport:
+    report = await NotebookReport.find_one(
+        {"_id": report_id, "notebook_id": notebook.id, "user_id": current_user.id},
+    )
+    if report is None:
+        raise ReportNotFoundError()
+    return report
+
+
+async def get_user_event_snapshot(
+    user_id: UUID,
+) -> tuple[list[NotebookDocument], list[NotebookReport]]:
+    documents, reports = await asyncio.gather(
+        NotebookDocument.find({"user_id": user_id}).to_list(),
+        NotebookReport.find({"user_id": user_id}).to_list(),
+    )
+    return documents, reports
+
+
+async def create_note(
+    notebook_id: UUID, payload: NoteCreate, current_user: User
+) -> NotebookDocument:
+    notebook = await get_notebook(notebook_id, current_user)
+
+    filename = payload.title.strip()
+    if not filename.endswith(".txt") and not filename.endswith(".md"):
+        filename += ".txt"
+
+    now = datetime.now(UTC)
+    doc_id = uuid4()
+    document = NotebookDocument(
+        id=doc_id,
+        notebook_id=notebook.id,
+        user_id=current_user.id,
+        s3_bucket=None,
+        s3_key=f"db-notes/{doc_id}",
+        filename=filename,
+        content_type="text/plain",
+        size=len(payload.content.encode("utf-8")),
+        status="uploaded",
+        content=payload.content,
+        created_at=now,
+        updated_at=now,
+    )
+    report = NotebookReport(
+        notebook_id=notebook.id,
+        user_id=current_user.id,
+        report_type="note",
+        status="completed",
+        content={
+            "title": payload.title,
+            "content": payload.content,
+            "document_id": str(doc_id),
+        },
+        created_at=now,
+        updated_at=now,
+    )
+    await asyncio.gather(document.insert(), report.insert())
+    return document
+
+
+async def create_pending_report(
+    notebook_id: UUID, payload: ReportGenerateRequest, current_user: User
+) -> tuple[NotebookReport, str, str | None, str | None, int | None]:
+    notebook = await get_notebook(notebook_id, current_user)
+
+    if not chat_provider_is_configured():
+        provider = get_settings().chat_provider.strip().lower()
+        raise LLMNotConfiguredError(provider)
+
+    context = await build_report_context(notebook, current_user)
+    if not context:
+        raise NoIndexedDocumentsError()
+
+    instructions = (payload.additional_instructions or "").strip() or None
+    if payload.report_type == "custom" and not instructions:
+        raise CustomReportMissingInstructionsError()
+
+    question_count: int | None = None
+    if payload.report_type in ("quiz", "flashcards"):
+        raw = (
+            payload.number_of_questions
+            if payload.report_type == "quiz"
+            else payload.number_of_cards
+        )
+        question_count = _QUESTION_COUNT_MAP.get(
+            (raw or "standard").strip().lower(), 20
+        )
+
+    now = datetime.now(UTC)
+    report = NotebookReport(
+        notebook_id=notebook.id,
+        user_id=current_user.id,
+        report_type=payload.report_type,
+        status="pending",
+        additional_instructions=instructions,
+        detail_level=payload.detail_level,
+        content={},
+        created_at=now,
+        updated_at=now,
+    )
+    await report.insert()
+    return report, context, instructions, payload.detail_level, question_count
+
+
+async def cancel_report(
+    notebook_id: UUID, report_id: UUID, current_user: User
+) -> NotebookReport:
+    notebook = await get_notebook(notebook_id, current_user)
+    report = await get_notebook_report(notebook, report_id, current_user)
+
+    if report.status not in ("pending", "generating"):
+        raise CannotCancelReportError(report.status)
+
+    report.status = "cancelled"
+    report.updated_at = datetime.now(UTC)
+    await report.save()
+    await domain_event_bus.emit(ReportCancelled(report))
+    return report
+
+
+async def delete_report(notebook_id: UUID, report_id: UUID, current_user: User) -> None:
+    notebook = await get_notebook(notebook_id, current_user)
+    report = await get_notebook_report(notebook, report_id, current_user)
+
+    if report.report_type == "note" and isinstance(report.content, dict):
+        doc_id_str = report.content.get("document_id")
+        if doc_id_str:
+            try:
+                doc_id = UUID(doc_id_str)
+                document = await NotebookDocument.find_one(
+                    {
+                        "_id": doc_id,
+                        "notebook_id": notebook.id,
+                        "user_id": current_user.id,
+                    },
+                )
+                if document:
+                    await asyncio.gather(
+                        NotebookDocumentChunk.find(
+                            {"document_id": document.id}
+                        ).delete(),
+                        document.delete(),
+                    )
+            except Exception:
+                _logger.exception(
+                    "Failed to delete corresponding note document %s", doc_id_str
+                )
+
+    await report.delete()
+
+
+async def list_reports(notebook_id: UUID, current_user: User) -> list[NotebookReport]:
+    notebook = await get_notebook(notebook_id, current_user)
+    return (
+        await NotebookReport.find(
+            {"notebook_id": notebook.id, "user_id": current_user.id}
+        )
+        .sort(("created_at", SortDirection.DESCENDING))
+        .to_list()
+    )
+
+
+async def get_report(
+    notebook_id: UUID, report_id: UUID, current_user: User
+) -> NotebookReport:
+    notebook = await get_notebook(notebook_id, current_user)
+    return await get_notebook_report(notebook, report_id, current_user)
+
+
+async def get_chunks_by_filename(
+    notebook_id: UUID, filename: str, current_user: User
+) -> list[dict[str, object]]:
+    notebook = await get_notebook(notebook_id, current_user)
+    document = await NotebookDocument.find_one(
+        {"notebook_id": notebook.id, "filename": filename, "user_id": current_user.id},
+    )
+    if document is None:
+        raise DocumentNotFoundError()
+    return await _fetch_and_serialize_chunks(document)
+
+
+async def get_chunks_by_document_id(
+    notebook_id: UUID, document_id: UUID, current_user: User
+) -> list[dict[str, object]]:
+    notebook = await get_notebook(notebook_id, current_user)
+    document = await get_notebook_document(notebook, document_id, current_user)
+    return await _fetch_and_serialize_chunks(document)
+
+
+async def get_single_chunk(
+    notebook_id: UUID, document_id: UUID, chunk_index: int, current_user: User
+) -> dict[str, object]:
+    notebook = await get_notebook(notebook_id, current_user)
+    document = await get_notebook_document(notebook, document_id, current_user)
+    chunk = await NotebookDocumentChunk.find_one(
+        {"document_id": document.id, "chunk_index": chunk_index},
+    )
+    if chunk is None:
+        raise ChunkNotFoundError()
+    return {
+        "id": str(chunk.id),
+        "document_id": str(chunk.document_id),
+        "filename": document.filename,
+        "chunk_index": chunk.chunk_index,
+        "content": chunk.content,
+        "metadata": chunk.chunk_metadata,
+    }
+
+
+async def build_chunk_image_url(
+    notebook_id: UUID,
+    document_id: UUID,
+    chunk_index: int,
+    current_user: User,
+    settings: Settings,
+) -> dict[str, str]:
+    notebook = await get_notebook(notebook_id, current_user)
+    document = await get_notebook_document(notebook, document_id, current_user)
+    chunk = await NotebookDocumentChunk.find_one(
+        {"document_id": document.id, "chunk_index": chunk_index},
+    )
+    if chunk is None:
+        raise ChunkNotFoundError()
+    if chunk.chunk_metadata.get("chunk_type") != "image":
+        raise ChunkNotAnImageError()
+    s3_key = chunk.chunk_metadata.get("s3_key")
+    if not s3_key:
+        raise ImageNotFoundError()
+    url = generate_presigned_get_url(settings, key=str(s3_key))
+    return {"url": url}

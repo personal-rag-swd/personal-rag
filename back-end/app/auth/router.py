@@ -1,8 +1,9 @@
-from typing import Annotated
+from typing import Annotated, Literal, cast
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Cookie, Depends, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 
+from app.auth.exceptions import RefreshTokenCookieMissingError
 from app.auth.schemas import (
     EmailVerificationCreate,
     RegistrationCreate,
@@ -29,10 +30,10 @@ def is_cookie_secure(request: Request, settings: Settings) -> bool:
     return request.url.hostname not in ("localhost", "127.0.0.1", "testserver")
 
 
-def get_cookie_samesite(settings: Settings) -> str:
+def get_cookie_samesite(settings: Settings) -> Literal["lax", "strict", "none"]:
     value = settings.cookie_samesite.lower()
     if value in {"lax", "strict", "none"}:
-        return value
+        return cast(Literal["lax", "strict", "none"], value)
     return "lax"
 
 
@@ -125,10 +126,7 @@ async def create_token_refresh(
     refresh_token: Annotated[str | None, Cookie()] = None,
 ) -> dict[str, str]:
     if not refresh_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token cookie missing",
-        )
+        raise RefreshTokenCookieMissingError()
     tokens = await refresh_session(refresh_token, settings)
     set_session_cookies(response, request, tokens, settings)
     return tokens

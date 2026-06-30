@@ -2,21 +2,21 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from httpx import AsyncClient
+from httpx import AsyncClient, Response
 
 from app.auth.models import RefreshToken
 from app.auth.service import hash_refresh_token
 from tests.conftest import make_user
 
 
-async def _refresh(client: AsyncClient, rt: str) -> object:
+async def _refresh(client: AsyncClient, rt: str) -> Response:
     return await client.post(
         "/api/v1/auth/token-refreshes",
         headers={"Cookie": f"refresh_token={rt}"},
     )
 
 
-async def _delete_session(client: AsyncClient, rt: str) -> object:
+async def _delete_session(client: AsyncClient, rt: str) -> Response:
     return await client.delete(
         "/api/v1/auth/sessions/current",
         headers={"Cookie": f"refresh_token={rt}"},

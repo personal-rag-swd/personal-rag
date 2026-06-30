@@ -3,6 +3,7 @@ import { AlertTriangleIcon, Loader2Icon } from "lucide-react"
 
 import { useDeleteNotebookMutation } from "@/features/notebooks/api"
 import { type Notebook } from "@/features/notebooks/types"
+import { getErrorMessage } from "@/lib/utils"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -38,9 +39,7 @@ export function DeleteNotebookDialog({
       await deleteMutation.mutateAsync(notebook.id)
       onSuccess()
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to delete notebook."
-      )
+      setError(getErrorMessage(err, "Failed to delete notebook."))
     }
   }
 

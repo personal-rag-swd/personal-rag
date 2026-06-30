@@ -124,7 +124,7 @@ class TestNotebookDocuments:
         headers = auth_headers(user, settings)
         notebook = await create_notebook(user)
 
-        doc, _ = await create_indexed_chunk(notebook.id, user.id)
+        await create_indexed_chunk(notebook.id, user.id)
 
         response = await client.get(
             f"/api/v1/notebooks/{notebook.id}/documents",
@@ -160,7 +160,7 @@ class TestNotebookDocuments:
         headers = auth_headers(user, settings)
         notebook = await create_notebook(user)
 
-        doc, chunk = await create_indexed_chunk(notebook.id, user.id)
+        doc, _ = await create_indexed_chunk(notebook.id, user.id)
 
         response = await client.get(
             f"/api/v1/notebooks/{notebook.id}/documents/chunks?filename={doc.filename}",

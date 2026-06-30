@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 import logfire
 from pydantic_ai import Agent
@@ -73,13 +72,13 @@ flashcards_agent = Agent(
 )
 
 
-async def _run_agent_with_retry(
-    agent: Agent,
+async def _run_agent_with_retry[OutputT](
+    agent: Agent[None, OutputT],
     user_msg: str,
     model: Model,
     max_retries: int = 4,
     initial_delay: float = 2.0,
-) -> AgentRunResult[Any]:
+) -> AgentRunResult[OutputT]:
     delay = initial_delay
     for attempt in range(max_retries):
         try:

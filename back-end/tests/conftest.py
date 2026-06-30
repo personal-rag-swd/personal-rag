@@ -7,8 +7,9 @@ from uuid import UUID, uuid4
 
 import pytest_asyncio
 from beanie import init_beanie
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from httpx import ASGITransport, AsyncClient
 from pwdlib import PasswordHash
 from pymongo import AsyncMongoClient
@@ -18,6 +19,7 @@ import app.auth.service as _auth_service
 from app.auth.models import PendingRegistration, RefreshToken
 from app.auth.router import router as auth_router
 from app.core.config import Settings, get_settings
+from app.core.exceptions import AppError
 
 # Disable email sending in tests
 _auth_service.send_registration_otp = lambda *a, **kw: None
@@ -57,6 +59,14 @@ async def _clean_db(app: FastAPI) -> None:
 
 def make_test_app() -> FastAPI:
     app = FastAPI(title="Aviary-Test", docs_url=None, redoc_url=None)
+
+    @app.exception_handler(AppError)
+    async def app_exception_handler(_request: Request, exc: AppError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+            headers=exc.headers,
+        )
 
     app.add_middleware(
         CORSMiddleware,
@@ -140,13 +150,12 @@ def make_user(
 ) -> User:
     if email is None:
         email = f"{uuid4()}@example.com"
-    user = User(
+    return User(
         email=email,
         hashed_password=password_hash.hash("password123"),
         role=role or "user",
         is_active=True,
     )
-    return user
 
 
 async def create_user(

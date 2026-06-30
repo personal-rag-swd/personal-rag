@@ -2,10 +2,10 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import jwt
-from fastapi import HTTPException, status
 from pwdlib import PasswordHash
 
 from app.core.config import Settings
+from app.core.exceptions import CouldNotValidateCredentialsError
 from app.users.models import User
 
 password_hash = PasswordHash.recommended()
@@ -45,8 +45,4 @@ def decode_access_token(token: str, settings: Settings) -> dict[str, object]:
             token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
         )
     except jwt.PyJWTError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        ) from exc
+        raise CouldNotValidateCredentialsError() from exc

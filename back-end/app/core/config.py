@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     chat_provider_url: str = ""
     chat_model: str = "openai/gpt-4o-mini"
 
+    embedding_model: str = "google/gemini-embedding-2"
+    embedding_dimension: int = 1536
+
     notebook_retrieval_top_k: int = 6
     enable_query_rewrite: bool = True
     notebook_chunk_size: int = 1000

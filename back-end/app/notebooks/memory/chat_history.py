@@ -3,10 +3,14 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic_ai import ModelMessage, ModelMessagesTypeAdapter
+from beanie.odm.enums import SortDirection
+from pydantic_ai import ModelMessagesTypeAdapter
 from pydantic_ai.messages import (
+    ModelMessage,
     ModelRequest,
     ModelResponse,
+    RetryPromptPart,
+    SystemPromptPart,
     TextPart,
     ThinkingPart,
     ToolCallPart,
@@ -25,12 +29,50 @@ CITATION_PATTERN = re.compile(
 )
 
 
+async def keep_recent_messages(messages: list[ModelMessage]) -> list[ModelMessage]:
+    system_prompts = []
+    other_messages = []
+    for msg in messages:
+        is_system = False
+        if isinstance(msg, ModelRequest):
+            has_system_part = any(
+                isinstance(part, SystemPromptPart) for part in msg.parts
+            )
+            has_conversational_part = any(
+                isinstance(part, (UserPromptPart, ToolReturnPart, RetryPromptPart))
+                for part in msg.parts
+            )
+            if has_system_part or (msg.instructions and not has_conversational_part):
+                is_system = True
+        if is_system:
+            system_prompts.append(msg)
+        else:
+            other_messages.append(msg)
+
+    recent_limit = 15
+    recent_others = (
+        other_messages[-recent_limit:]
+        if len(other_messages) > recent_limit
+        else other_messages
+    )
+    keep_set = {id(msg) for msg in system_prompts} | {id(msg) for msg in recent_others}
+    return [msg for msg in messages if id(msg) in keep_set]
+
+
 async def load_notebook_chat_history(
     notebook: Notebook,
 ) -> list[ModelMessage]:
+    """Load the full chat history for a notebook from the database.
+
+    Args:
+        notebook: The notebook whose message history to fetch.
+
+    Returns:
+        Ordered list of pydantic-ai model messages, sorted by sequence number.
+    """
     messages = (
         await NotebookMessage.find({"notebook_id": notebook.id})
-        .sort(("seq", 1))
+        .sort(("seq", SortDirection.ASCENDING))
         .to_list()
     )
     rows = [msg.message for msg in messages]
@@ -41,6 +83,19 @@ async def append_notebook_chat_history(
     notebook: Notebook,
     new_messages: list[ModelMessage],
 ) -> Notebook:
+    """Persist new messages to a notebook's chat history.
+
+    Assigns sequential sequence numbers continuing from the last stored
+    message, then updates the notebook's ``last_active_at`` and
+    ``updated_at`` timestamps.
+
+    Args:
+        notebook: The notebook to append messages to.
+        new_messages: pydantic-ai messages produced by the latest agent run.
+
+    Returns:
+        The updated notebook document.
+    """
     if not new_messages:
         return notebook
 
@@ -49,7 +104,7 @@ async def append_notebook_chat_history(
 
     last = (
         await NotebookMessage.find({"notebook_id": notebook.id})
-        .sort(("seq", -1))
+        .sort(("seq", SortDirection.DESCENDING))
         .first_or_none()
     )
     max_seq = last.seq if last else 0
@@ -70,12 +125,13 @@ def build_user_message_from_agui_payload(
 ) -> ModelRequest | None:
     """Extract the latest user turn from an AG-UI chat request body.
 
-    The AG-UI adapter passes incoming messages to the agent as ``message_history``
-    rather than as a fresh prompt, so they are excluded from
-    ``AgentRunResult.new_messages()``. We therefore reconstruct the user's new
-    message from the request payload so it can be persisted alongside the
-    assistant response. Returns ``None`` when no user text is present (e.g. an
-    empty ``messages`` array).
+    Args:
+        payload: The raw AG-UI request body, expected to be a dict with a
+            ``messages`` list.
+
+    Returns:
+        A ``ModelRequest`` containing the latest user text, or ``None`` when
+        no user text is present (e.g. an empty ``messages`` array).
     """
     if not isinstance(payload, dict):
         return None
@@ -102,8 +158,38 @@ def build_user_message_from_agui_payload(
     return None
 
 
+def _tool_return_to_text(content: object) -> str:
+    """Coerce a ToolReturnPart's content to the searchable context string.
+
+    ``search_notebook_context`` returns ``list[str | BinaryContent]`` (text
+    block + image bytes), which pydantic-ai persists as a raw list; older
+    messages stored a plain string. Join the string parts and drop binaries so
+    the SOURCE-block regex sees real text rather than a list ``repr``.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(item for item in content if isinstance(item, str))
+    return ""
+
+
 def parse_chunks_from_context_block(block: str) -> list[dict[str, object]]:
-    pattern = r"SOURCE \[filename=(?P<filename>.*?) doc_id=(?P<doc_id>[a-f0-9\-]+) chunk=(?P<chunk>\d+)\]\n(?P<content>.*?)(?=\n+SOURCE \[filename=|\Z)"
+    """Parse SOURCE blocks from a RAG context tool-return string.
+
+    Each block has the form::
+
+        SOURCE [filename=<name> doc_id=<uuid> chunk=<n>]
+        <content>
+
+    Args:
+        block: Raw string returned by the ``search_notebook_context`` tool.
+
+    Returns:
+        List of dicts, each with ``filename``, ``document_id``,
+        ``chunk_index``, ``content``, and ``metadata`` keys (the latter carries
+        ``chunk_type`` when the source header declares one, e.g. images).
+    """
+    pattern = r"SOURCE \[filename=(?P<filename>.*?) doc_id=(?P<doc_id>[a-f0-9\-]+) chunk=(?P<chunk>\d+)(?: chunk_type=(?P<chunk_type>\w+))?\]\n(?P<content>.*?)(?=\n+SOURCE \[filename=|\Z)"
     matches = re.finditer(pattern, block, re.DOTALL)
     return [
         {
@@ -111,6 +197,7 @@ def parse_chunks_from_context_block(block: str) -> list[dict[str, object]]:
             "document_id": match.group("doc_id"),
             "chunk_index": int(match.group("chunk")),
             "content": match.group("content").strip(),
+            "metadata": {"chunk_type": match.group("chunk_type") or "text"},
         }
         for match in matches
     ]
@@ -121,6 +208,25 @@ async def extract_notebook_chat_transcript(
     *,
     include_reasoning: bool = False,
 ) -> list[dict[str, object]]:
+    """Build a structured transcript from a notebook's raw message history.
+
+    Converts pydantic-ai ``ModelMessage`` objects into a frontend-friendly
+    format, resolving tool calls to their results and mapping inline citations
+    to their source chunks.
+
+    Args:
+        notebook: The notebook to extract the transcript from.
+        include_reasoning: When ``True``, include ``ThinkingPart`` content as
+            ``reasoning`` parts in assistant turns.
+
+    Returns:
+        List of turn dicts. Each user turn has ``role="user"`` and a
+        ``parts`` list with a single text entry. Each assistant turn has
+        ``role="assistant"``, a ``parts`` list (text, reasoning, and/or
+        tool-call entries), a ``sources`` list of all retrieved chunks, and a
+        ``references`` list of de-duplicated citations found in the assistant
+        text.
+    """
     messages = await load_notebook_chat_history(notebook)
     transcript: list[dict[str, object]] = []
 
@@ -221,7 +327,7 @@ async def extract_notebook_chat_transcript(
                                 isinstance(part, ToolReturnPart)
                                 and part.tool_name == "search_notebook_context"
                             ):
-                                content_str = str(part.content)
+                                content_str = _tool_return_to_text(part.content)
                                 sources.extend(
                                     parse_chunks_from_context_block(content_str)
                                 )
@@ -282,6 +388,7 @@ async def extract_notebook_chat_transcript(
                             "document_id": doc_id,
                             "chunk_index": chunk_index,
                             "content": source["content"],
+                            "metadata": source.get("metadata", {}),
                         }
                     )
 

@@ -34,6 +34,9 @@ const formSchema = z.object({
     .max(500, "Focus instructions must be at most 500 characters."),
 })
 
+const TOGGLE_ITEM_CLASS =
+  "rounded border-border px-3 py-1.5 text-xs data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+
 export function MindMapGenerateDialog({
   open,
   onOpenChange,
@@ -116,19 +119,19 @@ export function MindMapGenerateDialog({
                     >
                       <ToggleGroupItem
                         value="simple"
-                        className="rounded border-border px-3 py-1.5 text-xs data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+                        className={TOGGLE_ITEM_CLASS}
                       >
                         Simple
                       </ToggleGroupItem>
                       <ToggleGroupItem
                         value="intermediate"
-                        className="rounded border-border px-3 py-1.5 text-xs data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+                        className={TOGGLE_ITEM_CLASS}
                       >
                         Intermediate
                       </ToggleGroupItem>
                       <ToggleGroupItem
                         value="detailed"
-                        className="rounded border-border px-3 py-1.5 text-xs data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+                        className={TOGGLE_ITEM_CLASS}
                       >
                         Detailed
                       </ToggleGroupItem>

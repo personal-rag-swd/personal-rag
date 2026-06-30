@@ -11,7 +11,7 @@ from app.notebooks.rag.document_chunker import (
     chunk_docx,
     chunk_pdf,
 )
-from app.notebooks.rag.search_service import (
+from app.notebooks.rag.query_rewrite_agent import (
     rewrite_query_text,
 )
 
@@ -67,7 +67,7 @@ def test_pdf_chunking_extracts_simple_text(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(
         chunking_module.pymupdf4llm,
         "to_markdown",
-        lambda doc, page_chunks: [{"text": "PDF text"}] if page_chunks else "PDF text",
+        lambda doc: "PDF text",
     )
 
     chunks = chunk_pdf(
@@ -90,7 +90,6 @@ def test_chunk_document_uses_settings_for_docx(monkeypatch: pytest.MonkeyPatch) 
     def fake_chunk_docx(
         request: ChunkingRequest,
         *,
-        settings: Settings | None = None,
         chunk_size: int,
         chunk_overlap: int,
     ):
@@ -134,51 +133,57 @@ def test_chunk_document_rejects_unsupported_extension() -> None:
         chunk_document(request)
 
 
-def test_rewrite_query_text_disabled(
+@pytest.mark.anyio
+async def test_rewrite_query_text_disabled(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
     monkeypatch.setattr(
-        "app.notebooks.rag.search_service.chat_provider_is_configured", lambda: True
+        "app.notebooks.rag.query_rewrite_agent.chat_provider_is_configured",
+        lambda: True,
     )
     settings.enable_query_rewrite = False
 
-    res = rewrite_query_text("can you find apples?", settings)
+    res = await rewrite_query_text("can you find apples?", settings)
     assert res == "can you find apples?"
 
 
-def test_rewrite_query_text_success(
+@pytest.mark.anyio
+async def test_rewrite_query_text_success(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
     from pydantic_ai.models.test import TestModel
 
     monkeypatch.setattr(
-        "app.notebooks.rag.search_service.chat_provider_is_configured", lambda: True
+        "app.notebooks.rag.query_rewrite_agent.chat_provider_is_configured",
+        lambda: True,
     )
 
     monkeypatch.setattr(
-        "app.notebooks.rag.search_service.resolve_chat_provider",
+        "app.notebooks.rag.query_rewrite_agent.resolve_chat_provider",
         lambda: TestModel(custom_output_text="apples"),
     )
 
     settings.enable_query_rewrite = True
-    res = rewrite_query_text("can you find apples?", settings)
+    res = await rewrite_query_text("can you find apples?", settings)
     assert res == "apples"
 
 
-def test_rewrite_query_text_failure_fallback(
+@pytest.mark.anyio
+async def test_rewrite_query_text_failure_fallback(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
     monkeypatch.setattr(
-        "app.notebooks.rag.search_service.chat_provider_is_configured", lambda: True
+        "app.notebooks.rag.query_rewrite_agent.chat_provider_is_configured",
+        lambda: True,
     )
 
     def failing_resolve():
         raise RuntimeError("LLM error")
 
     monkeypatch.setattr(
-        "app.notebooks.rag.search_service.resolve_chat_provider", failing_resolve
+        "app.notebooks.rag.query_rewrite_agent.resolve_chat_provider", failing_resolve
     )
 
     settings.enable_query_rewrite = True
-    res = rewrite_query_text("can you find apples?", settings)
+    res = await rewrite_query_text("can you find apples?", settings)
     assert res == "can you find apples?"

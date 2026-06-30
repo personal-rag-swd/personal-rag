@@ -74,13 +74,6 @@ export type NotebookDocumentEvent =
       timestamp: string
     }
 
-export type NotebookActionState = {
-  values?: Partial<NotebookValues>
-  notebook?: Notebook
-  formError?: string
-  fieldErrors?: Partial<Record<"name" | "description" | "tags", string>>
-}
-
 export type NotebookApiPayload = {
   id: string
   name: string
