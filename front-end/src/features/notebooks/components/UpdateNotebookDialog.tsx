@@ -4,6 +4,7 @@ import { PencilIcon } from "lucide-react"
 
 import { useUpdateNotebookMutation } from "@/features/notebooks/api"
 import { notebookSchema, type Notebook } from "@/features/notebooks/types"
+import { getErrorMessage } from "@/lib/utils"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -68,9 +69,7 @@ export function UpdateNotebookDialog({
         })
         onSuccess(result)
       } catch (err: unknown) {
-        const message =
-          err instanceof Error ? err.message : "Failed to update notebook."
-        setFormError(message)
+        setFormError(getErrorMessage(err, "Failed to update notebook."))
       }
     },
   })

@@ -98,6 +98,8 @@ max-complexity = 10
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
+# Dev-only CLI utility: print() is the intended user-facing output.
+"create_dev_user.py" = ["T201"]
 "tests/*" = [
     "ANN",
     "ARG",

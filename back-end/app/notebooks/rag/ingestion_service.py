@@ -1,35 +1,36 @@
-from __future__ import annotations
-
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import pymupdf
+from beanie import SortDirection
 from beanie.odm.queries.update import UpdateResponse
+from botocore.client import BaseClient
 from botocore.exceptions import ClientError
-from bson import Binary
 from langchain_core.documents import Document
 from pydantic_ai import Agent
 from pydantic_ai.messages import BinaryContent
 
 from app.core.config import Settings
+from app.core.embedding_provider import embed_texts
 from app.core.event_bus import domain_event_bus
 from app.core.llm_provider import chat_provider_is_configured, resolve_chat_provider
 from app.core.s3 import get_s3_client
 from app.notebooks.domain_events import (
     DocumentFailed,
     DocumentIndexed,
-    DocumentIndexing,
     DocumentProcessing,
     DocumentRegistered,
     DocumentUploaded,
 )
+from app.notebooks.exceptions import TransientIngestionError
 from app.notebooks.models import Notebook, NotebookDocument, NotebookDocumentChunk
 from app.notebooks.rag.document_chunker import (
     IMAGE_EXTENSIONS,
+    IMAGE_MEDIA_TYPES,
     ChunkingRequest,
     chunk_document,
 )
@@ -37,7 +38,6 @@ from app.users.models import User
 
 logger = logging.getLogger(__name__)
 
-INGESTIBLE_STATUSES = {"pending", "uploaded"}
 CLAIMABLE_DOCUMENT_STATUSES = {"pending", "uploaded"}
 INGESTION_FAILED_MESSAGE = (
     "Ingestion timed out while processing. Please retry the upload."
@@ -45,156 +45,6 @@ INGESTION_FAILED_MESSAGE = (
 UPLOAD_FAILED_MESSAGE = (
     "Upload timed out. The file was not received by storage. Please retry the upload."
 )
-
-ATLAS_VECTOR_INDEX_NAME = "notebook_chunks_vector_index"
-
-
-async def _check_atlas_index_status() -> tuple[str, bool] | None:
-    """Check Atlas search index status using ``list_search_indexes``.
-
-    Returns ``(status, queryable)`` if the index is found, or ``None``
-    when the API is not available (non-Atlas deployments, old driver, …).
-    """
-    try:
-        collection = NotebookDocumentChunk.get_pymongo_collection()
-        cursor = collection.list_search_indexes()
-        indexes = await cursor.to_list(length=100)
-    except Exception:
-        return None
-
-    for index in indexes:
-        if index.get("name") == ATLAS_VECTOR_INDEX_NAME:
-            return index.get("status", ""), index.get("queryable", False)
-    return None
-
-
-async def _is_document_vector_indexed(
-    document: NotebookDocument,
-) -> bool:
-    """Check if every chunk of the document has been embedded and is searchable.
-
-    Atlas makes the index ACTIVE and queryable before all documents are
-    embedded, so we must verify each chunk individually rather than stopping
-    at the first hit.
-    """
-    chunks = await NotebookDocumentChunk.find(
-        {"document_id": document.id},
-        sort=[("chunk_index", 1)],
-    ).to_list()
-
-    if not chunks:
-        return True
-
-    for chunk in chunks:
-        try:
-            pipeline = [
-                {
-                    "$vectorSearch": {
-                        "index": ATLAS_VECTOR_INDEX_NAME,
-                        "path": "content",
-                        "query": chunk.content,
-                        "numCandidates": 20,
-                        "limit": 10,
-                        "similarity": "cosine",
-                        "filter": {
-                            "notebook_id": Binary.from_uuid(document.notebook_id),
-                            "user_id": Binary.from_uuid(document.user_id),
-                        },
-                    }
-                }
-            ]
-            results = await NotebookDocumentChunk.aggregate(pipeline).to_list()
-            found = any(r.get("document_id") == document.id for r in results)
-            if not found:
-                return False
-        except Exception as e:
-            logger.warning(
-                "Vector search query failed during indexing verification for document %s: %s",
-                document.id,
-                str(e),
-            )
-            return False
-
-    return True
-
-
-async def wait_for_atlas_vector_index(
-    document: NotebookDocument,
-    wait_seconds: float = 120.0,
-) -> None:
-    """Wait for the Atlas ``{ATLAS_VECTOR_INDEX_NAME}`` to become ACTIVE
-    and queryable, and for the document chunks to be embedded by the autoEmbed model.
-
-    During the wait the document status is set to ``"indexing"`` so the
-    existing SSE stream (``GET /notebooks/events``) pushes real-time
-    updates to the client.
-
-    If the check is not available (non-Atlas, missing index, etc.) the
-    function returns immediately.  On timeout the document proceeds
-    anyway with a warning.
-    """
-    index_status = await _check_atlas_index_status()
-    if index_status is None:
-        return
-
-    # In Atlas environments, we set the status to "indexing" while we check/wait
-    document.status = "indexing"
-    document.updated_at = datetime.now(UTC)
-    await document.save()
-    await domain_event_bus.emit(DocumentIndexing(document))
-
-    start_time = datetime.now(UTC)
-    deadline = start_time + timedelta(seconds=wait_seconds)
-    while True:
-        status, queryable = index_status
-        if (
-            status == "ACTIVE"
-            and queryable
-            and await _is_document_vector_indexed(document)
-        ):
-            logger.info(
-                "Atlas vector index %s is ACTIVE and document %s chunks are embedded/searchable (waited %.1fs)",
-                ATLAS_VECTOR_INDEX_NAME,
-                document.filename,
-                (datetime.now(UTC) - start_time).total_seconds(),
-            )
-            return
-
-        if datetime.now(UTC) >= deadline:
-            break
-
-        await asyncio.sleep(5.0)
-
-        # Refresh index status
-        index_status = await _check_atlas_index_status()
-        if index_status is None:
-            logger.info("$listSearchIndexes became unavailable - proceeding")
-            return
-
-    logger.warning(
-        "Timed out waiting for Atlas vector index %s or document %s embedding after %.0fs - "
-        "proceeding anyway; vector search may return incomplete results.",
-        ATLAS_VECTOR_INDEX_NAME,
-        document.filename,
-        wait_seconds,
-    )
-
-
-class TransientIngestionError(RuntimeError):
-    """A retryable ingestion error that should trigger message requeue."""
-
-
-# Canonical IANA image MIME types keyed by bare extension (no leading dot).
-# ``image/jpg`` is NOT valid — vision providers reject it — so ``jpg`` maps
-# to ``image/jpeg``. Both ``_image_media_type`` (filename-based) and
-# ``_extract_pdf_image_bytes`` (PyMuPDF ext-based) use this single source.
-_IMAGE_MEDIA_TYPES = {
-    "jpg": "image/jpeg",
-    "jpeg": "image/jpeg",
-    "png": "image/png",
-    "webp": "image/webp",
-    "gif": "image/gif",
-}
 
 image_description_agent = Agent(
     instructions=(
@@ -204,10 +54,27 @@ image_description_agent = Agent(
 )
 
 
-def _image_media_type(filename: str) -> str:
-    """Map a filename to a valid image MIME type, defaulting to image/jpeg."""
-    return _IMAGE_MEDIA_TYPES.get(
-        Path(filename).suffix.lstrip(".").lower(), "image/jpeg"
+def _image_chunk_document(
+    *,
+    description: str,
+    document: NotebookDocument,
+    source: str,
+    s3_key: str | None,
+    media_type: str,
+) -> Document:
+    """Build the ``image`` chunk Document shared by the direct-image upload and
+    embedded-PDF-image paths (same metadata shape, only ``source``/``s3_key`` vary).
+    """
+    return Document(
+        page_content=description,
+        metadata={
+            "source": source,
+            "document_id": str(document.id),
+            "chunk_type": "image",
+            "s3_key": s3_key,
+            "s3_bucket": document.s3_bucket,
+            "media_type": media_type,
+        },
     )
 
 
@@ -237,23 +104,16 @@ _PDF_IMAGE_VISION_CONCURRENCY = 5
 
 def _extract_pdf_image_bytes(
     pdf_doc: pymupdf.Document, xref: int
-) -> tuple[bytes, str, str] | None:
+) -> tuple[bytes, str, str]:
     """Return ``(image_bytes, extension, media_type)`` for an embedded image.
 
     Follows the official PyMuPDF recipe: ``extract_image`` yields the image in
     its native encoding; formats a vision model/browser cannot read are
-    re-rendered to RGB PNG via a ``Pixmap`` (handling CMYK/alpha). Returns
-    ``None`` for images too small to be meaningful.
+    re-rendered to RGB PNG via a ``Pixmap`` (handling CMYK/alpha).
     """
     base = pdf_doc.extract_image(xref)
-    if (
-        base["width"] < _MIN_EMBEDDED_IMAGE_DIMENSION
-        or base["height"] < _MIN_EMBEDDED_IMAGE_DIMENSION
-    ):
-        return None
-
     ext = base["ext"].lower()
-    media_type = _IMAGE_MEDIA_TYPES.get(ext)
+    media_type = IMAGE_MEDIA_TYPES.get(ext)
     if media_type is not None:
         return base["image"], ext, media_type
 
@@ -266,7 +126,7 @@ def _extract_pdf_image_bytes(
 async def _extract_pdf_images(
     document: NotebookDocument,
     pdf_bytes: bytes,
-    s3_client: Any,
+    s3_client: BaseClient,
 ) -> list[Document]:
     """Extract embedded images from a PDF, upload them to S3, and describe them.
 
@@ -274,6 +134,11 @@ async def _extract_pdf_images(
     only images actually embedded in the document are processed — each xref once
     — rather than rendering every page.
     """
+    if not document.s3_key or not document.s3_bucket:
+        raise ValueError(
+            "Cannot extract embedded images from a PDF without S3 bucket/key"
+        )
+
     key_prefix = document.s3_key.rsplit("/", 1)[0]
 
     seen_xrefs: set[int] = set()
@@ -281,17 +146,21 @@ async def _extract_pdf_images(
     pdf_doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     try:
         for page_index in range(len(pdf_doc)):
-            for img in pdf_doc[page_index].get_images():
-                xref = img[0]
+            # get_images(full=True) tuple: (xref, smask, width, height, ...).
+            for img in pdf_doc[page_index].get_images(full=True):
+                xref, width, height = img[0], img[2], img[3]
                 if xref in seen_xrefs:
                     continue
                 seen_xrefs.add(xref)
 
-                extracted = _extract_pdf_image_bytes(pdf_doc, xref)
-                if extracted is None:
+                # Skip logos/icons/spacers before the costlier extract_image call.
+                if (
+                    width < _MIN_EMBEDDED_IMAGE_DIMENSION
+                    or height < _MIN_EMBEDDED_IMAGE_DIMENSION
+                ):
                     continue
-                image_bytes, ext, media_type = extracted
 
+                image_bytes, ext, media_type = _extract_pdf_image_bytes(pdf_doc, xref)
                 image_key = f"{key_prefix}/images/img_{xref}.{ext}"
                 # boto3 put_object is blocking; keep it off the event loop.
                 await asyncio.to_thread(
@@ -315,27 +184,20 @@ async def _extract_pdf_images(
     # gather can hammer the provider into rate limits.
     semaphore = asyncio.Semaphore(_PDF_IMAGE_VISION_CONCURRENCY)
 
-    async def _describe_bounded(data: bytes, label: str, media_type: str) -> str:
+    async def _bounded(data: bytes, label: str, media_type: str) -> str:
         async with semaphore:
             return await _describe_image(data, label, media_type)
 
     descriptions = await asyncio.gather(
-        *(
-            _describe_bounded(data, label, media_type)
-            for _, data, media_type, label in images
-        )
+        *(_bounded(data, label, media_type) for _, data, media_type, label in images)
     )
     image_docs = [
-        Document(
-            page_content=description,
-            metadata={
-                "source": document.s3_key,
-                "document_id": str(document.id),
-                "chunk_type": "image",
-                "s3_key": image_key,
-                "s3_bucket": document.s3_bucket,
-                "media_type": media_type,
-            },
+        _image_chunk_document(
+            description=description,
+            document=document,
+            source=document.s3_key,
+            s3_key=image_key,
+            media_type=media_type,
         )
         for (image_key, _, media_type, _), description in zip(
             images, descriptions, strict=True
@@ -430,12 +292,16 @@ async def mark_pending_document_uploaded_if_object_exists(
     document: NotebookDocument,
     settings: Settings,
     *,
-    s3_client: Any | None = None,
+    s3_client: BaseClient | None,
 ) -> bool:
     if document.status != "pending":
         return document.status == "uploaded"
 
     s3_client = s3_client or get_s3_client(settings)
+    if not document.s3_bucket or not document.s3_key:
+        raise ValueError(
+            "Cannot check S3 object existence for a pending document without bucket/key"
+        )
     try:
         metadata = s3_client.head_object(Bucket=document.s3_bucket, Key=document.s3_key)
     except ClientError as exc:
@@ -474,7 +340,7 @@ async def process_unprocessed_notebook_documents(
         await NotebookDocument.find(
             {"status": "uploaded"},
         )
-        .sort(("created_at", 1))
+        .sort(("created_at", SortDirection.ASCENDING))
         .limit(limit)
         .to_list()
     )
@@ -483,7 +349,7 @@ async def process_unprocessed_notebook_documents(
         await NotebookDocument.find(
             {"status": "pending"},
         )
-        .sort(("created_at", 1))
+        .sort(("created_at", SortDirection.ASCENDING))
         .limit(limit - len(uploaded_docs))
         .to_list()
     )
@@ -521,12 +387,12 @@ async def claim_document_for_ingestion(
     }
     if size is not None:
         set_fields["size"] = size
-    # Atomic claim: only the caller whose find-and-update matches a CLAIMABLE
-    # status wins, so concurrent deliveries for the same object can't both
-    # claim it (queue.consume dispatches handlers concurrently when prefetch>1).
-    document = await NotebookDocument.find_one(
-        {"_id": document_id, "status": {"$in": list(CLAIMABLE_DOCUMENT_STATUSES)}},
-    ).update({"$set": set_fields}, response_type=UpdateResponse.NEW_DOCUMENT)
+    document = cast(
+        NotebookDocument | None,
+        await NotebookDocument.find_one(
+            {"_id": document_id, "status": {"$in": list(CLAIMABLE_DOCUMENT_STATUSES)}},
+        ).update_one({"$set": set_fields}, response_type=UpdateResponse.NEW_DOCUMENT),
+    )
     if document is None:
         return None
     await domain_event_bus.emit(DocumentProcessing(document))
@@ -559,7 +425,7 @@ async def mark_document_upload_failed(
 async def _run_document_ingestion(
     document: NotebookDocument,
     settings: Settings,
-    s3_client: Any,
+    s3_client: BaseClient,
 ) -> None:
     if document.content is not None:
         body = document.content.encode("utf-8")
@@ -575,6 +441,13 @@ async def _run_document_ingestion(
             document.s3_bucket,
             document.s3_key,
         )
+        if not s3_client:
+            raise ValueError("S3 client must be provided for S3-based ingestion")
+        if not document.s3_bucket or not document.s3_key:
+            raise ValueError(
+                "Cannot fetch document from S3 without bucket/key for ingestion"
+            )
+
         obj = s3_client.get_object(Bucket=document.s3_bucket, Key=document.s3_key)
         body = obj["Body"].read()
         source_key = document.s3_key
@@ -586,19 +459,15 @@ async def _run_document_ingestion(
     )
     suffix = Path(document.filename).suffix.lower()
     if suffix in IMAGE_EXTENSIONS:
-        media_type = _image_media_type(document.filename)
+        media_type = IMAGE_MEDIA_TYPES.get(suffix.lstrip("."), "image/jpeg")
         description = await _describe_image(body, document.filename, media_type)
         split_docs: list[Document] = [
-            Document(
-                page_content=description,
-                metadata={
-                    "source": source_key,
-                    "document_id": str(document.id),
-                    "chunk_type": "image",
-                    "s3_key": document.s3_key,
-                    "s3_bucket": document.s3_bucket,
-                    "media_type": media_type,
-                },
+            _image_chunk_document(
+                description=description,
+                document=document,
+                source=source_key,
+                s3_key=document.s3_key,
+                media_type=media_type,
             )
         ]
     else:
@@ -616,8 +485,6 @@ async def _run_document_ingestion(
                 document, body, s3_client
             )
 
-    # Drop blank chunks so they are never inserted/embedded — an empty chunk
-    # would stall index verification (its vector-search query never matches).
     split_docs = [doc for doc in split_docs if doc.page_content.strip()]
     if not split_docs:
         raise ValueError("No extractable text content in document")
@@ -632,23 +499,33 @@ async def _run_document_ingestion(
         )
 
     logger.info(
+        "Generating embeddings for %d chunks of %s...",
+        len(split_docs),
+        document.filename,
+    )
+    embeddings = await embed_texts(chunk_texts)
+
+    logger.info(
         "Indexing %d chunks in database for %s...", len(split_docs), document.filename
     )
     await NotebookDocumentChunk.find({"document_id": document.id}).delete()
     now = datetime.now(UTC)
-    for idx, split_doc in enumerate(split_docs):
-        await NotebookDocumentChunk(
-            document_id=document.id,
-            notebook_id=document.notebook_id,
-            user_id=document.user_id,
-            chunk_index=idx,
-            content=split_doc.page_content,
-            chunk_metadata=split_doc.metadata,
-            created_at=now,
-            updated_at=now,
-        ).insert()
-
-    await wait_for_atlas_vector_index(document)
+    await NotebookDocumentChunk.insert_many(
+        [
+            NotebookDocumentChunk(
+                document_id=document.id,
+                notebook_id=document.notebook_id,
+                user_id=document.user_id,
+                chunk_index=idx,
+                content=split_doc.page_content,
+                embedding=embeddings[idx],
+                chunk_metadata=split_doc.metadata,
+                created_at=now,
+                updated_at=now,
+            )
+            for idx, split_doc in enumerate(split_docs)
+        ]
+    )
 
     document.status = "indexed"
     document.error_message = None
@@ -662,11 +539,36 @@ async def _run_document_ingestion(
     )
 
 
+async def _record_ingestion_outcome(
+    document_id: UUID,
+    *,
+    status: str,
+    error_message: str | None,
+    event: type[DocumentUploaded] | type[DocumentFailed],
+    only_if_processing: bool = False,
+) -> None:
+    """Re-fetch the document and persist a terminal/transient ingestion outcome.
+
+    The ``ingest_document_by_id`` exception handlers run after the in-hand
+    ``document`` may be stale, so the row is re-read before updating. When
+    ``only_if_processing`` is set, a document no longer in ``"processing"`` is
+    left untouched (a concurrent handler already finalized it).
+    """
+    document = await NotebookDocument.find_one({"_id": document_id})
+    if document is None or (only_if_processing and document.status != "processing"):
+        return
+    document.status = status
+    document.error_message = error_message
+    document.updated_at = datetime.now(UTC)
+    await document.save()
+    await domain_event_bus.emit(event(document))
+
+
 async def ingest_document_by_id(
     document_id: UUID,
     settings: Settings,
     *,
-    s3_client: Any | None = None,
+    s3_client: BaseClient | None = None,
     require_processing_status: bool = False,
 ) -> None:
     document = await NotebookDocument.find_one({"_id": document_id})
@@ -705,33 +607,31 @@ async def ingest_document_by_id(
             logger.exception(
                 "Notebook document ingestion hit a transient error for %s", document_id
             )
-            document = await NotebookDocument.find_one({"_id": document_id})
-            if document is not None:
-                document.status = "uploaded"
-                document.error_message = None
-                document.updated_at = datetime.now(UTC)
-                await document.save()
-                await domain_event_bus.emit(DocumentUploaded(document))
+            await _record_ingestion_outcome(
+                document_id,
+                status="uploaded",
+                error_message=None,
+                event=DocumentUploaded,
+            )
             raise TransientIngestionError(str(exc)) from exc
         logger.exception("Notebook document ingestion failed for %s", document_id)
-        document = await NotebookDocument.find_one({"_id": document_id})
-        if document is not None:
-            document.status = "failed"
-            document.error_message = str(exc)[:4000]
-            document.updated_at = datetime.now(UTC)
-            await document.save()
-            await domain_event_bus.emit(DocumentFailed(document))
+        await _record_ingestion_outcome(
+            document_id,
+            status="failed",
+            error_message=str(exc)[:4000],
+            event=DocumentFailed,
+        )
     except BaseException:
         # CancelledError (and other BaseException subclasses) must not leave the
         # document permanently stuck at "processing". Mark it failed so the stale
         # timeout doesn't need to clean it up, then re-raise so the cancellation
         # propagates normally.
         logger.warning("Ingestion cancelled for document %s", document_id)
-        doc = await NotebookDocument.find_one({"_id": document_id})
-        if doc is not None and doc.status == "processing":
-            doc.status = "failed"
-            doc.error_message = "Ingestion was interrupted. Please retry the upload."
-            doc.updated_at = datetime.now(UTC)
-            await doc.save()
-            await domain_event_bus.emit(DocumentFailed(doc))
+        await _record_ingestion_outcome(
+            document_id,
+            status="failed",
+            error_message="Ingestion was interrupted. Please retry the upload.",
+            event=DocumentFailed,
+            only_if_processing=True,
+        )
         raise

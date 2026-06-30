@@ -20,6 +20,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { apiFetch } from "@/lib/api-client"
+import { getErrorMessage } from "@/lib/utils"
 
 type NoteCreateDialogProps = {
   notebookId: string
@@ -37,7 +38,7 @@ export function NoteCreateDialog({
   const [content, setContent] = useState("")
   const [isSaving, setIsSaving] = useState(false)
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SyntheticEvent) => {
     e.preventDefault()
     e.stopPropagation()
 
@@ -80,9 +81,8 @@ export function NoteCreateDialog({
 
       onOpenChange(false)
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "The note could not be saved."
       toast.error("Failed to save note", {
-        description: message,
+        description: getErrorMessage(err, "The note could not be saved."),
       })
     } finally {
       setIsSaving(false)

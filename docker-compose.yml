@@ -50,7 +50,7 @@ services:
       sh -c "fastapi dev app/main.py --host 0.0.0.0 --port 8000"
     environment:
       PYTHONDONTWRITEBYTECODE: "1"
-      DATABASE_URL: mongodb://mongodb:27017/personal-rag
+      DATABASE_URL: ${DATABASE_URL:-mongodb://mongodb:27017/personal-rag}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-to-a-32-byte-dev-secret}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}

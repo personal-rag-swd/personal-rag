@@ -15,6 +15,7 @@ Backend (run from `back-end/`):
 - `uv run fastapi dev app/main.py` — run dev API server (port 8000)
 - `uv run pytest` — run all tests; single test: `uv run pytest tests/test_notebooks.py::test_name`
 - `uv run ruff check` / `uv run ruff format` — lint / format (ruff config in `pyproject.toml`, line length 88, very strict ruleset)
+- `npx pyright --pythonpath .venv/bin/python` — type check (run alongside ruff; pyright is not installed in the venv, use npx)
 
 Frontend (run from `front-end/`):
 - `npm install`, `npm run dev` (port 5173)
@@ -28,7 +29,7 @@ These are non-obvious and cause silent failures if violated:
 - **Always use dict-based queries** (`{"field": value}`), never `Eq(Model.field, value)` — Pydantic v2's metaclass blocks class-level field access on Beanie `Document`s.
 - For id lookups use `{"_id": value}`, **not** `{"id": value}` — Beanie maps Python `id` → Mongo `_id`.
 - Document models all use `id: UUID = Field(default_factory=uuid4)`. UUIDs are stored as BSON `Binary`; when building `$vectorSearch` filters on UUID fields, wrap with `Binary.from_uuid(...)` (see `rag/search_service.py`).
-- Atlas `$vectorSearch` uses server-side embeddings: pass `query` (raw text) on the `content` path, not a precomputed `queryVector`. Index name is `notebook_chunks_vector_index`.
+- `$vectorSearch` uses client-side embeddings: pass `queryVector` (a `list[float]`) on the `embedding` path, not `query`. Embeddings are generated via OpenRouter (`app/core/embedding_provider.py`). Index name is `notebook_chunks_vector_index`. The Atlas index must be defined as `type: vector`, `path: embedding`, `numDimensions: 1536`, `similarity: cosine`.
 - Tests use `mongomock-motor`; `conftest.py` patches `list_collection_names` to drop the `authorizedCollections` kwarg for compatibility.
 - All Document models register in `app/main.py` `lifespan()` via `init_beanie(document_models=[...])` — new models must be added there.
 
@@ -45,8 +46,8 @@ Feature-oriented modules under `back-end/app/`, each with `models.py` / `schemas
 
 1. Client gets a presigned URL and uploads to MinIO/S3; a `NotebookDocument` row is created with `status="pending"`.
 2. MinIO emits an `ObjectCreated` event → RabbitMQ. `consumer.py` (`run_notebook_document_consumer`, started in `lifespan` when `RABBITMQ_CONSUMER_ENABLED=true`) consumes it and calls `ingest_document_by_id`.
-3. Ingestion (`ingestion_service.py`): claim doc (`status="processing"`) → fetch bytes from S3 (or `document.content` for in-app notes) → `chunk_document` (`document_chunker.py`) → store `NotebookDocumentChunk` rows → `wait_for_atlas_vector_index` (polls Atlas index until ACTIVE + queryable) → `status="indexed"`.
-4. Document **status lifecycle**: `pending → uploaded → processing → indexing → indexed` (or `failed`). Stale docs are timed out by `fail_stale_*` helpers.
+3. Ingestion (`ingestion_service.py`): claim doc (`status="processing"`) → fetch bytes from S3 (or `document.content` for in-app notes) → `chunk_document` (`document_chunker.py`) → embed chunks via `embed_texts` (OpenRouter) → store `NotebookDocumentChunk` rows with `embedding` vectors → `status="indexed"`.
+4. Document **status lifecycle**: `pending → uploaded → processing → indexed` (or `failed`). Stale docs are timed out by `fail_stale_*` helpers.
 5. **Fallback without RabbitMQ**: `process_unprocessed_notebook_documents()` polls Mongo for `pending`/`uploaded` docs — used when `RABBITMQ_CONSUMER_ENABLED=false` (the default).
 
 ### Chat & retrieval

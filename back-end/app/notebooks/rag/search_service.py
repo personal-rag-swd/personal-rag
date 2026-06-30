@@ -5,6 +5,7 @@ from bson import Binary
 from pydantic import BaseModel
 
 from app.core.config import Settings
+from app.core.embedding_provider import embed_text
 from app.notebooks.models import Notebook, NotebookDocument, NotebookDocumentChunk
 from app.notebooks.rag.query_rewrite_agent import rewrite_query_text
 from app.users.models import User
@@ -31,13 +32,14 @@ async def search_notebook_chunks(
     top_k: int = 6,
 ) -> list[RetrievedChunk]:
     query = await rewrite_query_text(query, settings)
+    query_vector = await embed_text(query)
 
     pipeline = [
         {
             "$vectorSearch": {
                 "index": "notebook_chunks_vector_index",
-                "path": "content",
-                "query": query,
+                "path": "embedding",
+                "queryVector": query_vector,
                 "numCandidates": top_k * 10,
                 "limit": top_k,
                 "similarity": "cosine",

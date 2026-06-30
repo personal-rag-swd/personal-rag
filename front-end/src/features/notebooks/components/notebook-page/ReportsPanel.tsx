@@ -39,6 +39,48 @@ export function ReportsPanel({
   const isPending =
     report?.status === "pending" || report?.status === "generating"
 
+  function getStatusDescription(): string {
+    if (!report) return "This saved output could not be loaded."
+    if (isPending) return "Generating..."
+    if (isFailed) return "Generation failed"
+    if (isCancelled) return "Cancelled"
+    return `Generated ${formatDistanceToNow(new Date(report.createdAt), {
+      addSuffix: true,
+    })}`
+  }
+
+  function renderContent() {
+    if (report && isCompleted) {
+      return <ReportContentView report={report} />
+    }
+    if (report && isFailed) {
+      return (
+        <div className="p-6 text-sm text-destructive">
+          {report.errorMessage ?? "Report generation failed."}
+        </div>
+      )
+    }
+    if (isCancelled) {
+      return (
+        <div className="p-6 text-sm text-muted-foreground">
+          This report was cancelled.
+        </div>
+      )
+    }
+    if (isPending) {
+      return (
+        <div className="flex items-center justify-center p-6 text-sm text-muted-foreground">
+          Generating report...
+        </div>
+      )
+    }
+    return (
+      <div className="p-6 text-sm text-muted-foreground">
+        This saved output is unavailable.
+      </div>
+    )
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[min(90vh,38rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
@@ -47,39 +89,11 @@ export function ReportsPanel({
             {meta?.label ?? "Saved report"}
           </DialogTitle>
           <DialogDescription className="truncate text-[11px] text-muted-foreground">
-            {report
-              ? isPending
-                ? "Generating..."
-                : isFailed
-                  ? "Generation failed"
-                  : isCancelled
-                    ? "Cancelled"
-                    : `Generated ${formatDistanceToNow(new Date(report.createdAt), { addSuffix: true })}`
-              : "This saved output could not be loaded."}
+            {getStatusDescription()}
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="min-h-0 flex-1">
-          {report && isCompleted ? (
-            <ReportContentView report={report} />
-          ) : isFailed ? (
-            <div className="p-6 text-sm text-destructive">
-              {report.errorMessage ?? "Report generation failed."}
-            </div>
-          ) : isCancelled ? (
-            <div className="p-6 text-sm text-muted-foreground">
-              This report was cancelled.
-            </div>
-          ) : isPending ? (
-            <div className="flex items-center justify-center p-6 text-sm text-muted-foreground">
-              Generating report...
-            </div>
-          ) : (
-            <div className="p-6 text-sm text-muted-foreground">
-              This saved output is unavailable.
-            </div>
-          )}
-        </ScrollArea>
+        <ScrollArea className="min-h-0 flex-1">{renderContent()}</ScrollArea>
       </DialogContent>
     </Dialog>
   )

@@ -1,9 +1,10 @@
 import logging
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
+from uuid import UUID
 
 from botocore.exceptions import ClientError
-from fastapi import HTTPException, status
 
 from app.core.config import Settings
 from app.core.s3 import (
@@ -11,7 +12,18 @@ from app.core.s3 import (
     get_s3_client,
     presign_endpoint_url,
 )
-from app.file.schemas import PresignedUrlRequest, PresignedUrlResponse
+from app.file.exceptions import (
+    EmptyFilenameError,
+    ForbiddenResourceError,
+    InvalidFilenameCharactersError,
+    InvalidOperationError,
+    PresignedUrlGenerationFailedError,
+)
+from app.file.schemas import (
+    PresignedUrlRequest,
+    PresignedUrlResponse,
+    UploadFailedRequest,
+)
 from app.notebooks.models import NotebookDocument
 from app.users.models import User
 
@@ -30,33 +42,22 @@ async def generate_presigned_url_service(
 ) -> PresignedUrlResponse:
     operation = request.operation.lower()
     if operation not in ("upload", "download"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Operation must be either 'upload' or 'download'",
-        )
+        raise InvalidOperationError()
 
     if ".." in request.filename or "\\" in request.filename:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid characters or directory traversal detected",
-        )
+        raise InvalidFilenameCharactersError()
 
+    cleaned_name = ""
     if operation == "upload":
         cleaned_name = sanitize_filename(request.filename)
         if not cleaned_name:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Filename cannot be empty after sanitization",
-            )
+            raise EmptyFilenameError()
         unique_id = str(uuid.uuid4())
         s3_key = f"users/{current_user.id}/{unique_id}/{cleaned_name}"
     else:
         expected_prefix = f"users/{current_user.id}/"
         if not request.filename.startswith(expected_prefix):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Forbidden: You do not have access to this resource",
-            )
+            raise ForbiddenResourceError()
         s3_key = request.filename
 
     try:
@@ -82,10 +83,7 @@ async def generate_presigned_url_service(
             )
     except ClientError as exc:
         logger.exception("Failed to generate S3 presigned URL")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate presigned URL",
-        ) from exc
+        raise PresignedUrlGenerationFailedError() from exc
 
     if operation == "upload" and request.notebook_id is not None:
         document = NotebookDocument(
@@ -100,3 +98,23 @@ async def generate_presigned_url_service(
         await document.insert()
 
     return PresignedUrlResponse(url=presigned_url, key=s3_key)
+
+
+async def mark_upload_failed(
+    request: UploadFailedRequest, user_id: UUID
+) -> dict[str, object]:
+    document = await NotebookDocument.find_one(
+        {"s3_key": request.key, "user_id": user_id},
+    )
+    if document is None:
+        return {"status": "ok", "updated": False}
+    if document.status in {"indexed", "processing", "uploaded"}:
+        return {"status": "ok", "updated": True}
+    document.status = "failed"
+    document.error_message = (
+        request.error_message
+        or "Upload failed before object storage accepted the file."
+    )[:4000]
+    document.updated_at = datetime.now(UTC)
+    await document.save()
+    return {"status": "ok", "updated": True}

@@ -40,6 +40,70 @@ export function QuizDialog({
     0
   )
 
+  function getStatusDescription(): string {
+    if (isCompleted) {
+      return submitted
+        ? `You scored ${score} / ${questions.length}`
+        : `${questions.length} questions · answer each, then submit`
+    }
+    if (status === "failed") return "Generation failed"
+    if (status === "cancelled") return "Cancelled"
+    return "Generating quiz..."
+  }
+
+  function renderBody() {
+    if (report && isCompleted && questions.length > 0) {
+      return (
+        <div className="space-y-4 p-5">
+          {submitted ? (
+            <ScoreBanner score={score} total={questions.length} />
+          ) : null}
+          <ol className="space-y-4">
+            {questions.map((q, i) => (
+              <QuizQuestionView
+                key={i}
+                index={i}
+                question={q}
+                selected={answers[i]}
+                submitted={submitted}
+                onSelect={(optionIndex) => {
+                  if (submitted) return
+                  setAnswers((prev) => ({ ...prev, [i]: optionIndex }))
+                }}
+              />
+            ))}
+          </ol>
+        </div>
+      )
+    }
+    if (report && isCompleted) {
+      return (
+        <div className="p-6 text-sm text-muted-foreground">
+          This quiz has no questions.
+        </div>
+      )
+    }
+    if (status === "failed") {
+      return (
+        <div className="p-6 text-sm text-destructive">
+          {report?.errorMessage ?? "Quiz generation failed."}
+        </div>
+      )
+    }
+    if (status === "cancelled") {
+      return (
+        <div className="p-6 text-sm text-muted-foreground">
+          This quiz was cancelled.
+        </div>
+      )
+    }
+    return (
+      <div className="flex items-center justify-center p-6 text-sm text-muted-foreground">
+        Generating quiz...
+      </div>
+    )
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[min(90vh,42rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
@@ -48,58 +112,11 @@ export function QuizDialog({
             Quiz
           </DialogTitle>
           <DialogDescription className="truncate text-[11px] text-muted-foreground">
-            {isCompleted
-              ? submitted
-                ? `You scored ${score} / ${questions.length}`
-                : `${questions.length} questions · answer each, then submit`
-              : status === "failed"
-                ? "Generation failed"
-                : status === "cancelled"
-                  ? "Cancelled"
-                  : "Generating quiz..."}
+            {getStatusDescription()}
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="min-h-0 flex-1">
-          {report && isCompleted && questions.length > 0 ? (
-            <div className="space-y-4 p-5">
-              {submitted ? (
-                <ScoreBanner score={score} total={questions.length} />
-              ) : null}
-              <ol className="space-y-4">
-                {questions.map((q, i) => (
-                  <QuizQuestionView
-                    key={i}
-                    index={i}
-                    question={q}
-                    selected={answers[i]}
-                    submitted={submitted}
-                    onSelect={(optionIndex) => {
-                      if (submitted) return
-                      setAnswers((prev) => ({ ...prev, [i]: optionIndex }))
-                    }}
-                  />
-                ))}
-              </ol>
-            </div>
-          ) : report && isCompleted ? (
-            <div className="p-6 text-sm text-muted-foreground">
-              This quiz has no questions.
-            </div>
-          ) : status === "failed" ? (
-            <div className="p-6 text-sm text-destructive">
-              {report?.errorMessage ?? "Quiz generation failed."}
-            </div>
-          ) : status === "cancelled" ? (
-            <div className="p-6 text-sm text-muted-foreground">
-              This quiz was cancelled.
-            </div>
-          ) : (
-            <div className="flex items-center justify-center p-6 text-sm text-muted-foreground">
-              Generating quiz...
-            </div>
-          )}
-        </ScrollArea>
+        <ScrollArea className="min-h-0 flex-1">{renderBody()}</ScrollArea>
 
         {report && isCompleted && questions.length > 0 ? (
           <div className="flex items-center justify-between gap-3 border-t px-5 py-3">

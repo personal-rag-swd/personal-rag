@@ -31,7 +31,7 @@ import {
   verificationSchema,
   type AuthActionState,
 } from "@/features/auth/types"
-import { cn } from "@/lib/utils"
+import { cn, getErrorMessage } from "@/lib/utils"
 
 const initialAuthActionState: AuthActionState = {
   step: "details",
@@ -154,12 +154,10 @@ function RegistrationDetailsForm({
           setVerificationState({ step: "otp", email: value.email })
         }
       } catch (err: unknown) {
-        const message =
-          err instanceof Error ? err.message : "Failed to start registration."
         setState({
           step: "details",
           email: value.email,
-          formError: message,
+          formError: getErrorMessage(err, "Failed to start registration."),
         })
       }
     },
@@ -351,14 +349,10 @@ function VerificationForm({
         await verifyRegistration(email, value.otp)
         navigate("/login")
       } catch (err: unknown) {
-        const message =
-          err instanceof Error
-            ? err.message
-            : "Failed to verify registration code."
         setState({
           step: "otp",
           email,
-          formError: message,
+          formError: getErrorMessage(err, "Failed to verify registration code."),
         })
       }
     },

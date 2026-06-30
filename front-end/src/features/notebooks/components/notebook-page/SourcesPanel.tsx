@@ -63,7 +63,7 @@ import {
   useNotebookDocumentsQuery,
 } from "@/features/notebooks/api"
 import type { NotebookDocument } from "@/features/notebooks/types"
-import { cn } from "@/lib/utils"
+import { cn, getErrorMessage } from "@/lib/utils"
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 // Photos from modern devices routinely exceed the document limit.
@@ -387,10 +387,7 @@ function SourceItem({ document }: { document: NotebookDocument }) {
       setIsDeleteDialogOpen(false)
     } catch (error) {
       toast.error("Delete failed", {
-        description:
-          error instanceof Error
-            ? error.message
-            : "The source could not be deleted.",
+        description: getErrorMessage(error, "The source could not be deleted."),
       })
     }
   }
@@ -621,10 +618,7 @@ async function uploadNotebookSource(
 
     await callbacks.onSuccess()
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "The source could not be uploaded."
+    const message = getErrorMessage(error, "The source could not be uploaded.")
     try {
       if (typeof key === "string" && key.length > 0) {
         await reportUploadFailed(key, notebookId, message)

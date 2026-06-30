@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import ClassVar
 from uuid import UUID, uuid4
 
 from beanie import Document
@@ -6,7 +7,7 @@ from pydantic import Field
 
 
 class PendingRegistration(Document):
-    id: UUID = Field(default_factory=uuid4)
+    id: UUID = Field(default_factory=uuid4)  # type: ignore[override]
     email: str
     hashed_password: str
     hashed_otp: str
@@ -18,13 +19,13 @@ class PendingRegistration(Document):
     class Settings:
         name = "pending_registrations"
         use_state_management = True
-        indexes = [
+        indexes: ClassVar[list[list[tuple[str, int]]]] = [
             [("email", 1)],
         ]
 
 
 class RefreshToken(Document):
-    id: UUID = Field(default_factory=uuid4)
+    id: UUID = Field(default_factory=uuid4)  # type: ignore[override]
     user_id: UUID
     token_hash: str
     family_id: UUID
@@ -36,7 +37,7 @@ class RefreshToken(Document):
     class Settings:
         name = "refresh_tokens"
         use_state_management = True
-        indexes = [
+        indexes: ClassVar[list[list[tuple[str, int]]]] = [
             [("token_hash", 1)],
             [("family_id", 1)],
         ]

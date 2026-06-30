@@ -67,7 +67,7 @@ def test_pdf_chunking_extracts_simple_text(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(
         chunking_module.pymupdf4llm,
         "to_markdown",
-        lambda doc, page_chunks: [{"text": "PDF text"}] if page_chunks else "PDF text",
+        lambda doc: "PDF text",
     )
 
     chunks = chunk_pdf(
@@ -90,7 +90,6 @@ def test_chunk_document_uses_settings_for_docx(monkeypatch: pytest.MonkeyPatch) 
     def fake_chunk_docx(
         request: ChunkingRequest,
         *,
-        settings: Settings | None = None,
         chunk_size: int,
         chunk_overlap: int,
     ):

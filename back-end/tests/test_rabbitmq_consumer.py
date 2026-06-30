@@ -9,8 +9,8 @@ from app.notebooks.consumer import (
     _process_message,
     parse_minio_object_created_events,
 )
+from app.notebooks.exceptions import TransientIngestionError
 from app.notebooks.models import Notebook, NotebookDocument
-from app.notebooks.rag.ingestion_service import TransientIngestionError
 from app.users.models import User
 
 pytestmark = pytest.mark.anyio

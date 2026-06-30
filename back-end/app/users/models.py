@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import ClassVar
 from uuid import UUID, uuid4
 
 from beanie import Document
@@ -6,7 +7,7 @@ from pydantic import Field
 
 
 class User(Document):
-    id: UUID = Field(default_factory=uuid4) # type: ignore
+    id: UUID = Field(default_factory=uuid4)  # type: ignore
     email: str
     hashed_password: str
     role: str = "user"
@@ -17,6 +18,6 @@ class User(Document):
     class Settings:
         name = "users"
         use_state_management = True
-        indexes = [
+        indexes: ClassVar[list[list[tuple[str, int]]]] = [
             [("email", 1)],
         ]

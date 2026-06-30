@@ -2,7 +2,7 @@ import { useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 
-import { cn } from "@/lib/utils"
+import { cn, getErrorMessage } from "@/lib/utils"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -83,6 +83,20 @@ export function NotebookPage() {
     }
   }
 
+  const handleActivateAction = (actionId: string) => {
+    if (actionId === "reports") {
+      setSelectedReport(null)
+      setIsReportGenerateOpen(true)
+    } else if (actionId === "mind-map") {
+      setSelectedMindMap(null)
+      setIsMindMapGenerateOpen(true)
+    } else if (actionId === "quiz") {
+      setIsQuizGenerateOpen(true)
+    } else if (actionId === "flashcards") {
+      setIsFlashcardsGenerateOpen(true)
+    }
+  }
+
   const generateMindMapMutation = useGenerateNotebookReportMutation(id || "")
 
   const handleGenerateMindMap = async (
@@ -99,8 +113,7 @@ export function NotebookPage() {
       setSelectedMindMap(data)
       toast.success("Mind map generated successfully!")
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Unknown error"
-      toast.error(`Failed to generate mind map: ${errorMessage}`)
+      toast.error(`Failed to generate mind map: ${getErrorMessage(err, "Unknown error")}`)
     }
   }
 
@@ -121,8 +134,7 @@ export function NotebookPage() {
       })
       toast.success("Quiz is generating — it'll appear in Studio shortly.")
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Unknown error"
-      toast.error(`Failed to start quiz: ${errorMessage}`)
+      toast.error(`Failed to start quiz: ${getErrorMessage(err, "Unknown error")}`)
     }
   }
 
@@ -143,8 +155,7 @@ export function NotebookPage() {
       })
       toast.success("Flashcards are generating — they'll appear in Studio shortly.")
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Unknown error"
-      toast.error(`Failed to start flashcards: ${errorMessage}`)
+      toast.error(`Failed to start flashcards: ${getErrorMessage(err, "Unknown error")}`)
     }
   }
 
@@ -161,11 +172,10 @@ export function NotebookPage() {
   if (isError || !notebook) {
     return (
       <NotebookError
-        message={
-          error instanceof Error
-            ? error.message
-            : "This notebook could not be loaded. It may have been deleted or you don't have access."
-        }
+        message={getErrorMessage(
+          error,
+          "This notebook could not be loaded. It may have been deleted or you don't have access."
+        )}
       />
     )
   }
@@ -206,19 +216,7 @@ export function NotebookPage() {
             <PanelCard title="Studio" hideHeaderBorder>
               <StudioPanel
                 notebookId={id}
-                onActivate={(actionId) => {
-                  if (actionId === "reports") {
-                    setSelectedReport(null)
-                    setIsReportGenerateOpen(true)
-                  } else if (actionId === "mind-map") {
-                    setSelectedMindMap(null)
-                    setIsMindMapGenerateOpen(true)
-                  } else if (actionId === "quiz") {
-                    setIsQuizGenerateOpen(true)
-                  } else if (actionId === "flashcards") {
-                    setIsFlashcardsGenerateOpen(true)
-                  }
-                }}
+                onActivate={handleActivateAction}
                 onViewReport={handleViewReport}
                 isMindMapGenerating={generateMindMapMutation.isPending}
                 onAddNoteClick={() => setIsNoteCreateOpen(true)}
@@ -237,19 +235,7 @@ export function NotebookPage() {
           <PanelCard title="Studio" hideHeaderBorder>
             <StudioPanel
               notebookId={id}
-              onActivate={(actionId) => {
-                if (actionId === "reports") {
-                  setSelectedReport(null)
-                  setIsReportGenerateOpen(true)
-                } else if (actionId === "mind-map") {
-                  setSelectedMindMap(null)
-                  setIsMindMapGenerateOpen(true)
-                } else if (actionId === "quiz") {
-                  setIsQuizGenerateOpen(true)
-                } else if (actionId === "flashcards") {
-                  setIsFlashcardsGenerateOpen(true)
-                }
-              }}
+              onActivate={handleActivateAction}
               onViewReport={handleViewReport}
               isMindMapGenerating={generateMindMapMutation.isPending}
               onAddNoteClick={() => setIsNoteCreateOpen(true)}
