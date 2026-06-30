@@ -33,7 +33,10 @@ from app.notebooks.events import (
     build_report_snapshots,
     event_bus,
 )
-from app.notebooks.exceptions import DocumentNotFoundError
+from app.notebooks.exceptions import (
+    DocumentContentUnavailableError,
+    DocumentNotFoundError,
+)
 from app.notebooks.memory import (
     append_notebook_chat_history,
     build_user_message_from_agui_payload,
@@ -243,7 +246,7 @@ async def read_notebook_document_preview(
         )
 
     if not document.s3_key:
-        raise DocumentNotFoundError()
+        raise DocumentContentUnavailableError()
 
     url = generate_presigned_get_url(
         settings,
@@ -273,7 +276,7 @@ async def read_notebook_document_pdf_inline(
         current_user,
     )
     if not document.s3_key:
-        raise DocumentNotFoundError()
+        raise DocumentContentUnavailableError()
 
     try:
         result = await obstore.get_async(get_s3_store(settings), document.s3_key)
