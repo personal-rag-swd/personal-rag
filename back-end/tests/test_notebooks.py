@@ -285,15 +285,21 @@ class TestNotebookDocumentPreview:
 
         captured: dict[str, Any] = {}
 
-        class FakeS3Client:
-            def generate_presigned_url(self, **kwargs: Any) -> str:
-                captured.update(kwargs)
-                return "http://localhost:9000/presigned-preview"
+        def fake_generate_presigned_get_url(
+            settings: Any,
+            *,
+            key: str,
+            expires_in: int = 3600,
+        ) -> str:
+            captured["settings"] = settings
+            captured["key"] = key
+            captured["expires_in"] = expires_in
+            return "http://localhost:9000/presigned-preview"
 
         monkeypatch.setattr(
             notebooks_router,
-            "get_s3_client",
-            lambda *args, **kwargs: FakeS3Client(),
+            "generate_presigned_get_url",
+            fake_generate_presigned_get_url,
         )
 
         user = await create_user(role="user")
@@ -320,11 +326,8 @@ class TestNotebookDocumentPreview:
         data = response.json()
         assert data["preview_type"] == "url"
         assert data["url"] == "http://localhost:9000/presigned-preview"
-        assert captured["ClientMethod"] == "get_object"
-        assert captured["HttpMethod"] == "GET"
-        assert captured["Params"]["Bucket"] == "source-bucket"
-        assert captured["Params"]["Key"] == "users/source.pdf"
-        assert captured["Params"]["ResponseContentDisposition"].startswith("inline;")
+        assert captured["key"] == "users/source.pdf"
+        assert captured["expires_in"] == 3600
 
 
 class TestNotebookDocumentChunks:

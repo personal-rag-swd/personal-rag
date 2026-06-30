@@ -23,6 +23,14 @@ class DocumentNotFoundError(AppError):
         )
 
 
+class DocumentContentUnavailableError(AppError):
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document content is not available",
+        )
+
+
 class ReportNotFoundError(AppError):
     def __init__(self) -> None:
         super().__init__(
