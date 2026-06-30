@@ -56,8 +56,8 @@ export function NavMain({
                   tooltip={item.title}
                   className={`
                     transition-all duration-150
-                    ${isActive 
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium shadow-sm" 
+                    ${isActive
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium shadow-sm"
                       : "hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground"
                     }
                   `}
