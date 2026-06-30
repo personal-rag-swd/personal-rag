@@ -596,7 +596,7 @@ function SourcePreviewDialog({
             </ScrollArea>
           ) : sourceUrl && canRenderInline ? (
             <iframe
-              title={preview.filename}
+              title={preview?.filename ?? "Document"}
               src={sourceUrl}
               sandbox=""
               className="h-[55dvh] w-full bg-background"
