@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import patch
 from uuid import UUID
 
 import pytest
 from httpx import AsyncClient
+from pydantic_ai.models.test import TestModel
 
 from app.notebooks.models import (
     NotebookDocument,
@@ -14,6 +16,22 @@ from app.notebooks.models import (
 from tests.conftest import auth_headers, create_notebook, create_user
 
 pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture(autouse=True)
+def _stub_report_model():
+    """Return synthetic report output instantly instead of calling the provider.
+
+    Report generation runs as a FastAPI background task *inside* each POST
+    request. Hitting the real provider made these tests slow and flaky: a slow
+    generation could outlast the access-token TTL and cause the next request to
+    401. ``TestModel`` produces schema-valid output with no network I/O.
+    """
+    with patch(
+        "app.notebooks.agent.report_agents.resolve_chat_provider",
+        return_value=TestModel(),
+    ):
+        yield
 
 
 async def _add_document_to_notebook(notebook_id: UUID, user_id: UUID) -> UUID:

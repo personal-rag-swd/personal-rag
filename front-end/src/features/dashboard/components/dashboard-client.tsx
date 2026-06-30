@@ -6,6 +6,7 @@ import { useNotebooks } from "@/features/notebooks/store/notebook-store"
 import { useCreateNotebookMutation } from "@/features/notebooks/api"
 import { notebookSchema, type Notebook } from "@/features/notebooks/types"
 import { UpdateNotebookDialog } from "@/features/notebooks/components/UpdateNotebookDialog"
+import { getErrorMessage } from "@/lib/utils"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -57,7 +58,6 @@ import {
   SparklesIcon,
   AlertCircleIcon,
   PencilIcon,
-  ChevronDownIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -393,9 +393,7 @@ export function CreateNotebookDialogContent({
         })
         onSuccess(result)
       } catch (err: unknown) {
-        const message =
-          err instanceof Error ? err.message : "Failed to create notebook."
-        setFormError(message)
+        setFormError(getErrorMessage(err, "Failed to create notebook."))
       }
     },
   })

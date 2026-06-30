@@ -1,12 +1,9 @@
 import type { LucideIcon } from "lucide-react"
 import {
-  // AudioLinesIcon, // TODO: dùng lại khi code Audio Overview
   BarChart3Icon,
   BrainCircuitIcon,
   FileQuestionIcon,
-  // LayoutPanelTopIcon, // TODO: dùng lại khi code Slide Deck
   SquareStackIcon,
-  // VideoIcon, // TODO: dùng lại khi code Video Draft
 } from "lucide-react"
 
 export type StudioAction = {
@@ -32,28 +29,8 @@ const ALL_STUDIO_ACTIONS: StudioAction[] = [
     icon: BarChart3Icon,
     implemented: true,
   },
-  // TODO: Chưa code — tạm ẩn các tính năng này
-  // {
-  //   id: "audio-overview",
-  //   label: "Audio Overview",
-  //   description: "Narrated summary",
-  //   icon: AudioLinesIcon,
-  //   implemented: false,
-  // },
-  // {
-  //   id: "slide-deck",
-  //   label: "Slide Deck",
-  //   description: "Notes into slides",
-  //   icon: LayoutPanelTopIcon,
-  //   implemented: false,
-  // },
-  // {
-  //   id: "video-draft",
-  //   label: "Video Draft",
-  //   description: "Video outline",
-  //   icon: VideoIcon,
-  //   implemented: false,
-  // },
+  // TODO: Planned actions (Audio Overview, Slide Deck, Video Draft) go here with
+  // `implemented: false` once built — they render disabled and sort last.
   {
     id: "flashcards",
     label: "Flashcards",

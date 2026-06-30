@@ -76,19 +76,36 @@ import {
   useNotebookDocumentsQuery,
 } from "@/features/notebooks/api"
 import type { NotebookDocument } from "@/features/notebooks/types"
-import { cn } from "@/lib/utils"
+import { cn, getErrorMessage } from "@/lib/utils"
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024
-const SUPPORTED_EXTENSIONS = [".pdf", ".docx", ".txt", ".md"]
+// Photos from modern devices routinely exceed the document limit.
+const MAX_IMAGE_FILE_SIZE = 25 * 1024 * 1024
+const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif"]
+const SUPPORTED_EXTENSIONS = [
+  ".pdf",
+  ".docx",
+  ".txt",
+  ".md",
+  ...IMAGE_EXTENSIONS,
+]
 const SAFE_UPLOAD_CONTENT_TYPES = new Set([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "text/plain",
   "text/markdown",
   "text/x-markdown",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
 ])
 const SAFE_INLINE_PREVIEW_CONTENT_TYPES = new Set([
   "application/pdf",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
   "text/plain",
   "text/markdown",
   "text/x-markdown",
@@ -144,7 +161,7 @@ export function SourcesPanel({
     if (!isSupportedFile(file)) {
       toast.error("Unsupported source type", {
         description:
-          "Upload PDF, DOCX, TXT, or Markdown files for notebook ingestion.",
+          "Upload PDF, DOCX, TXT, Markdown, or image files (JPG, PNG, WEBP, GIF) for notebook ingestion.",
       })
       return
     }
@@ -152,14 +169,15 @@ export function SourcesPanel({
     if (!isSafeUploadContentType(file)) {
       toast.error("Unsupported source content", {
         description:
-          "Only PDF, DOCX, plain text, or Markdown content can be uploaded.",
+          "Only PDF, DOCX, plain text, Markdown, or image content can be uploaded.",
       })
       return
     }
 
-    if (file.size > MAX_FILE_SIZE) {
+    const maxSize = isImageFile(file) ? MAX_IMAGE_FILE_SIZE : MAX_FILE_SIZE
+    if (file.size > maxSize) {
       toast.error("File is too large", {
-        description: "Maximum file size is 10MB.",
+        description: `Maximum file size is ${maxSize / (1024 * 1024)}MB.`,
       })
       return
     }
@@ -345,7 +363,7 @@ export function SourcesPanel({
                   <EmptyDescription className="text-xs">
                     {documents.length > 0
                       ? "Try a different filename search."
-                      : "Click Add source above to upload PDF, DOCX, TXT, or Markdown files."}
+                      : "Click Add source above to upload PDF, DOCX, TXT, Markdown, or image files."}
                   </EmptyDescription>
                 </EmptyHeader>
                 {documents.length === 0 && (
@@ -389,10 +407,7 @@ function SourceItem({ document }: { document: NotebookDocument }) {
       setIsDeleteDialogOpen(false)
     } catch (error) {
       toast.error("Delete failed", {
-        description:
-          error instanceof Error
-            ? error.message
-            : "The source could not be deleted.",
+        description: getErrorMessage(error, "The source could not be deleted."),
       })
     }
   }
@@ -658,9 +673,17 @@ function SourcesPlaceholder({
   )
 }
 
-function isSupportedFile(file: File) {
+function hasExtension(file: File, extensions: string[]) {
   const filename = file.name.toLowerCase()
-  return SUPPORTED_EXTENSIONS.some((extension) => filename.endsWith(extension))
+  return extensions.some((ext) => filename.endsWith(ext))
+}
+
+function isSupportedFile(file: File) {
+  return hasExtension(file, SUPPORTED_EXTENSIONS)
+}
+
+function isImageFile(file: File) {
+  return hasExtension(file, IMAGE_EXTENSIONS)
 }
 
 function isSafeUploadContentType(file: File) {
@@ -729,7 +752,8 @@ function canRenderPreviewInline(preview: NotebookDocumentPreview) {
   return (
     filename.endsWith(".pdf") ||
     filename.endsWith(".txt") ||
-    filename.endsWith(".md")
+    filename.endsWith(".md") ||
+    IMAGE_EXTENSIONS.some((ext) => filename.endsWith(ext))
   )
 }
 
@@ -795,10 +819,7 @@ async function uploadNotebookSource(
 
     await callbacks.onSuccess()
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "The source could not be uploaded."
+    const message = getErrorMessage(error, "The source could not be uploaded.")
     try {
       if (typeof key === "string" && key.length > 0) {
         await reportUploadFailed(key, notebookId, message)

@@ -50,7 +50,7 @@ services:
       sh -c "fastapi dev app/main.py --host 0.0.0.0 --port 8000"
     environment:
       PYTHONDONTWRITEBYTECODE: "1"
-      DATABASE_URL: mongodb://mongodb:27017/personal-rag
+      DATABASE_URL: ${DATABASE_URL:-mongodb://mongodb:27017/personal-rag}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-to-a-32-byte-dev-secret}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
@@ -67,7 +67,7 @@ services:
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-auto}
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
       EMBEDDING_PROVIDER_URL: ${EMBEDDING_PROVIDER_URL:-}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-google/gemini-embedding-2}
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-1536}
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173","http://localhost:8000"]}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}

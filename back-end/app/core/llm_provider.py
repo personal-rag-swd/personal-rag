@@ -30,23 +30,13 @@ def _get_openrouter_model() -> Model:
 
 
 def resolve_chat_provider() -> Model:
-    settings = get_settings()
-    selected_provider = settings.chat_provider.strip().lower()
-    if selected_provider == "openrouter":
-        return _get_openrouter_model()
-    raise ValueError(
-        f"Unsupported chat provider '{selected_provider}'. Use openrouter."
-    )
+    return _get_openrouter_model()
 
 
 def chat_provider_is_configured() -> bool:
-    """True if the currently selected chat provider has an API key available.
+    """True if an OpenRouter API key is configured.
 
     Used to surface a friendly 503 before attempting LLM-backed features
     (chat, reports) instead of failing deep inside the provider SDK.
     """
-    settings = get_settings()
-    selected_provider = settings.chat_provider.strip().lower()
-    if selected_provider == "openrouter":
-        return bool(settings.chat_api_key)
-    return False
+    return bool(get_settings().chat_api_key)

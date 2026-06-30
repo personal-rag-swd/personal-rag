@@ -1,7 +1,6 @@
 "use client"
 
 import {
-  type CodeHeaderProps,
   type StreamdownTextComponents,
   StreamdownTextPrimitive,
   useIsStreamdownCodeBlock,
@@ -64,8 +63,11 @@ const preprocessCitations = (text: string) => {
       docId = docIdMatch[1].trim()
     }
 
-    // 2. Try to extract file=... or filename=...
-    const fileMatch = innerContent.match(/(?:file|filename)\s*=\s*([^,\s\]]+)/i)
+    // 2. Try to extract file=... or filename=... (allow spaces in the filename,
+    // but stop before the next " key=value" token, a comma, or the closing ]).
+    const fileMatch = innerContent.match(
+      /(?:file|filename)\s*=\s*([^,\]]+?)(?=\s+[\w-]+\s*=|\s*,|\s*\]|$)/i
+    )
     if (fileMatch) {
       filename = fileMatch[1].trim()
     } else {
@@ -114,7 +116,7 @@ const MarkdownTextImpl = () => {
     <StreamdownTextPrimitive
       plugins={{ code, math, mermaid, cjk }}
       containerClassName="aui-md"
-      components={defaultComponents as StreamdownTextComponents}
+      components={defaultComponents as unknown as StreamdownTextComponents}
       preprocess={preprocessCitations}
     />
   )
@@ -122,13 +124,21 @@ const MarkdownTextImpl = () => {
 
 export const MarkdownText = memo(MarkdownTextImpl)
 
+interface ChunkMetadata {
+  chunk_type?: string
+  s3_key?: string
+  s3_bucket?: string
+  media_type?: string
+  [key: string]: unknown
+}
+
 interface ChunkType {
   id?: string
   filename: string
   document_id: string
   chunk_index: number
   content: string
-  metadata?: Record<string, unknown>
+  metadata?: ChunkMetadata
 }
 
 interface ReferenceType {
@@ -138,6 +148,79 @@ interface ReferenceType {
   document_id: string
   chunk_index: number
   content: string
+  metadata?: ChunkMetadata
+}
+
+// Fetch a presigned URL for an image chunk. Resets on dependency change and
+// ignores late responses after unmount, so it is safe to share between the
+// inline source view and the citation popover.
+function useChunkImageUrl(
+  notebookId: string | undefined,
+  documentId: string | undefined,
+  chunkIndex: number,
+  enabled: boolean
+) {
+  const [imageUrl, setImageUrl] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    if (!enabled || !notebookId || !documentId || chunkIndex < 0) return
+    setImageUrl(null)
+    setFailed(false)
+    let cancelled = false
+    apiFetch<{ url: string }>(
+      `/api/v1/notebooks/${notebookId}/documents/${documentId}/chunks/${chunkIndex}/image-url`
+    )
+      .then((data) => {
+        if (!cancelled) setImageUrl(data.url)
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [enabled, notebookId, documentId, chunkIndex])
+
+  return { imageUrl, failed, markFailed: () => setFailed(true) }
+}
+
+function ImageChunkDisplay({
+  notebookId,
+  documentId,
+  chunkIndex,
+  altText,
+}: {
+  notebookId: string | undefined
+  documentId: string
+  chunkIndex: number
+  altText: string
+}) {
+  const { imageUrl, failed, markFailed } = useChunkImageUrl(
+    notebookId,
+    documentId,
+    chunkIndex,
+    true
+  )
+
+  if (failed) return null
+
+  if (!imageUrl) {
+    return (
+      <div className="flex h-32 items-center justify-center">
+        <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  return (
+    <img
+      src={imageUrl}
+      alt={altText}
+      onError={markFailed}
+      className="max-h-[480px] w-full rounded-xl object-contain"
+    />
+  )
 }
 
 function DocumentChunksViewer({
@@ -215,18 +298,35 @@ function DocumentChunksViewer({
       <div className="mx-auto max-w-2xl space-y-6 px-6 py-8">
         {chunks.map((chunk) => {
           const isActive = chunk.chunk_index === activeChunkIndex
+          const isImage = chunk.metadata?.chunk_type === "image"
           return (
             <div
               key={chunk.id}
               ref={isActive ? activeChunkRef : undefined}
               className={cn(
-                "rounded-2xl border border-transparent p-4 text-sm leading-relaxed break-words whitespace-pre-wrap text-foreground/80 transition-all duration-300",
+                "rounded-2xl border border-transparent p-4 text-sm leading-relaxed transition-all duration-300",
                 isActive
                   ? "border-blue-500/20 bg-blue-500/5 font-medium text-foreground shadow-xs ring-1 ring-blue-500/20"
                   : "hover:bg-muted/10"
               )}
             >
-              {chunk.content}
+              {isImage ? (
+                <div className="space-y-3">
+                  <ImageChunkDisplay
+                    notebookId={notebookId}
+                    documentId={chunk.document_id}
+                    chunkIndex={chunk.chunk_index}
+                    altText={chunk.content}
+                  />
+                  <p className="text-xs text-muted-foreground italic">
+                    {chunk.content}
+                  </p>
+                </div>
+              ) : (
+                <span className="break-words whitespace-pre-wrap text-foreground/80">
+                  {chunk.content}
+                </span>
+              )}
             </div>
           )
         })}
@@ -344,6 +444,21 @@ function CitationPopover({
 
   const activeSource = localReference || localSource || fetchedSource
   const contentText = activeSource?.content ?? ""
+  const isImageChunk =
+    (activeSource as ChunkType | null)?.metadata?.chunk_type === "image"
+  const activeDocId =
+    (activeSource as ChunkType | null)?.document_id || finalDocumentId
+
+  const {
+    imageUrl: popoverImageUrl,
+    failed: popoverImageFailed,
+    markFailed: markPopoverImageFailed,
+  } = useChunkImageUrl(
+    notebookId,
+    activeDocId || undefined,
+    resolvedChunkIndex,
+    isOpen && isImageChunk
+  )
 
   const lines = contentText
     .split("\n")
@@ -380,11 +495,31 @@ function CitationPopover({
             </span>
           </div>
 
-          <div className="max-h-48 [scrollbar-width:none] overflow-y-auto p-3.5 text-xs leading-relaxed text-muted-foreground [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          <div className="max-h-56 [scrollbar-width:none] overflow-y-auto p-3.5 text-xs leading-relaxed text-muted-foreground [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             {isLoading ? (
               <div className="flex items-center justify-center gap-2 py-6 text-muted-foreground">
                 <Loader2Icon className="size-3.5 animate-spin text-primary" />
                 <span>Loading source...</span>
+              </div>
+            ) : isImageChunk ? (
+              <div className="space-y-2">
+                {!popoverImageFailed && popoverImageUrl ? (
+                  <img
+                    src={popoverImageUrl}
+                    alt={contentText}
+                    onError={markPopoverImageFailed}
+                    className="w-full rounded-lg object-contain"
+                  />
+                ) : !popoverImageFailed ? (
+                  <div className="flex h-24 items-center justify-center">
+                    <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
+                  </div>
+                ) : null}
+                {contentText && (
+                  <p className="text-[11px] leading-relaxed break-words whitespace-pre-wrap italic">
+                    {contentText}
+                  </p>
+                )}
               </div>
             ) : contentText ? (
               <div className="space-y-2">
@@ -448,22 +583,30 @@ function CitationPopover({
   )
 }
 
-const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
+type CodeBlockProps = Record<string, unknown> & {
+  language: string
+  code: string
+}
+
+const CodeBlock: FC<CodeBlockProps> = ({ language, code }) => {
   const { isCopied, copyToClipboard } = useCopyToClipboard()
-  const onCopy = () => {
-    if (!code || isCopied) return
-    copyToClipboard(code)
-  }
 
   return (
-    <div className="aui-code-header-root mt-2.5 flex items-center justify-between rounded-t-lg border border-b-0 border-border/50 bg-muted/50 px-3 py-1.5 text-xs">
-      <span className="aui-code-header-language font-medium text-muted-foreground lowercase">
-        {language}
-      </span>
-      <TooltipIconButton tooltip="Copy" onClick={onCopy}>
-        {!isCopied && <CopyIcon />}
-        {isCopied && <CheckIcon />}
-      </TooltipIconButton>
+    <div className="mt-2.5 overflow-hidden rounded-lg border border-border/50">
+      <div className="flex items-center justify-between border-b border-border/50 bg-muted/50 px-3 py-1.5 text-xs">
+        <span className="font-medium text-muted-foreground lowercase">{language}</span>
+        <TooltipIconButton
+          tooltip="Copy"
+          onClick={() => {
+            if (!isCopied) copyToClipboard(code)
+          }}
+        >
+          {isCopied ? <CheckIcon /> : <CopyIcon />}
+        </TooltipIconButton>
+      </div>
+      <pre className="overflow-x-auto bg-muted/30 p-3 text-xs leading-relaxed">
+        <code className="font-mono">{code}</code>
+      </pre>
     </div>
   )
 }
@@ -688,15 +831,6 @@ const defaultComponents = {
       {...props}
     />
   ),
-  pre: ({ className, ...props }: MarkdownNodeProps) => (
-    <pre
-      className={cn(
-        "aui-md-pre overflow-x-auto rounded-t-none rounded-b-lg border border-t-0 border-border/50 bg-muted/30 p-3 text-xs leading-relaxed",
-        className
-      )}
-      {...props}
-    />
-  ),
   code: function Code({ className, ...props }: MarkdownNodeProps) {
     const isCodeBlock = useIsStreamdownCodeBlock()
     return (
@@ -710,5 +844,5 @@ const defaultComponents = {
       />
     )
   },
-  CodeHeader,
+  SyntaxHighlighter: CodeBlock,
 }

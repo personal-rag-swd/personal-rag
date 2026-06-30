@@ -2,10 +2,12 @@ from collections.abc import Callable
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, Request
 
 from app.core.config import Settings, get_settings
+from app.core.exceptions import CouldNotValidateCredentialsError
 from app.core.security import decode_access_token
+from app.users.exceptions import ForbiddenError
 from app.users.models import User
 
 
@@ -29,30 +31,18 @@ async def get_current_user(
 ) -> User:
     token = get_access_token(request)
     if token is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise CouldNotValidateCredentialsError()
 
     payload = decode_access_token(token, settings)
     subject = payload.get("sub")
     try:
         user_id = UUID(str(subject))
     except (TypeError, ValueError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        ) from exc
+        raise CouldNotValidateCredentialsError() from exc
 
     user = await User.find_one({"_id": user_id})
     if user is None or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise CouldNotValidateCredentialsError()
     return user
 
 
@@ -63,15 +53,9 @@ def require_role(required_role: str) -> Callable[..., None]:
     ) -> None:
         token = get_access_token(request)
         if token is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+            raise CouldNotValidateCredentialsError()
         payload = decode_access_token(token, settings)
         if payload.get("role") != required_role:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden"
-            )
+            raise ForbiddenError()
 
     return dependency

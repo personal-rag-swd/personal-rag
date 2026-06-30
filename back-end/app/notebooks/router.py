@@ -1,63 +1,50 @@
 import asyncio
+import functools
 import json
 import logging
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
 from typing import Annotated
-from urllib.parse import quote
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import (
     APIRouter,
     BackgroundTasks,
     Depends,
-    HTTPException,
     Request,
     Response,
     status,
 )
 from fastapi.responses import StreamingResponse
 from pydantic_ai.capabilities.process_history import ProcessHistory
-from pydantic_ai.messages import (
-    ModelMessage,
-    ModelRequest,
-    RetryPromptPart,
-    SystemPromptPart,
-    ToolReturnPart,
-    UserPromptPart,
-)
 from pydantic_ai.run import AgentRunResult
 from pydantic_ai.ui.ag_ui import AGUIAdapter
 
-from app.core.config import get_settings
-from app.core.event_bus import domain_event_bus
-from app.core.llm_provider import chat_provider_is_configured, resolve_chat_provider
-from app.core.s3 import get_s3_client
+from app.core.config import Settings, get_settings
+from app.core.llm_provider import resolve_chat_provider
+from app.core.s3 import generate_presigned_get_url
 from app.notebooks.agent import (
     NotebookChatDeps,
     notebook_chat_agent,
 )
-from app.notebooks.domain_events import ReportCancelled
 from app.notebooks.events import (
     build_document_snapshots,
     build_report_snapshots,
     event_bus,
 )
+from app.notebooks.exceptions import DocumentNotFoundError
 from app.notebooks.memory import (
     append_notebook_chat_history,
     build_user_message_from_agui_payload,
     extract_notebook_chat_transcript,
+    keep_recent_messages,
     load_notebook_chat_history,
 )
-from app.notebooks.models import (
-    NotebookDocument,
-    NotebookDocumentChunk,
-    NotebookReport,
-)
+from app.notebooks.models import Notebook, NotebookDocument
 from app.notebooks.rag.ingestion_service import ingest_document_by_id
 from app.notebooks.schemas import (
     NotebookChatHistoryMessage,
     NotebookCreate,
+    NotebookDocumentPreviewRead,
     NotebookDocumentRead,
     NotebookPopulateRead,
     NotebookRead,
@@ -67,13 +54,23 @@ from app.notebooks.schemas import (
     ReportGenerateRequest,
 )
 from app.notebooks.service import (
-    build_report_context,
+    build_chunk_image_url,
+    cancel_report,
+    create_note,
     create_notebook,
+    create_pending_report,
     delete_notebook,
     delete_notebook_document,
+    delete_report,
+    get_chunks_by_document_id,
+    get_chunks_by_filename,
     get_notebook,
+    get_report,
+    get_single_chunk,
+    get_user_event_snapshot,
     list_notebook_documents,
     list_notebooks,
+    list_reports,
     populate_notebook_metrics,
     run_report_generation,
     touch_notebook,
@@ -86,8 +83,40 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/notebooks", tags=["Notebooks"])
 
-# Idle interval between SSE keep-alive comments on the events stream.
 SSE_PING_SECONDS = 30.0
+
+
+async def _notebook_event_generator(current_user: User) -> AsyncIterator[str]:
+    documents, reports = await get_user_event_snapshot(current_user.id)
+    for event in (
+        *build_document_snapshots(documents),
+        *build_report_snapshots(reports),
+    ):
+        yield f"data: {json.dumps(event)}\n\n"
+
+    async with event_bus.subscribe(current_user.id) as queue:
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=SSE_PING_SECONDS)
+                yield f"data: {json.dumps(event)}\n\n"
+            except TimeoutError:
+                yield ": ping\n\n"
+
+
+async def _persist_chat_history(
+    notebook: Notebook, result: AgentRunResult[object]
+) -> None:
+    await append_notebook_chat_history(notebook, result.new_messages())
+
+
+async def _run_background_note_ingestion(document_id: UUID) -> None:
+    settings = get_settings()
+    try:
+        await ingest_document_by_id(document_id, settings)
+    except Exception:
+        logger.exception(
+            "Background note ingestion failed for document %s", document_id
+        )
 
 
 @router.get("/", response_model=list[NotebookRead])
@@ -109,29 +138,8 @@ async def create_notebook_route(
 async def read_notebook_events(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> StreamingResponse:
-    async def event_generator() -> AsyncIterator[str]:
-        documents = await NotebookDocument.find({"user_id": current_user.id}).to_list()
-        reports = await NotebookReport.find({"user_id": current_user.id}).to_list()
-
-        # Replay current state so a (re)connecting client is immediately in sync.
-        for event in (
-            *build_document_snapshots(documents),
-            *build_report_snapshots(reports),
-        ):
-            yield f"data: {json.dumps(event)}\n\n"
-
-        async with event_bus.subscribe(current_user.id) as queue:
-            while True:
-                try:
-                    event = await asyncio.wait_for(
-                        queue.get(), timeout=SSE_PING_SECONDS
-                    )
-                    yield f"data: {json.dumps(event)}\n\n"
-                except TimeoutError:
-                    yield ": ping\n\n"  # keep-alive comment; ignored by EventSource
-
     return StreamingResponse(
-        event_generator(),
+        _notebook_event_generator(current_user),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -183,12 +191,14 @@ async def read_notebook_documents(
 
 @router.get(
     "/{notebook_id}/documents/{document_id}/preview",
+    response_model=NotebookDocumentPreviewRead,
 )
 async def read_notebook_document_preview(
     notebook_id: UUID,
     document_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
-) -> dict[str, object]:
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> NotebookDocumentPreviewRead:
     document = await NotebookDocument.find_one(
         {
             "_id": document_id,
@@ -197,61 +207,34 @@ async def read_notebook_document_preview(
         }
     )
     if document is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found",
-        )
+        raise DocumentNotFoundError()
 
     if document.content is not None:
-        return {
-            "filename": document.filename,
-            "content_type": document.content_type,
-            "size": document.size,
-            "url": None,
-            "content": document.content,
-            "preview_type": "text",
-        }
+        return NotebookDocumentPreviewRead(
+            filename=document.filename,
+            content_type=document.content_type,
+            size=document.size,
+            url=None,
+            content=document.content,
+            preview_type="text",
+        )
 
     if not document.s3_key:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document content is not available",
-        )
+        raise DocumentNotFoundError()
 
-    settings = get_settings()
-    presign_endpoint = settings.s3_public_endpoint_url or settings.s3_endpoint_url
-    s3_client = get_s3_client(settings, endpoint_url=presign_endpoint)
-    disposition = f"inline; filename*=UTF-8''{quote(document.filename)}"
-    url = s3_client.generate_presigned_url(
-        ClientMethod="get_object",
-        Params={
-            "Bucket": document.s3_bucket or settings.s3_bucket,
-            "Key": document.s3_key,
-            "ResponseContentDisposition": disposition,
-        },
-        ExpiresIn=3600,
-        HttpMethod="GET",
+    url = generate_presigned_get_url(
+        settings,
+        key=document.s3_key,
+        expires_in=3600,
     )
-    return {
-        "filename": document.filename,
-        "content_type": document.content_type,
-        "size": document.size,
-        "url": url,
-        "content": None,
-        "preview_type": "url",
-    }
-
-
-def _run_background_note_ingestion(
-    document_id: UUID,
-) -> None:
-    settings = get_settings()
-    try:
-        asyncio.run(ingest_document_by_id(document_id, settings))
-    except Exception:
-        logger.exception(
-            "Background note ingestion failed for document %s", document_id
-        )
+    return NotebookDocumentPreviewRead(
+        filename=document.filename,
+        content_type=document.content_type,
+        size=document.size,
+        url=url,
+        content=None,
+        preview_type="url",
+    )
 
 
 @router.delete(
@@ -278,51 +261,8 @@ async def create_notebook_note(
     background_tasks: BackgroundTasks,
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> object:
-    notebook = await get_notebook(notebook_id, current_user)
-
-    filename = payload.title.strip()
-    if not filename.endswith(".txt") and not filename.endswith(".md"):
-        filename += ".txt"
-
-    now = datetime.now(UTC)
-    doc_id = uuid4()
-    document = NotebookDocument(
-        id=doc_id,
-        notebook_id=notebook.id,
-        user_id=current_user.id,
-        s3_bucket=None,
-        s3_key=f"db-notes/{doc_id}",
-        filename=filename,
-        content_type="text/plain",
-        size=len(payload.content.encode("utf-8")),
-        status="uploaded",
-        content=payload.content,
-        created_at=now,
-        updated_at=now,
-    )
-
-    report = NotebookReport(
-        notebook_id=notebook.id,
-        user_id=current_user.id,
-        report_type="note",
-        status="completed",
-        content={
-            "title": payload.title,
-            "content": payload.content,
-            "document_id": str(doc_id),
-        },
-        created_at=now,
-        updated_at=now,
-    )
-
-    await document.insert()
-    await report.insert()
-
-    background_tasks.add_task(
-        _run_background_note_ingestion,
-        document_id=document.id,
-    )
-
+    document = await create_note(notebook_id, payload, current_user)
+    background_tasks.add_task(_run_background_note_ingestion, document.id)
     return document
 
 
@@ -336,66 +276,19 @@ async def chat_notebook_route(
     message_history = await load_notebook_chat_history(notebook)
     settings = get_settings()
 
-    # The AG-UI adapter forwards the incoming user message as part of
-    # ``message_history`` (not as a fresh prompt), so it is excluded from
-    # ``result.new_messages()``. Capture it from the raw request body here so it
-    # can be persisted alongside the assistant response; otherwise user turns are
-    # lost and disappear from the chat history on reload.
     try:
         request_payload = json.loads(await request.body() or b"{}")
     except (ValueError, TypeError):
         request_payload = None
     new_user_message = build_user_message_from_agui_payload(request_payload)
+    if new_user_message is not None:
+        await append_notebook_chat_history(notebook, [new_user_message])
 
     deps = NotebookChatDeps(
         notebook=notebook,
         current_user=current_user,
         settings=settings,
     )
-
-    async def persist_chat_history(result: AgentRunResult[object]) -> None:
-        new_messages = list(result.new_messages())
-        already_has_user_turn = bool(new_messages) and isinstance(
-            new_messages[0], ModelRequest
-        ) and any(isinstance(part, UserPromptPart) for part in new_messages[0].parts)
-        if new_user_message is not None and not already_has_user_turn:
-            new_messages = [new_user_message, *new_messages]
-        await append_notebook_chat_history(notebook, new_messages)
-
-    async def keep_recent(messages: list[ModelMessage]) -> list[ModelMessage]:
-        system_prompts = []
-        other_messages = []
-        for msg in messages:
-            is_system = False
-            if isinstance(msg, ModelRequest):
-                has_system_part = any(
-                    isinstance(part, SystemPromptPart) for part in msg.parts
-                )
-                has_conversational_part = any(
-                    isinstance(part, (UserPromptPart, ToolReturnPart, RetryPromptPart))
-                    for part in msg.parts
-                )
-                if has_system_part or (
-                    msg.instructions and not has_conversational_part
-                ):
-                    is_system = True
-
-            if is_system:
-                system_prompts.append(msg)
-            else:
-                other_messages.append(msg)
-
-        recent_limit = 15
-        recent_others = (
-            other_messages[-recent_limit:]
-            if len(other_messages) > recent_limit
-            else other_messages
-        )
-
-        keep_set = {id(msg) for msg in system_prompts} | {
-            id(msg) for msg in recent_others
-        }
-        return [msg for msg in messages if id(msg) in keep_set]
 
     return await AGUIAdapter.dispatch_request(
         request,
@@ -404,8 +297,8 @@ async def chat_notebook_route(
         deps=deps,
         message_history=message_history,
         conversation_id=str(notebook.id),
-        on_complete=persist_chat_history,
-        capabilities=[ProcessHistory(keep_recent)],
+        on_complete=functools.partial(_persist_chat_history, notebook),
+        capabilities=[ProcessHistory(keep_recent_messages)],
     )
 
 
@@ -429,31 +322,7 @@ async def read_document_chunks(
     filename: str,
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> list:
-    notebook = await get_notebook(notebook_id, current_user)
-    document = await NotebookDocument.find_one(
-        {"notebook_id": notebook.id, "filename": filename, "user_id": current_user.id},
-    )
-    if not document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
-        )
-
-    chunks = (
-        await NotebookDocumentChunk.find({"document_id": document.id})
-        .sort(("chunk_index", 1))
-        .to_list()
-    )
-
-    return [
-        {
-            "id": str(c.id),
-            "document_id": str(c.document_id),
-            "chunk_index": c.chunk_index,
-            "content": c.content,
-            "metadata": c.chunk_metadata,
-        }
-        for c in chunks
-    ]
+    return await get_chunks_by_filename(notebook_id, filename, current_user)
 
 
 @router.get(
@@ -465,31 +334,7 @@ async def read_document_chunks_by_id(
     document_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> list[dict[str, object]]:
-    notebook = await get_notebook(notebook_id, current_user)
-    document = await NotebookDocument.find_one(
-        {"_id": document_id, "notebook_id": notebook.id, "user_id": current_user.id},
-    )
-    if not document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
-        )
-
-    chunks = (
-        await NotebookDocumentChunk.find({"document_id": document.id})
-        .sort(("chunk_index", 1))
-        .to_list()
-    )
-
-    return [
-        {
-            "id": str(c.id),
-            "document_id": str(c.document_id),
-            "chunk_index": c.chunk_index,
-            "content": c.content,
-            "metadata": c.chunk_metadata,
-        }
-        for c in chunks
-    ]
+    return await get_chunks_by_document_id(notebook_id, document_id, current_user)
 
 
 @router.get("/{notebook_id}/documents/{document_id}/chunks/{chunk_index}")
@@ -499,31 +344,20 @@ async def read_single_chunk(
     chunk_index: int,
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> dict[str, object]:
-    notebook = await get_notebook(notebook_id, current_user)
-    document = await NotebookDocument.find_one(
-        {"_id": document_id, "notebook_id": notebook.id, "user_id": current_user.id},
-    )
-    if not document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
-        )
+    return await get_single_chunk(notebook_id, document_id, chunk_index, current_user)
 
-    chunk = await NotebookDocumentChunk.find_one(
-        {"document_id": document.id, "chunk_index": chunk_index},
-    )
-    if not chunk:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Chunk not found"
-        )
 
-    return {
-        "id": str(chunk.id),
-        "document_id": str(chunk.document_id),
-        "filename": document.filename,
-        "chunk_index": chunk.chunk_index,
-        "content": chunk.content,
-        "metadata": chunk.chunk_metadata,
-    }
+@router.get("/{notebook_id}/documents/{document_id}/chunks/{chunk_index}/image-url")
+async def get_chunk_image_url(
+    notebook_id: UUID,
+    document_id: UUID,
+    chunk_index: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, str]:
+    return await build_chunk_image_url(
+        notebook_id, document_id, chunk_index, current_user, settings
+    )
 
 
 @router.delete("/{notebook_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -546,63 +380,22 @@ async def generate_notebook_report(
     background_tasks: BackgroundTasks,
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> object:
-    notebook = await get_notebook(notebook_id, current_user)
-
-    if not chat_provider_is_configured():
-        provider = get_settings().chat_provider.strip().lower()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"LLM service is not configured. Set the API key for the '{provider}' chat provider.",
-        )
-
-    context = await build_report_context(notebook, current_user)
-    if not context:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="No indexed documents found in this notebook. Upload and wait for indexing to complete.",
-        )
-
-    instructions = (payload.additional_instructions or "").strip() or None
-    if payload.report_type == "custom" and not instructions:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="additional_instructions is required for report_type 'custom'.",
-        )
-
-    question_count: int | None = None
-    if payload.report_type == "quiz":
-        question_count = {"fewer": 10, "standard": 20, "more": 30}.get(
-            (payload.number_of_questions or "standard").strip().lower(), 20
-        )
-    elif payload.report_type == "flashcards":
-        question_count = {"fewer": 10, "standard": 20, "more": 30}.get(
-            (payload.number_of_cards or "standard").strip().lower(), 20
-        )
-
-    now = datetime.now(UTC)
-    report = NotebookReport(
-        notebook_id=notebook.id,
-        user_id=current_user.id,
-        report_type=payload.report_type,
-        status="pending",
-        additional_instructions=instructions,
-        detail_level=payload.detail_level,
-        content={},
-        created_at=now,
-        updated_at=now,
-    )
-    await report.insert()
-
+    (
+        report,
+        context,
+        instructions,
+        detail_level,
+        question_count,
+    ) = await create_pending_report(notebook_id, payload, current_user)
     background_tasks.add_task(
         run_report_generation,
         report_id=report.id,
         report_type=payload.report_type,
         context=context,
         instructions=instructions,
-        detail_level=payload.detail_level,
+        detail_level=detail_level,
         question_count=question_count,
     )
-
     return report
 
 
@@ -615,26 +408,7 @@ async def cancel_notebook_report(
     report_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> object:
-    notebook = await get_notebook(notebook_id, current_user)
-    report = await NotebookReport.find_one(
-        {"_id": report_id, "notebook_id": notebook.id, "user_id": current_user.id},
-    )
-    if report is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Report not found"
-        )
-
-    if report.status not in ("pending", "generating"):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Cannot cancel report with status '{report.status}'.",
-        )
-
-    report.status = "cancelled"
-    report.updated_at = datetime.now(UTC)
-    await report.save()
-    await domain_event_bus.emit(ReportCancelled(report))
-    return report
+    return await cancel_report(notebook_id, report_id, current_user)
 
 
 @router.delete(
@@ -645,37 +419,7 @@ async def delete_notebook_report(
     report_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> Response:
-    notebook = await get_notebook(notebook_id, current_user)
-    report = await NotebookReport.find_one(
-        {"_id": report_id, "notebook_id": notebook.id, "user_id": current_user.id},
-    )
-    if report is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Report not found"
-        )
-
-    if report.report_type == "note" and isinstance(report.content, dict):
-        doc_id_str = report.content.get("document_id")
-        if doc_id_str:
-            try:
-                doc_id = UUID(doc_id_str)
-                document = await NotebookDocument.find_one(
-                    {
-                        "_id": doc_id,
-                        "notebook_id": notebook.id,
-                        "user_id": current_user.id,
-                    },
-                )
-                if document:
-                    await NotebookDocumentChunk.find(
-                        {"document_id": document.id}
-                    ).delete()
-                    await document.delete()
-            except Exception:
-                logger.exception(
-                    "Failed to delete corresponding note document %s", doc_id_str
-                )
-    await report.delete()
+    await delete_report(notebook_id, report_id, current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -684,14 +428,7 @@ async def list_notebook_reports(
     notebook_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> list:
-    notebook = await get_notebook(notebook_id, current_user)
-    return (
-        await NotebookReport.find(
-            {"notebook_id": notebook.id, "user_id": current_user.id},
-        )
-        .sort(("created_at", -1))
-        .to_list()
-    )
+    return await list_reports(notebook_id, current_user)
 
 
 @router.get("/{notebook_id}/reports/{report_id}", response_model=NotebookReportRead)
@@ -700,12 +437,4 @@ async def get_notebook_report(
     report_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> object:
-    notebook = await get_notebook(notebook_id, current_user)
-    report = await NotebookReport.find_one(
-        {"_id": report_id, "notebook_id": notebook.id, "user_id": current_user.id},
-    )
-    if report is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Report not found"
-        )
-    return report
+    return await get_report(notebook_id, report_id, current_user)

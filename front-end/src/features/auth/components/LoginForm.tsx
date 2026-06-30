@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/input-group"
 import { useAuth } from "@/features/auth/store/auth-store"
 import { loginSchema, type AuthActionState } from "@/features/auth/types"
-import { cn } from "@/lib/utils"
+import { cn, getErrorMessage } from "@/lib/utils"
 
 const initialAuthActionState: AuthActionState = {
   step: "details",
@@ -52,11 +52,9 @@ export function LoginForm({
         await login(value.email, value.password)
         navigate("/dashboard")
       } catch (err: unknown) {
-        const message =
-          err instanceof Error ? err.message : "Incorrect email or password."
         setState({
           email: value.email,
-          formError: message,
+          formError: getErrorMessage(err, "Incorrect email or password."),
         })
       }
     },

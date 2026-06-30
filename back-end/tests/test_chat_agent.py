@@ -4,6 +4,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from beanie.odm.enums import SortDirection
 from httpx import AsyncClient
 from starlette.responses import JSONResponse
 
@@ -115,7 +116,7 @@ async def test_chunks_endpoints(
     notebook_id = created.json()["id"]
     from uuid import UUID
 
-    doc, chunk = await create_indexed_chunk(UUID(notebook_id), user.id)
+    doc, _ = await create_indexed_chunk(UUID(notebook_id), user.id)
 
     resp = await client.get(
         f"/api/v1/notebooks/{nb_id}/documents/chunks?filename=test.txt",
@@ -146,7 +147,6 @@ async def test_chunks_endpoints(
 async def test_notebook_message_stores_and_retrieves_history() -> None:
     from uuid import uuid4
 
-    user_id = uuid4()
     notebook_id = uuid4()
 
     msg1 = NotebookMessage(
@@ -164,10 +164,8 @@ async def test_notebook_message_stores_and_retrieves_history() -> None:
     await msg2.insert()
 
     stored = (
-        await NotebookMessage.find(
-            {"notebook_id": notebook_id}
-        )
-        .sort(("seq", 1))
+        await NotebookMessage.find({"notebook_id": notebook_id})
+        .sort(("seq", SortDirection.ASCENDING))
         .to_list()
     )
     assert len(stored) == 2
@@ -189,8 +187,10 @@ async def test_notebook_chat_persists_messages_in_db(
 
     test_model = TestModel(custom_output_text="Hello from TestModel!")
 
-    with patch("app.notebooks.router.resolve_chat_provider", return_value=test_model), \
-         patch("app.notebooks.agent.chat_agent.search_notebook_chunks", return_value=[]):
+    with (
+        patch("app.notebooks.router.resolve_chat_provider", return_value=test_model),
+        patch("app.notebooks.agent.chat_agent.search_notebook_chunks", return_value=[]),
+    ):
         response = await client.post(
             f"/api/v1/notebooks/{notebook.id}/chat",
             json={
@@ -210,15 +210,14 @@ async def test_notebook_chat_persists_messages_in_db(
             },
             headers=headers,
         )
-        print("RESPONSE:", response.text)
         assert response.status_code == 200
         # Fully consume the stream response content so that on_complete triggers
         await response.aread()
 
     # Now verify that NotebookMessages were inserted in MongoDB
-    messages = await NotebookMessage.find({"notebook_id": notebook.id}).sort(("seq", 1)).to_list()
-    print("MESSAGES IN DB:")
-    for m in messages:
-        print(f"  seq={m.seq}: {m.message}")
+    messages = (
+        await NotebookMessage.find({"notebook_id": notebook.id})
+        .sort(("seq", SortDirection.ASCENDING))
+        .to_list()
+    )
     assert len(messages) == 4
-

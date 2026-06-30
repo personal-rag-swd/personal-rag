@@ -5,9 +5,15 @@ from string import digits
 from uuid import UUID
 
 import resend
-from fastapi import HTTPException, status
 
 from app.auth.domain_events import RegistrationRequested, RegistrationVerified
+from app.auth.exceptions import (
+    EmailAlreadyRegisteredError,
+    InvalidCredentialsError,
+    InvalidOrExpiredCodeError,
+    InvalidRefreshTokenError,
+    RegistrationEmailFailedError,
+)
 from app.auth.models import PendingRegistration, RefreshToken
 from app.core.config import Settings
 from app.core.event_bus import domain_event_bus
@@ -48,19 +54,13 @@ def send_registration_otp(email: str, otp: str, settings: Settings) -> None:
     )
 
 
-async def start_registration(
-    email: str, password: str, settings: Settings
-) -> None:
+async def start_registration(email: str, password: str, settings: Settings) -> None:
     normalized_email = normalize_email(email)
     existing_user = await User.find_one({"email": normalized_email})
     if existing_user is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Email is already registered"
-        )
+        raise EmailAlreadyRegisteredError()
 
-    existing_pending = await PendingRegistration.find_one(
-        {"email": normalized_email}
-    )
+    existing_pending = await PendingRegistration.find_one({"email": normalized_email})
     if existing_pending is not None:
         await existing_pending.delete()
 
@@ -80,34 +80,21 @@ async def start_registration(
         )
         await pending.insert()
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Could not send verification email",
-        ) from exc
+        raise RegistrationEmailFailedError() from exc
 
 
-async def verify_registration_otp(
-    email: str, otp: str, settings: Settings
-) -> None:
+async def verify_registration_otp(email: str, otp: str, settings: Settings) -> None:
     normalized_email = normalize_email(email)
-    pending = await PendingRegistration.find_one(
-        {"email": normalized_email}
-    )
+    pending = await PendingRegistration.find_one({"email": normalized_email})
     if pending is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired verification code",
-        )
+        raise InvalidOrExpiredCodeError()
 
     if (
         as_utc(pending.expires_at) <= datetime.now(UTC)
         or pending.otp_attempts >= settings.otp_max_attempts
     ):
         await pending.delete()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired verification code",
-        )
+        raise InvalidOrExpiredCodeError()
 
     if not verify_password(otp, pending.hashed_otp):
         pending.otp_attempts += 1
@@ -116,17 +103,12 @@ async def verify_registration_otp(
             await pending.delete()
         else:
             await pending.save()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired verification code",
-        )
+        raise InvalidOrExpiredCodeError()
 
     existing_user = await User.find_one({"email": normalized_email})
     if existing_user is not None:
         await pending.delete()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Email is already registered"
-        )
+        raise EmailAlreadyRegisteredError()
 
     user = User(email=normalized_email, hashed_password=pending.hashed_password)
     await user.insert()
@@ -144,11 +126,7 @@ async def authenticate_user(email: str, password: str) -> User:
         or not user.is_active
         or not verify_password(password, user.hashed_password)
     ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise InvalidCredentialsError()
     return user
 
 
@@ -185,9 +163,7 @@ async def create_session(
 
 async def revoke_token_family(family_id: UUID) -> None:
     now = datetime.now(UTC)
-    tokens = await RefreshToken.find(
-        {"family_id": family_id}
-    ).to_list()
+    tokens = await RefreshToken.find({"family_id": family_id}).to_list()
     for token in tokens:
         if token.revoked_at is None:
             token.revoked_at = now
@@ -196,43 +172,29 @@ async def revoke_token_family(family_id: UUID) -> None:
             await token.save()
 
 
-async def refresh_session(
-    raw_refresh_token: str, settings: Settings
-) -> dict[str, str]:
+async def refresh_session(raw_refresh_token: str, settings: Settings) -> dict[str, str]:
     token_hash = hash_refresh_token(raw_refresh_token)
-    refresh_token = await RefreshToken.find_one(
-        {"token_hash": token_hash}
-    )
+    refresh_token = await RefreshToken.find_one({"token_hash": token_hash})
     if refresh_token is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
-        )
+        raise InvalidRefreshTokenError()
 
     now = datetime.now(UTC)
     if refresh_token.revoked_at is not None:
         await revoke_token_family(refresh_token.family_id)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
-        )
+        raise InvalidRefreshTokenError()
     if as_utc(refresh_token.expires_at) <= now:
         refresh_token.revoked_at = now
         await refresh_token.save()
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
-        )
+        raise InvalidRefreshTokenError()
 
     user = await User.find_one({"_id": refresh_token.user_id})
     if user is None or not user.is_active:
         await revoke_token_family(refresh_token.family_id)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
-        )
+        raise InvalidRefreshTokenError()
 
     refresh_token.revoked_at = now
     await refresh_token.save()
-    tokens = await issue_token_pair(
-        user, settings, family_id=refresh_token.family_id
-    )
+    tokens = await issue_token_pair(user, settings, family_id=refresh_token.family_id)
     refresh_token.replaced_by_token_id = UUID(tokens["_refresh_token_id"])
     await refresh_token.save()
     tokens.pop("_refresh_token_id", None)
@@ -241,12 +203,8 @@ async def refresh_session(
 
 async def logout_session(raw_refresh_token: str) -> None:
     token_hash = hash_refresh_token(raw_refresh_token)
-    refresh_token = await RefreshToken.find_one(
-        {"token_hash": token_hash}
-    )
+    refresh_token = await RefreshToken.find_one({"token_hash": token_hash})
     if refresh_token is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
-        )
+        raise InvalidRefreshTokenError()
 
     await revoke_token_family(refresh_token.family_id)

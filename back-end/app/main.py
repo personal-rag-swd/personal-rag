@@ -31,12 +31,14 @@ for name in (
 ):
     logging.getLogger(name).setLevel(logging.WARNING)
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from scalar_fastapi import get_scalar_api_reference
 
 from app.auth.models import PendingRegistration, RefreshToken
 from app.auth.router import router as auth_router
+from app.core.exceptions import AppError
 from app.event_listeners import register_default_event_listeners
 from app.file.router import router as file_router
 from app.notebooks.consumer import run_notebook_document_consumer
@@ -141,7 +143,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     logger = logging.getLogger("app.startup")
     logger.info("============================================================")
     logger.info("Application starting up with MongoDB")
-    logger.info("  Chat Provider:      %s", settings.chat_provider.strip().upper())
+    logger.info("  Chat Provider:      OPENROUTER")
     logger.info("  Chat Model:         %s", settings.chat_model)
     logger.info("============================================================")
 
@@ -163,12 +165,21 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             consumer_task.cancel()
             with suppress(asyncio.CancelledError):
                 await consumer_task
-        mongo_client.close()
+        await mongo_client.close()
 
 
 app = FastAPI(title="Aviary", docs_url=None, redoc_url=None, lifespan=lifespan)
 
 API_V1_PREFIX = "/api/v1"
+
+
+@app.exception_handler(AppError)
+async def app_exception_handler(_request: Request, exc: AppError) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers=exc.headers,
+    )
 
 
 app.add_middleware(
