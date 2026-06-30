@@ -143,7 +143,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     logger = logging.getLogger("app.startup")
     logger.info("============================================================")
     logger.info("Application starting up with MongoDB")
-    logger.info("  Chat Provider:      %s", settings.chat_provider.strip().upper())
+    logger.info("  Chat Provider:      OPENROUTER")
     logger.info("  Chat Model:         %s", settings.chat_model)
     logger.info("============================================================")
 

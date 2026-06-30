@@ -7,7 +7,7 @@ from beanie import SortDirection
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelRequest
 
-from app.core.config import Settings, get_settings
+from app.core.config import Settings
 from app.core.event_bus import domain_event_bus
 from app.core.llm_provider import chat_provider_is_configured
 from app.core.s3 import generate_presigned_get_url
@@ -439,8 +439,7 @@ async def create_pending_report(
     notebook = await get_notebook(notebook_id, current_user)
 
     if not chat_provider_is_configured():
-        provider = get_settings().chat_provider.strip().lower()
-        raise LLMNotConfiguredError(provider)
+        raise LLMNotConfiguredError("openrouter")
 
     context = await build_report_context(notebook, current_user)
     if not context:

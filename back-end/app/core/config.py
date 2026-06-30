@@ -16,9 +16,7 @@ class Settings(BaseSettings):
     resend_from_email: str = "noreply@example.com"
     log_level: str = "INFO"
 
-    chat_provider: str = "openrouter"
     chat_api_key: str = ""
-    chat_provider_url: str = ""
     chat_model: str = "openai/gpt-4o-mini"
 
     embedding_model: str = "google/gemini-embedding-2"
