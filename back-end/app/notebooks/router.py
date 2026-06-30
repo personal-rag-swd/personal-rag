@@ -4,8 +4,10 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from typing import Annotated
+from urllib.parse import quote
 from uuid import UUID
 
+import obstore
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -21,7 +23,7 @@ from pydantic_ai.ui.ag_ui import AGUIAdapter
 
 from app.core.config import Settings, get_settings
 from app.core.llm_provider import resolve_chat_provider
-from app.core.s3 import generate_presigned_get_url
+from app.core.s3 import get_s3_store
 from app.notebooks.agent import (
     NotebookChatDeps,
     notebook_chat_agent,
@@ -84,6 +86,65 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/notebooks", tags=["Notebooks"])
 
 SSE_PING_SECONDS = 30.0
+
+
+def _document_content_disposition(filename: str, disposition: str) -> str:
+    fallback = filename.encode("ascii", "ignore").decode("ascii") or "document"
+    fallback = fallback.replace("\\", "_").replace('"', "'")
+    encoded = quote(filename)
+    return f"{disposition}; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
+
+
+async def _get_owned_notebook_document(
+    notebook_id: UUID,
+    document_id: UUID,
+    current_user: User,
+) -> NotebookDocument:
+    document = await NotebookDocument.find_one(
+        {
+            "_id": document_id,
+            "notebook_id": notebook_id,
+            "user_id": current_user.id,
+        }
+    )
+    if document is None:
+        raise DocumentNotFoundError()
+    return document
+
+
+async def _document_file_response(
+    *,
+    notebook_id: UUID,
+    document_id: UUID,
+    current_user: User,
+    settings: Settings,
+    disposition: str,
+) -> Response:
+    document = await _get_owned_notebook_document(
+        notebook_id,
+        document_id,
+        current_user,
+    )
+
+    if document.content is not None:
+        body = document.content.encode("utf-8")
+    else:
+        if not document.s3_key:
+            raise DocumentNotFoundError()
+        result = await obstore.get_async(get_s3_store(settings), document.s3_key)
+        body = bytes(await result.bytes_async())
+
+    return Response(
+        content=body,
+        media_type=document.content_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": _document_content_disposition(
+                document.filename,
+                disposition,
+            ),
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 async def _notebook_event_generator(current_user: User) -> AsyncIterator[str]:
@@ -197,17 +258,12 @@ async def read_notebook_document_preview(
     notebook_id: UUID,
     document_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
-    settings: Annotated[Settings, Depends(get_settings)],
 ) -> NotebookDocumentPreviewRead:
-    document = await NotebookDocument.find_one(
-        {
-            "_id": document_id,
-            "notebook_id": notebook_id,
-            "user_id": current_user.id,
-        }
+    document = await _get_owned_notebook_document(
+        notebook_id,
+        document_id,
+        current_user,
     )
-    if document is None:
-        raise DocumentNotFoundError()
 
     if document.content is not None:
         return NotebookDocumentPreviewRead(
@@ -222,18 +278,45 @@ async def read_notebook_document_preview(
     if not document.s3_key:
         raise DocumentNotFoundError()
 
-    url = generate_presigned_get_url(
-        settings,
-        key=document.s3_key,
-        expires_in=3600,
-    )
     return NotebookDocumentPreviewRead(
         filename=document.filename,
         content_type=document.content_type,
         size=document.size,
-        url=url,
+        url=f"/api/v1/notebooks/{notebook_id}/documents/{document_id}/preview/content",
         content=None,
         preview_type="url",
+    )
+
+
+@router.get("/{notebook_id}/documents/{document_id}/preview/content")
+async def read_notebook_document_preview_content(
+    notebook_id: UUID,
+    document_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> Response:
+    return await _document_file_response(
+        notebook_id=notebook_id,
+        document_id=document_id,
+        current_user=current_user,
+        settings=settings,
+        disposition="inline",
+    )
+
+
+@router.get("/{notebook_id}/documents/{document_id}/download")
+async def download_notebook_document(
+    notebook_id: UUID,
+    document_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> Response:
+    return await _document_file_response(
+        notebook_id=notebook_id,
+        document_id=document_id,
+        current_user=current_user,
+        settings=settings,
+        disposition="attachment",
     )
 
 

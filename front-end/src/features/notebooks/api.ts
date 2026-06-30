@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import { create } from "zustand"
 import type { ThreadMessage } from "@assistant-ui/core"
-import { apiFetch } from "@/lib/api-client"
+import { apiClient, apiFetch } from "@/lib/api-client"
 import {
   type Notebook,
   type NotebookApiPayload,
@@ -37,7 +37,7 @@ type NotebookDocumentPreviewApiPayload = {
   preview_type: "url" | "text"
 }
 
-function buildApiUrl(path: string): string {
+export function buildApiUrl(path: string): string {
   const base = import.meta.env.VITE_API_URL
   if (!base || base === "/") {
     return path
@@ -159,7 +159,7 @@ function mapNotebookDocumentPreview(
     filename: payload.filename,
     contentType: payload.content_type,
     size: payload.size,
-    url: payload.url,
+    url: payload.url ? buildApiUrl(payload.url) : null,
     content: payload.content,
     previewType: payload.preview_type,
   }
@@ -514,6 +514,14 @@ export async function getNotebookDocumentPreview(
     `/api/v1/notebooks/${notebookId}/documents/${documentId}/preview`
   )
   return mapNotebookDocumentPreview(data)
+}
+
+export async function getNotebookDocumentDownloadBlob(url: string) {
+  const response = await apiClient.request<Blob>({
+    url,
+    responseType: "blob",
+  })
+  return response.data
 }
 
 export function useTouchNotebookMutation() {
