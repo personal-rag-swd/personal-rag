@@ -9,8 +9,6 @@ import {
   type NotebookDocument,
   type NotebookDocumentApiPayload,
   type NotebookDocumentEvent,
-  type NotebookDocumentPreview,
-  type NotebookDocumentPreviewApiPayload,
   type NotebookReport,
   type NotebookReportApiPayload,
   type MindMapContent,
@@ -20,6 +18,24 @@ import {
   type ReportType,
   type ReportStatus,
 } from "./types"
+
+export type NotebookDocumentPreview = {
+  filename: string
+  contentType: string | null
+  size: number | null
+  url: string | null
+  content: string | null
+  previewType: "url" | "text"
+}
+
+type NotebookDocumentPreviewApiPayload = {
+  filename: string
+  content_type: string | null
+  size: number | null
+  url: string | null
+  content: string | null
+  preview_type: "url" | "text"
+}
 
 function buildApiUrl(path: string): string {
   const base = import.meta.env.VITE_API_URL

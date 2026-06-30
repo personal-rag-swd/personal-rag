@@ -70,14 +70,12 @@ import {
 import { getPresignedUploadUrl, reportUploadFailed } from "@/features/files/api"
 import {
   getNotebookDocumentPreview,
+  type NotebookDocumentPreview,
   useNotebookDocumentEvents,
   useDeleteNotebookDocumentMutation,
   useNotebookDocumentsQuery,
 } from "@/features/notebooks/api"
-import type {
-  NotebookDocument,
-  NotebookDocumentPreview,
-} from "@/features/notebooks/types"
+import type { NotebookDocument } from "@/features/notebooks/types"
 import { cn } from "@/lib/utils"
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024

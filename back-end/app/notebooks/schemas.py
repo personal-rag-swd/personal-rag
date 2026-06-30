@@ -98,15 +98,6 @@ class NotebookDocumentRead(BaseModel):
     updated_at: datetime
 
 
-class NotebookDocumentPreviewRead(BaseModel):
-    filename: str
-    content_type: str | None = None
-    size: int | None = None
-    url: str | None = None
-    content: str | None = None
-    preview_type: Literal["url", "text"]
-
-
 class NotebookChatHistoryPart(BaseModel):
     type: str
     content: str | None = None

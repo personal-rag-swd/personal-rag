@@ -58,7 +58,6 @@ from app.notebooks.rag.ingestion_service import ingest_document_by_id
 from app.notebooks.schemas import (
     NotebookChatHistoryMessage,
     NotebookCreate,
-    NotebookDocumentPreviewRead,
     NotebookDocumentRead,
     NotebookPopulateRead,
     NotebookRead,
@@ -184,13 +183,12 @@ async def read_notebook_documents(
 
 @router.get(
     "/{notebook_id}/documents/{document_id}/preview",
-    response_model=NotebookDocumentPreviewRead,
 )
 async def read_notebook_document_preview(
     notebook_id: UUID,
     document_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
-) -> NotebookDocumentPreviewRead:
+) -> dict[str, object]:
     document = await NotebookDocument.find_one(
         {
             "_id": document_id,
@@ -205,13 +203,14 @@ async def read_notebook_document_preview(
         )
 
     if document.content is not None:
-        return NotebookDocumentPreviewRead(
-            filename=document.filename,
-            content_type=document.content_type,
-            size=document.size,
-            content=document.content,
-            preview_type="text",
-        )
+        return {
+            "filename": document.filename,
+            "content_type": document.content_type,
+            "size": document.size,
+            "url": None,
+            "content": document.content,
+            "preview_type": "text",
+        }
 
     if not document.s3_key:
         raise HTTPException(
@@ -233,13 +232,14 @@ async def read_notebook_document_preview(
         ExpiresIn=3600,
         HttpMethod="GET",
     )
-    return NotebookDocumentPreviewRead(
-        filename=document.filename,
-        content_type=document.content_type,
-        size=document.size,
-        url=url,
-        preview_type="url",
-    )
+    return {
+        "filename": document.filename,
+        "content_type": document.content_type,
+        "size": document.size,
+        "url": url,
+        "content": None,
+        "preview_type": "url",
+    }
 
 
 def _run_background_note_ingestion(
