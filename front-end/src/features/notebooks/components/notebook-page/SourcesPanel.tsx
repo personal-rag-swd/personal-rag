@@ -70,6 +70,7 @@ import {
 import { getPresignedUploadUrl, reportUploadFailed } from "@/features/files/api"
 import {
   buildApiUrl,
+  getNotebookDocumentDownloadBlob,
   getNotebookDocumentPreview,
   type NotebookDocumentPreview,
   useNotebookDocumentEvents,
@@ -585,8 +586,39 @@ function SourcePreviewDialog({
           `/api/v1/notebooks/${document.notebookId}/documents/${document.id}/pdf-inline`
         )
       : sourceUrl
+  const [isDownloading, setIsDownloading] = React.useState(false)
   const errorMessage =
     error instanceof Error ? error.message : "The document could not be opened."
+
+  const handleDownload = async () => {
+    if (!preview) {
+      return
+    }
+    setIsDownloading(true)
+    try {
+      const blob = await getNotebookDocumentDownloadBlob(
+        document.notebookId,
+        document.id
+      )
+      const objectUrl = URL.createObjectURL(blob)
+      const anchor = window.document.createElement("a")
+      anchor.href = objectUrl
+      anchor.download = preview.filename
+      window.document.body.append(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(objectUrl)
+    } catch (downloadError) {
+      toast.error("Download failed", {
+        description: getErrorMessage(
+          downloadError,
+          "The document could not be downloaded."
+        ),
+      })
+    } finally {
+      setIsDownloading(false)
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -632,22 +664,29 @@ function SourcePreviewDialog({
         </div>
 
         <DialogFooter>
-          {sourceUrl ? (
+          {sourceUrl || preview ? (
             <>
+              {sourceUrl ? (
+                <Button
+                  variant="outline"
+                  render={
+                    <a href={sourceUrl} target="_blank" rel="noreferrer" />
+                  }
+                >
+                  <ExternalLinkIcon data-icon="inline-start" />
+                  Open
+                </Button>
+              ) : null}
               <Button
                 variant="outline"
-                render={
-                  <a href={sourceUrl} target="_blank" rel="noreferrer" />
-                }
+                onClick={handleDownload}
+                disabled={!preview || isDownloading}
               >
-                <ExternalLinkIcon data-icon="inline-start" />
-                Open
-              </Button>
-              <Button
-                variant="outline"
-                render={<a href={sourceUrl} download={preview?.filename} />}
-              >
-                <DownloadIcon data-icon="inline-start" />
+                {isDownloading ? (
+                  <Loader2Icon data-icon="inline-start" className="animate-spin" />
+                ) : (
+                  <DownloadIcon data-icon="inline-start" />
+                )}
                 Download
               </Button>
             </>

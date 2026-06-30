@@ -116,6 +116,10 @@ def _safe_pdf_filename(filename: str) -> str:
     return safe_name
 
 
+def _safe_download_filename(filename: str) -> str:
+    return filename.replace("\\", "_").replace("/", "_").replace('"', "'").strip() or "document"
+
+
 async def _notebook_event_generator(current_user: User) -> AsyncIterator[str]:
     documents, reports = await get_user_event_snapshot(current_user.id)
     for event in (
@@ -294,6 +298,47 @@ async def read_notebook_document_pdf_inline(
         headers={
             "Content-Disposition": (
                 f"inline; filename=\"{safe_filename}\"; "
+                f"filename*=UTF-8''{quote(safe_filename)}"
+            ),
+            "Cache-Control": "private, max-age=3600",
+        },
+    )
+
+
+@router.get("/{notebook_id}/documents/{document_id}/download")
+async def download_notebook_document(
+    notebook_id: UUID,
+    document_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> StreamingResponse:
+    document = await _get_owned_notebook_document(
+        notebook_id,
+        document_id,
+        current_user,
+    )
+    safe_filename = _safe_download_filename(document.filename)
+
+    if document.content is not None:
+        body = document.content.encode("utf-8")
+    else:
+        if not document.s3_key:
+            raise DocumentContentUnavailableError()
+        try:
+            result = await obstore.get_async(get_s3_store(settings), document.s3_key)
+        except FileNotFoundError as exc:
+            raise DocumentNotFoundError() from exc
+        body = bytes(await result.bytes_async())
+
+    async def stream_document() -> AsyncIterator[bytes]:
+        yield body
+
+    return StreamingResponse(
+        stream_document(),
+        media_type=document.content_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=\"{safe_filename}\"; "
                 f"filename*=UTF-8''{quote(safe_filename)}"
             ),
             "Cache-Control": "private, max-age=3600",
