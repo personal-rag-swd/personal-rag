@@ -3,7 +3,7 @@ import functools
 import json
 import logging
 from collections.abc import AsyncIterator
-from typing import Annotated, Literal
+from typing import Annotated
 from urllib.parse import quote
 from uuid import UUID
 
@@ -17,7 +17,6 @@ from fastapi import (
     status,
 )
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 from pydantic_ai.capabilities.process_history import ProcessHistory
 from pydantic_ai.run import AgentRunResult
 from pydantic_ai.ui.ag_ui import AGUIAdapter
@@ -47,6 +46,7 @@ from app.notebooks.rag.ingestion_service import ingest_document_by_id
 from app.notebooks.schemas import (
     NotebookChatHistoryMessage,
     NotebookCreate,
+    NotebookDocumentPreviewRead,
     NotebookDocumentRead,
     NotebookPopulateRead,
     NotebookRead,
@@ -86,15 +86,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/notebooks", tags=["Notebooks"])
 
 SSE_PING_SECONDS = 30.0
-
-
-class NotebookDocumentPreviewRead(BaseModel):
-    filename: str
-    content_type: str | None
-    size: int | None
-    url: str | None
-    content: str | None
-    preview_type: Literal["url", "text"]
 
 
 def _document_content_disposition(filename: str, disposition: str) -> str:
