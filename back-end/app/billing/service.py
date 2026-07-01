@@ -401,11 +401,18 @@ def verify_webhook_signature(
         hmac.compare_digest(expected_signature, provided)
         for provided in provided_signatures
     ):
+        # Fingerprint (not the secret itself) so we can confirm from logs
+        # whether the runtime process actually has the secret we think it
+        # does, without ever printing the real value.
+        secret_fingerprint = hashlib.sha256(secret.encode()).hexdigest()[:8]
         logger.warning(
             "Polar webhook rejected: signature mismatch - "
             "configured POLAR_WEBHOOK_SECRET doesn't match the secret Polar "
             "used to sign this delivery (wrong secret for this endpoint, or "
-            "env var not actually redeployed)"
+            "env var not actually redeployed). Runtime secret fingerprint=%s "
+            "len=%d",
+            secret_fingerprint,
+            len(secret),
         )
         raise WebhookSignatureInvalidError()
 
