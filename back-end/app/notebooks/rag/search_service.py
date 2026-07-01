@@ -30,9 +30,19 @@ async def search_notebook_chunks(
     query: str,
     settings: Settings,
     top_k: int = 6,
+    document_ids: list[UUID] | None = None,
 ) -> list[RetrievedChunk]:
     query = await rewrite_query_text(query, settings)
     query_vector = await embed_text(query)
+
+    search_filter: dict[str, object] = {
+        "notebook_id": Binary.from_uuid(notebook.id),
+        "user_id": Binary.from_uuid(current_user.id),
+    }
+    if document_ids:
+        search_filter["document_id"] = {
+            "$in": [Binary.from_uuid(doc_id) for doc_id in document_ids]
+        }
 
     pipeline = [
         {
@@ -43,10 +53,7 @@ async def search_notebook_chunks(
                 "numCandidates": top_k * 10,
                 "limit": top_k,
                 "similarity": "cosine",
-                "filter": {
-                    "notebook_id": Binary.from_uuid(notebook.id),
-                    "user_id": Binary.from_uuid(current_user.id),
-                },
+                "filter": search_filter,
             }
         },
     ]

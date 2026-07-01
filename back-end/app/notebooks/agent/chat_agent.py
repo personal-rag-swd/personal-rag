@@ -4,6 +4,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 import obstore
 from pydantic_ai import Agent, RunContext
@@ -27,6 +28,7 @@ class NotebookChatDeps:
     notebook: Notebook
     current_user: User
     settings: Settings
+    document_ids: list[UUID] | None = None
 
 
 notebook_chat_agent = Agent(
@@ -46,6 +48,7 @@ async def search_notebook_context(
         query=query,
         settings=ctx.deps.settings,
         top_k=ctx.deps.settings.notebook_retrieval_top_k,
+        document_ids=ctx.deps.document_ids,
     )
     context_block = build_context_block(chunks)
 

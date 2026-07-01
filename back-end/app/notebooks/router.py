@@ -42,6 +42,7 @@ from app.notebooks.memory import (
     append_notebook_chat_history,
     build_user_message_from_agui_payload,
     extract_notebook_chat_transcript,
+    extract_scoped_document_ids,
     keep_recent_messages,
     load_notebook_chat_history,
 )
@@ -78,6 +79,7 @@ from app.notebooks.service import (
     list_notebooks,
     list_reports,
     populate_notebook_metrics,
+    resolve_scoped_document_ids,
     run_report_generation,
     touch_notebook,
     update_notebook,
@@ -404,6 +406,14 @@ async def chat_notebook_route(
         request_payload = json.loads(await request.body() or b"{}")
     except ValueError, TypeError:
         request_payload = None
+
+    # Validate the optional document scope before persisting the user turn, so a
+    # rejected scope (deleted/foreign/malformed id) doesn't leave an orphaned
+    # user message in the history with no assistant reply.
+    scoped_document_ids = await resolve_scoped_document_ids(
+        notebook, current_user, extract_scoped_document_ids(request_payload)
+    )
+
     new_user_message = build_user_message_from_agui_payload(request_payload)
     if new_user_message is not None:
         await append_notebook_chat_history(notebook, [new_user_message])
@@ -412,6 +422,7 @@ async def chat_notebook_route(
         notebook=notebook,
         current_user=current_user,
         settings=settings,
+        document_ids=scoped_document_ids,
     )
 
     return await AGUIAdapter.dispatch_request(

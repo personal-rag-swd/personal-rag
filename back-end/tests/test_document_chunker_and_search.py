@@ -1,10 +1,16 @@
 import io
+from typing import Any
+from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
+from bson import Binary
 from docx import Document as DocxDocument
 
 import app.notebooks.rag.document_chunker as chunking_module
+import app.notebooks.rag.search_service as search_service_module
 from app.core.config import Settings
+from app.notebooks.models import Notebook, NotebookDocumentChunk
 from app.notebooks.rag.document_chunker import (
     ChunkingRequest,
     chunk_document,
@@ -14,6 +20,8 @@ from app.notebooks.rag.document_chunker import (
 from app.notebooks.rag.query_rewrite_agent import (
     rewrite_query_text,
 )
+from app.notebooks.rag.search_service import search_notebook_chunks
+from app.users.models import User
 
 
 @pytest.fixture
@@ -187,3 +195,73 @@ async def test_rewrite_query_text_failure_fallback(
     settings.enable_query_rewrite = True
     res = await rewrite_query_text("can you find apples?", settings)
     assert res == "can you find apples?"
+
+
+@pytest.mark.anyio
+async def test_search_notebook_chunks_filters_by_document_id(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    captured_pipeline: list[dict[str, Any]] = []
+
+    def fake_aggregate(pipeline: list[dict[str, Any]]) -> AsyncMock:
+        captured_pipeline.extend(pipeline)
+        cursor = AsyncMock()
+        cursor.to_list.return_value = []
+        return cursor
+
+    monkeypatch.setattr(NotebookDocumentChunk, "aggregate", fake_aggregate)
+    monkeypatch.setattr(
+        search_service_module, "embed_text", AsyncMock(return_value=[0.0])
+    )
+    monkeypatch.setattr(
+        search_service_module, "rewrite_query_text", AsyncMock(return_value="query")
+    )
+
+    notebook = Notebook(id=uuid4(), user_id=uuid4(), name="Test Notebook")
+    user = User(id=uuid4(), email="user@example.com", hashed_password="hashed")
+    document_ids = [uuid4(), uuid4()]
+
+    await search_notebook_chunks(
+        notebook=notebook,
+        current_user=user,
+        query="query",
+        settings=settings,
+        document_ids=document_ids,
+    )
+
+    search_filter = captured_pipeline[0]["$vectorSearch"]["filter"]
+    assert search_filter["document_id"] == {
+        "$in": [Binary.from_uuid(doc_id) for doc_id in document_ids]
+    }
+    assert search_filter["notebook_id"] == Binary.from_uuid(notebook.id)
+
+
+@pytest.mark.anyio
+async def test_search_notebook_chunks_omits_document_id_filter_by_default(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    captured_pipeline: list[dict[str, Any]] = []
+
+    def fake_aggregate(pipeline: list[dict[str, Any]]) -> AsyncMock:
+        captured_pipeline.extend(pipeline)
+        cursor = AsyncMock()
+        cursor.to_list.return_value = []
+        return cursor
+
+    monkeypatch.setattr(NotebookDocumentChunk, "aggregate", fake_aggregate)
+    monkeypatch.setattr(
+        search_service_module, "embed_text", AsyncMock(return_value=[0.0])
+    )
+    monkeypatch.setattr(
+        search_service_module, "rewrite_query_text", AsyncMock(return_value="query")
+    )
+
+    notebook = Notebook(id=uuid4(), user_id=uuid4(), name="Test Notebook")
+    user = User(id=uuid4(), email="user@example.com", hashed_password="hashed")
+
+    await search_notebook_chunks(
+        notebook=notebook, current_user=user, query="query", settings=settings
+    )
+
+    search_filter = captured_pipeline[0]["$vectorSearch"]["filter"]
+    assert "document_id" not in search_filter

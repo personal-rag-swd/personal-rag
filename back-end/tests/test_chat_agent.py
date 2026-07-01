@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 from beanie.odm.enums import SortDirection
@@ -9,7 +10,13 @@ from httpx import AsyncClient
 from starlette.responses import JSONResponse
 
 from app.notebooks.models import NotebookMessage
-from tests.conftest import auth_headers, create_notebook, create_user, make_user
+from tests.conftest import (
+    auth_headers,
+    create_indexed_chunk,
+    create_notebook,
+    create_user,
+    make_user,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -221,3 +228,93 @@ async def test_notebook_chat_persists_messages_in_db(
         .to_list()
     )
     assert len(messages) == 4
+
+
+async def test_notebook_chat_scopes_search_to_document_id(
+    client: AsyncClient,
+    settings: Any,
+) -> None:
+    from pydantic_ai.models.test import TestModel
+
+    user = await create_user(role="user")
+    headers = auth_headers(user, settings)
+    notebook = await create_notebook(user)
+    doc, _ = await create_indexed_chunk(notebook.id, user.id)
+
+    test_model = TestModel(custom_output_text="Hello from TestModel!")
+    search_mock = AsyncMock(return_value=[])
+
+    with (
+        patch("app.notebooks.router.resolve_chat_provider", return_value=test_model),
+        patch("app.notebooks.agent.chat_agent.search_notebook_chunks", search_mock),
+    ):
+        response = await client.post(
+            f"/api/v1/notebooks/{notebook.id}/chat",
+            json={
+                "threadId": str(notebook.id),
+                "runId": "msg-1-run",
+                "state": {},
+                "messages": [{"role": "user", "id": "msg-1", "content": "Hi agent"}],
+                "tools": [],
+                "context": [],
+                "forwardedProps": {"documentIds": [str(doc.id)]},
+            },
+            headers=headers,
+        )
+        assert response.status_code == 200
+        await response.aread()
+
+    search_mock.assert_awaited()
+    assert search_mock.await_args is not None
+    assert search_mock.await_args.kwargs["document_ids"] == [doc.id]
+
+
+async def test_notebook_chat_rejects_unknown_document_id(
+    client: AsyncClient,
+    settings: Any,
+) -> None:
+    user = await create_user(role="user")
+    headers = auth_headers(user, settings)
+    notebook = await create_notebook(user)
+
+    response = await client.post(
+        f"/api/v1/notebooks/{notebook.id}/chat",
+        json={
+            "threadId": str(notebook.id),
+            "runId": "msg-1-run",
+            "state": {},
+            "messages": [{"role": "user", "id": "msg-1", "content": "Hi agent"}],
+            "tools": [],
+            "context": [],
+            "forwardedProps": {"documentIds": [str(uuid4())]},
+        },
+        headers=headers,
+    )
+    assert response.status_code == 404
+
+
+async def test_notebook_chat_rejects_document_id_from_other_owner(
+    client: AsyncClient,
+    settings: Any,
+) -> None:
+    owner = await create_user(email="owner@example.com", role="user")
+    other_user = await create_user(email="other@example.com", role="user")
+    owner_notebook = await create_notebook(owner)
+    other_notebook = await create_notebook(other_user)
+    foreign_doc, _ = await create_indexed_chunk(other_notebook.id, other_user.id)
+
+    headers = auth_headers(owner, settings)
+    response = await client.post(
+        f"/api/v1/notebooks/{owner_notebook.id}/chat",
+        json={
+            "threadId": str(owner_notebook.id),
+            "runId": "msg-1-run",
+            "state": {},
+            "messages": [{"role": "user", "id": "msg-1", "content": "Hi agent"}],
+            "tools": [],
+            "context": [],
+            "forwardedProps": {"documentIds": [str(foreign_doc.id)]},
+        },
+        headers=headers,
+    )
+    assert response.status_code == 404

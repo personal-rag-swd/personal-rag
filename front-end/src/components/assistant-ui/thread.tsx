@@ -9,6 +9,14 @@ import {
 } from "@/components/assistant-ui/chain-of-thought"
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import {
   ActionBarMorePrimitive,
@@ -31,6 +39,7 @@ import {
   ChevronRightIcon,
   CopyIcon,
   DownloadIcon,
+  FileTextIcon,
   MoreHorizontalIcon,
   PencilIcon,
   RefreshCwIcon,
@@ -39,8 +48,21 @@ import {
 } from "lucide-react"
 import type { FC } from "react"
 
+export type DocumentScopeOption = {
+  id: string
+  filename: string
+}
+
+export type DocumentScopeProps = {
+  options: DocumentScopeOption[]
+  /** Selected document ids. Empty array means "All sources". */
+  value: string[]
+  onChange: (documentIds: string[]) => void
+}
+
 type ThreadProps = {
   hideScrollbar?: boolean
+  documentScope?: DocumentScopeProps
 }
 
 /** Small filled dot used as the leading marker for reasoning steps. */
@@ -98,7 +120,10 @@ const ChainOfThoughtToolStep: FC<ChainOfThoughtToolPart> = ({
   return <ChainOfThoughtStep icon={SearchIcon} active={isRunning} label={label} />
 }
 
-export const Thread: FC<ThreadProps> = ({ hideScrollbar = false }) => {
+export const Thread: FC<ThreadProps> = ({
+  hideScrollbar = false,
+  documentScope,
+}) => {
   return (
     <ThreadPrimitive.Root
       className="aui-root aui-thread-root @container flex h-full flex-col bg-background"
@@ -132,7 +157,7 @@ export const Thread: FC<ThreadProps> = ({ hideScrollbar = false }) => {
 
           <ThreadPrimitive.ViewportFooter className="aui-thread-viewport-footer sticky bottom-0 mt-auto flex flex-col gap-4 overflow-visible rounded-t-(--composer-radius) bg-background pb-4 md:pb-6">
             <ThreadScrollToBottom />
-            <Composer />
+            <Composer documentScope={documentScope} />
           </ThreadPrimitive.ViewportFooter>
         </div>
       </ThreadPrimitive.Viewport>
@@ -212,11 +237,16 @@ const ThreadSuggestionItem: FC = () => {
   )
 }
 
-const Composer: FC = () => {
+const Composer: FC<{ documentScope?: DocumentScopeProps }> = ({
+  documentScope,
+}) => {
   const textLength = useAuiState((s) => s.composer.text.length)
 
   return (
-    <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
+    <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col gap-2">
+      {documentScope && documentScope.options.length > 0 && (
+        <DocumentScopeSelect {...documentScope} />
+      )}
       <ComposerPrimitive.AttachmentDropzone
         render={
           <div
@@ -241,6 +271,68 @@ const Composer: FC = () => {
         <ComposerAction />
       </ComposerPrimitive.AttachmentDropzone>
     </ComposerPrimitive.Root>
+  )
+}
+
+const DocumentScopeSelect: FC<DocumentScopeProps> = ({
+  options,
+  value,
+  onChange,
+}) => {
+  const selectedIds = new Set(value)
+  const selectedOptions = options.filter((option) => selectedIds.has(option.id))
+
+  const triggerLabel =
+    selectedOptions.length === 0
+      ? "All sources"
+      : selectedOptions.length === 1
+        ? selectedOptions[0].filename
+        : `${selectedOptions.length} sources`
+
+  const toggle = (documentId: string, checked: boolean) => {
+    if (checked) {
+      onChange([...value, documentId])
+    } else {
+      onChange(value.filter((id) => id !== documentId))
+    }
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="aui-composer-document-scope h-auto max-w-64 self-start gap-1.5 bg-transparent px-2.5 py-1 text-xs font-normal text-muted-foreground hover:text-foreground"
+          />
+        }
+      >
+        <FileTextIcon className="size-3.5 shrink-0" />
+        <span className="truncate">{triggerLabel}</span>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-w-72">
+        <DropdownMenuItem
+          closeOnClick={false}
+          onClick={() => onChange([])}
+          className={cn(selectedOptions.length === 0 && "font-medium")}
+        >
+          All sources
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {options.map((option) => (
+          <DropdownMenuCheckboxItem
+            key={option.id}
+            checked={selectedIds.has(option.id)}
+            closeOnClick={false}
+            onCheckedChange={(checked) => toggle(option.id, checked)}
+          >
+            <span className="truncate">{option.filename}</span>
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
