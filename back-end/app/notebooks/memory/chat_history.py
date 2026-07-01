@@ -158,6 +158,25 @@ def build_user_message_from_agui_payload(
     return None
 
 
+def extract_scoped_document_ids(payload: object) -> list[object]:
+    """Extract the optional document-scope ids from an AG-UI request body.
+
+    The frontend sends the selected document ids under
+    ``forwardedProps.documentIds`` to scope chat retrieval to a subset of
+    sources. Returns an empty list when no scope is present; the ids are
+    returned raw (unvalidated) for the service layer to resolve.
+    """
+    if not isinstance(payload, dict):
+        return []
+    forwarded_props = payload.get("forwardedProps")
+    if not isinstance(forwarded_props, dict):
+        return []
+    raw_document_ids = forwarded_props.get("documentIds")
+    if not isinstance(raw_document_ids, list):
+        return []
+    return raw_document_ids
+
+
 def _tool_return_to_text(content: object) -> str:
     """Coerce a ToolReturnPart's content to the searchable context string.
 

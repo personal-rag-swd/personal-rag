@@ -1,13 +1,31 @@
 import * as React from "react"
-import { HttpAgent } from "@ag-ui/client"
+import {
+  HttpAgent,
+  type HttpAgentConfig,
+  type RunAgentParameters,
+} from "@ag-ui/client"
 import { AssistantRuntimeProvider } from "@assistant-ui/react"
 import { useAgUiRuntime } from "@assistant-ui/react-ag-ui"
 import type { ThreadHistoryAdapter } from "@assistant-ui/core"
 
-import { fetchNotebookChatHistory } from "@/features/notebooks/api"
+import {
+  fetchNotebookChatHistory,
+  useNotebookDocumentsQuery,
+} from "@/features/notebooks/api"
 import { Thread } from "@/components/assistant-ui/thread"
 
+type CredentialedHttpAgentConfig = HttpAgentConfig & {
+  documentIdsRef: React.RefObject<string[]>
+}
+
 class CredentialedHttpAgent extends HttpAgent {
+  private readonly documentIdsRef: React.RefObject<string[]>
+
+  constructor({ documentIdsRef, ...config }: CredentialedHttpAgentConfig) {
+    super(config)
+    this.documentIdsRef = documentIdsRef
+  }
+
   protected requestInit(input: Parameters<HttpAgent["run"]>[0]): RequestInit {
     const init = super.requestInit(input)
     return {
@@ -15,10 +33,51 @@ class CredentialedHttpAgent extends HttpAgent {
       credentials: "include",
     }
   }
+
+  protected prepareRunAgentInput(parameters?: RunAgentParameters) {
+    const input = super.prepareRunAgentInput(parameters)
+    const documentIds = this.documentIdsRef.current
+    if (!documentIds.length) return input
+    return {
+      ...input,
+      forwardedProps: {
+        ...input.forwardedProps,
+        documentIds,
+      },
+    }
+  }
 }
 
 export function ChatPanel({ notebookId }: { notebookId: string }) {
   const apiBaseUrl = import.meta.env.VITE_API_URL
+
+  const { data: documents } = useNotebookDocumentsQuery(notebookId)
+  const indexedDocuments = React.useMemo(
+    () =>
+      (documents ?? [])
+        .filter((document) => document.status === "indexed")
+        .map((document) => ({ id: document.id, filename: document.filename })),
+    [documents]
+  )
+
+  const [scopedDocumentIds, setScopedDocumentIds] = React.useState<string[]>([])
+  // Drops any selected document that was deleted or whose indexing is no longer
+  // complete, falling back toward "All sources" without a stray effect render.
+  const indexedIds = React.useMemo(
+    () => new Set(indexedDocuments.map((document) => document.id)),
+    [indexedDocuments]
+  )
+  const effectiveScopedDocumentIds = React.useMemo(
+    () => scopedDocumentIds.filter((id) => indexedIds.has(id)),
+    [scopedDocumentIds, indexedIds]
+  )
+
+  // Mirror the current scope into a ref so the memoized agent can read the
+  // latest selection at request time without being rebuilt on every toggle.
+  const scopedDocumentIdsRef = React.useRef<string[]>([])
+  React.useEffect(() => {
+    scopedDocumentIdsRef.current = effectiveScopedDocumentIds
+  }, [effectiveScopedDocumentIds])
 
   const notebookAgent = React.useMemo(
     () =>
@@ -28,9 +87,11 @@ export function ChatPanel({ notebookId }: { notebookId: string }) {
           : `/api/v1/notebooks/${notebookId}/chat`,
         agentId: "notebook-chat",
         fetch: window.fetch.bind(window),
+        documentIdsRef: scopedDocumentIdsRef,
       }),
     [apiBaseUrl, notebookId]
   )
+
   const historyAdapter = React.useMemo<ThreadHistoryAdapter>(
     () => ({
       async load() {
@@ -64,7 +125,14 @@ export function ChatPanel({ notebookId }: { notebookId: string }) {
     <div className="flex h-full min-h-0 flex-col bg-card">
       <div className="min-h-0 flex-1 overflow-hidden bg-card [&_.aui-thread-root]:bg-card [&_.aui-thread-viewport-footer]:bg-card [&_.aui-thread-welcome-suggestion]:bg-card">
         <AssistantRuntimeProvider runtime={runtime}>
-          <Thread hideScrollbar />
+          <Thread
+            hideScrollbar
+            documentScope={{
+              options: indexedDocuments,
+              value: effectiveScopedDocumentIds,
+              onChange: setScopedDocumentIds,
+            }}
+          />
         </AssistantRuntimeProvider>
       </div>
     </div>

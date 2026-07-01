@@ -382,6 +382,43 @@ async def get_notebook_document(
     return document
 
 
+async def resolve_scoped_document_ids(
+    notebook: Notebook,
+    current_user: User,
+    raw_document_ids: list[object],
+) -> list[UUID] | None:
+    """Validate client-supplied document ids that scope chat retrieval.
+
+    Each id must belong to ``notebook`` and ``current_user`` so a chat request
+    can't be used to probe document ids from other notebooks. Ownership is
+    checked in a single ``$in`` query. Returns None when no scope is supplied
+    (retrieval spans all sources); raises ``DocumentNotFoundError`` if any id
+    is malformed or not owned.
+    """
+    if not raw_document_ids:
+        return None
+
+    parsed_ids: list[UUID] = []
+    for raw_document_id in raw_document_ids:
+        try:
+            parsed_ids.append(UUID(str(raw_document_id)))
+        except ValueError as exc:
+            raise DocumentNotFoundError() from exc
+
+    unique_ids = list(dict.fromkeys(parsed_ids))
+    owned_count = await NotebookDocument.find(
+        {
+            "_id": {"$in": unique_ids},
+            "notebook_id": notebook.id,
+            "user_id": current_user.id,
+        }
+    ).count()
+    if owned_count != len(unique_ids):
+        raise DocumentNotFoundError()
+
+    return unique_ids
+
+
 async def get_notebook_report(
     notebook: Notebook, report_id: UUID, current_user: User
 ) -> NotebookReport:
