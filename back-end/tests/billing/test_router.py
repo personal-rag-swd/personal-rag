@@ -19,7 +19,7 @@ class TestBillingRouter:
         user = await create_user()
         headers = auth_headers(user, settings)
         response = await client.post(
-            "/api/v1/billing/checkout", headers=headers, json={"tier": "plus"}
+            "/api/v1/billing/checkout", headers=headers, json={"tier": "pro"}
         )
         assert response.status_code == 503
 

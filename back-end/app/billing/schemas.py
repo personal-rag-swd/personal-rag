@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 
 class CheckoutRequest(BaseModel):
-    tier: Literal["plus", "pro"]
+    tier: Literal["pro", "max"]
 
 
 class CheckoutSessionResponse(BaseModel):
