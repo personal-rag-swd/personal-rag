@@ -85,6 +85,39 @@ class TestPolarWebhook:
         assert updated.subscription_status == "active"
         assert updated.subscription_id == "sub_1"
 
+    async def test_valid_signature_captures_product_id_for_tier_resolution(
+        self, client: AsyncClient, settings: Any
+    ) -> None:
+        secret = "whsec_" + base64.b64encode(b"secret").decode()
+        settings.polar_webhook_secret = secret
+
+        user = await create_user()
+        customer = await BillingCustomer(
+            user_id=user.id, polar_customer_id="cus_product_test"
+        ).insert()
+
+        body = json.dumps(
+            {
+                "type": "subscription.active",
+                "data": {
+                    "id": "sub_2",
+                    "status": "active",
+                    "customer_id": "cus_product_test",
+                    "product_id": settings.polar_pro_product_id,
+                },
+            }
+        ).encode()
+        headers = _webhook_headers(secret, body, webhook_id="msg_product_1")
+
+        response = await client.post(
+            "/api/v1/billing/webhooks/polar", content=body, headers=headers
+        )
+        assert response.status_code == 200
+
+        updated = await BillingCustomer.find_one({"_id": customer.id})
+        assert updated is not None
+        assert updated.product_id == settings.polar_pro_product_id
+
     async def test_duplicate_webhook_id_is_a_no_op(
         self, client: AsyncClient, settings: Any
     ) -> None:

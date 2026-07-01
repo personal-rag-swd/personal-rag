@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-client"
 
 import type {
+  BillingTier,
   SubscriptionStatus,
   SubscriptionStatusApiPayload,
   UsageSummary,
@@ -16,6 +17,7 @@ function mapUsageSummary(payload: UsageSummaryApiPayload): UsageSummary {
     llmTokensUsed: payload.llm_tokens_used,
     llmTokensAllowance: payload.llm_tokens_allowance,
     isSubscriptionActive: payload.is_subscription_active,
+    tier: payload.tier,
   }
 }
 
@@ -26,6 +28,7 @@ function mapSubscriptionStatus(
     subscriptionStatus: payload.subscription_status,
     currentPeriodStart: payload.current_period_start,
     currentPeriodEnd: payload.current_period_end,
+    tier: payload.tier,
   }
 }
 
@@ -52,10 +55,11 @@ export function useSubscriptionStatusQuery() {
 }
 
 export function useCreateCheckoutMutation() {
-  return useMutation<string, Error, void>({
-    mutationFn: async () => {
+  return useMutation<string, Error, BillingTier>({
+    mutationFn: async (tier: BillingTier) => {
       const data = await apiFetch<{ url: string }>("/api/v1/billing/checkout", {
         method: "POST",
+        data: { tier },
       })
       return data.url
     },

@@ -82,14 +82,18 @@ class TestQuotaGating:
         user = await create_user()
         await check_quota_and_raise(user.id, 1, settings)
 
-    async def test_active_subscription_bypasses_gate(
+    async def test_plus_tier_allows_usage_above_free_tier_cap(
         self, app: Any, settings: Any
     ) -> None:
+        """A Plus subscriber isn't blocked by the free-tier cap, but does
+        have their own (much larger) tier cap - subscribing isn't unlimited.
+        """
         user = await create_user()
         await BillingCustomer(
             user_id=user.id,
-            polar_customer_id="cus_active",
+            polar_customer_id="cus_plus",
             subscription_status="active",
+            product_id=settings.polar_plus_product_id,
         ).insert()
         await record_usage_event(
             user_id=user.id,
@@ -97,6 +101,63 @@ class TestQuotaGating:
             idempotency_key=f"test:{uuid4()}",
         )
         await check_quota_and_raise(user.id, 1, settings)
+
+    async def test_plus_tier_blocks_once_its_own_cap_is_exceeded(
+        self, app: Any, settings: Any
+    ) -> None:
+        user = await create_user()
+        await BillingCustomer(
+            user_id=user.id,
+            polar_customer_id="cus_plus",
+            subscription_status="active",
+            product_id=settings.polar_plus_product_id,
+        ).insert()
+        await record_usage_event(
+            user_id=user.id,
+            quantity=settings.plus_tier_llm_tokens_allowance,
+            idempotency_key=f"test:{uuid4()}",
+        )
+        with pytest.raises(UsageQuotaExceededError):
+            await check_quota_and_raise(user.id, 1, settings)
+
+    async def test_pro_tier_uses_its_own_larger_cap(
+        self, app: Any, settings: Any
+    ) -> None:
+        user = await create_user()
+        await BillingCustomer(
+            user_id=user.id,
+            polar_customer_id="cus_pro",
+            subscription_status="active",
+            product_id=settings.polar_pro_product_id,
+        ).insert()
+        await record_usage_event(
+            user_id=user.id,
+            quantity=settings.plus_tier_llm_tokens_allowance + 5,
+            idempotency_key=f"test:{uuid4()}",
+        )
+        await check_quota_and_raise(user.id, 1, settings)
+
+    async def test_unrecognized_product_id_falls_back_to_free_tier(
+        self, app: Any, settings: Any
+    ) -> None:
+        """If an active subscription's product_id doesn't match a known
+        tier (misconfiguration), the gate must fail toward the smaller
+        free-tier cap, never toward unlimited.
+        """
+        user = await create_user()
+        await BillingCustomer(
+            user_id=user.id,
+            polar_customer_id="cus_unknown",
+            subscription_status="active",
+            product_id="prod_does_not_match_any_tier",
+        ).insert()
+        await record_usage_event(
+            user_id=user.id,
+            quantity=settings.free_tier_llm_tokens_allowance,
+            idempotency_key=f"test:{uuid4()}",
+        )
+        with pytest.raises(UsageQuotaExceededError):
+            await check_quota_and_raise(user.id, 1, settings)
 
     async def test_fails_open_on_internal_error(
         self, app: Any, settings: Any, monkeypatch: pytest.MonkeyPatch
@@ -131,9 +192,22 @@ class TestPolarCustomerAndCheckout:
     ) -> None:
         user = await create_user()
         fake_client = FakePolarClient()
-        url = await create_checkout_session(user, settings, client=fake_client)
+        url = await create_checkout_session(user, settings, "plus", client=fake_client)
         assert url == "https://sandbox.polar.sh/checkout/fake"
         assert len(fake_client.checkout_calls) == 1
+        assert fake_client.checkout_calls[0]["product_id"] == (
+            settings.polar_plus_product_id
+        )
+
+    async def test_create_checkout_session_resolves_correct_product_per_tier(
+        self, app: Any, settings: Any
+    ) -> None:
+        user = await create_user()
+        fake_client = FakePolarClient()
+        await create_checkout_session(user, settings, "pro", client=fake_client)
+        assert fake_client.checkout_calls[0]["product_id"] == (
+            settings.polar_pro_product_id
+        )
 
     async def test_create_customer_portal_session_returns_url(
         self, app: Any, settings: Any

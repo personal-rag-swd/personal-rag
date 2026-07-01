@@ -18,7 +18,9 @@ class TestBillingRouter:
     ) -> None:
         user = await create_user()
         headers = auth_headers(user, settings)
-        response = await client.post("/api/v1/billing/checkout", headers=headers)
+        response = await client.post(
+            "/api/v1/billing/checkout", headers=headers, json={"tier": "plus"}
+        )
         assert response.status_code == 503
 
     async def test_portal_requires_billing_configured(

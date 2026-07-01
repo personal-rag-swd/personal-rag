@@ -54,10 +54,13 @@ Go to the **Environment** tab of the Compose service and add the following requi
 | `POLAR_WEBHOOK_SECRET` | *Webhook secret from the Polar endpoint registered for this domain* | Verifies inbound `POST /api/v1/billing/webhooks/polar` |
 | `POLAR_ENVIRONMENT` | `production` | Switches the Polar API base URL from sandbox to production |
 | `POLAR_ORGANIZATION_ID` | *Your Polar production Organization ID* | Not read by code today, kept for reference/future validation |
-| `POLAR_PRODUCT_ID` | *Production product ID with the metered price attached* | Used by checkout session creation |
-| `POLAR_LLM_TOKENS_METER_ID` | *Production meter ID* | Not read by code today, kept for reference/future validation |
+| `POLAR_PLUS_PRODUCT_ID` | *Product ID for the $20/mo Plus plan (fixed recurring price)* | Used by checkout session creation for the "plus" tier |
+| `POLAR_PRO_PRODUCT_ID` | *Product ID for the $100/mo Pro plan (fixed recurring price)* | Used by checkout session creation for the "pro" tier |
+| `POLAR_LLM_TOKENS_METER_ID` | *Production meter ID* | Tracking/audit only ($0/unit) — not the billing mechanism |
 | `POLAR_SUCCESS_URL` | `https://rag.quanphungg.me/settings/billing?checkout=success` | Where Polar redirects after a successful checkout |
 | `FREE_TIER_LLM_TOKENS_ALLOWANCE` | `50000` (or desired monthly token limit) | Free-tier LLM token cap before checkout is required |
+| `PLUS_TIER_LLM_TOKENS_ALLOWANCE` | `5000000` | Hard token cap for Plus subscribers (blocked once exceeded) |
+| `PRO_TIER_LLM_TOKENS_ALLOWANCE` | `35000000` | Hard token cap for Pro subscribers (blocked once exceeded) |
 
 ### Step 4: Expose Services via Domains
 Dokploy integrates seamlessly with Traefik to handle Let's Encrypt SSL certificates automatically. To expose the Frontend, Backend, and MinIO publicly, go to the **Domains** tab in each respective service configuration or configure it via the Dokploy UI:

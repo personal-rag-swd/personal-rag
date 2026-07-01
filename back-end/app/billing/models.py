@@ -12,6 +12,7 @@ class BillingCustomer(Document):
     polar_customer_id: str
     subscription_id: str | None = None
     subscription_status: str | None = None
+    product_id: str | None = None
     current_period_start: datetime | None = None
     current_period_end: datetime | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

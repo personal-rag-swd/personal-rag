@@ -20,6 +20,17 @@ import {
   useSubscriptionStatusQuery,
   useUsageSummaryQuery,
 } from "../api"
+import type { BillingTier } from "../types"
+
+const PLANS: {
+  tier: BillingTier
+  name: string
+  price: string
+  tokens: string
+}[] = [
+  { tier: "plus", name: "Plus", price: "$20/mo", tokens: "5,000,000 tokens/mo" },
+  { tier: "pro", name: "Pro", price: "$100/mo", tokens: "35,000,000 tokens/mo" },
+]
 
 function UsageBar({
   label,
@@ -57,11 +68,12 @@ export function BillingSettings() {
   const portalMutation = useCustomerPortalMutation()
 
   const isActive = usageQuery.data?.isSubscriptionActive ?? false
+  const currentTier = subscriptionQuery.data?.tier ?? null
 
-  const handleUpgrade = async () => {
+  const handleUpgrade = async (tier: BillingTier) => {
     try {
-      const url = await checkoutMutation.mutateAsync()
-      window.location.href = url
+      const url = await checkoutMutation.mutateAsync(tier)
+      window.location.assign(url)
     } catch (error) {
       toast.error(
         getErrorMessage(error, "Could not start checkout. Please try again.")
@@ -95,7 +107,9 @@ export function BillingSettings() {
           <CardAction>
             {isActive ? (
               <Badge variant="secondary">
-                {subscriptionQuery.data?.subscriptionStatus ?? "active"}
+                {currentTier
+                  ? `${currentTier} — ${subscriptionQuery.data?.subscriptionStatus ?? "active"}`
+                  : (subscriptionQuery.data?.subscriptionStatus ?? "active")}
               </Badge>
             ) : (
               <Badge variant="outline">Free tier</Badge>
@@ -111,16 +125,32 @@ export function BillingSettings() {
             />
           )}
 
+          {!isActive && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {PLANS.map((plan) => (
+                <Card key={plan.tier}>
+                  <CardHeader>
+                    <CardTitle>{plan.name}</CardTitle>
+                    <CardDescription>
+                      {plan.price} · {plan.tokens}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Button
+                      className="w-full"
+                      onClick={() => void handleUpgrade(plan.tier)}
+                      disabled={checkoutMutation.isPending}
+                    >
+                      <SparklesIcon className="size-4" />
+                      Upgrade to {plan.name}
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
           <div className="flex flex-wrap gap-3">
-            {!isActive && (
-              <Button
-                onClick={() => void handleUpgrade()}
-                disabled={checkoutMutation.isPending}
-              >
-                <SparklesIcon className="size-4" />
-                Upgrade for unlimited usage
-              </Button>
-            )}
             <Button
               variant="outline"
               onClick={() => void handleManageBilling()}

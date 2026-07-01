@@ -36,6 +36,57 @@ _ACTIVE_SUBSCRIPTION_STATUSES = {"active", "trialing"}
 _WEBHOOK_TIMESTAMP_TOLERANCE = timedelta(minutes=5)
 _METER_EVENT_NAME = "llm_usage"
 
+_TIER_PLUS = "plus"
+_TIER_PRO = "pro"
+
+
+def _product_id_for_tier(tier: str, settings: Settings) -> str:
+    return {
+        _TIER_PLUS: settings.polar_plus_product_id,
+        _TIER_PRO: settings.polar_pro_product_id,
+    }[tier]
+
+
+def _allowance_for_tier(tier: str, settings: Settings) -> int:
+    return {
+        _TIER_PLUS: settings.plus_tier_llm_tokens_allowance,
+        _TIER_PRO: settings.pro_tier_llm_tokens_allowance,
+    }[tier]
+
+
+def _tier_for_product_id(product_id: str | None, settings: Settings) -> str | None:
+    if product_id and product_id == settings.polar_plus_product_id:
+        return _TIER_PLUS
+    if product_id and product_id == settings.polar_pro_product_id:
+        return _TIER_PRO
+    return None
+
+
+def _resolve_effective_allowance(
+    billing_customer: BillingCustomer | None, settings: Settings
+) -> tuple[str | None, int]:
+    """Return ``(tier, allowance_limit)`` for the user's current subscription.
+
+    Falls back to the free-tier allowance (tier=None) whenever there's no
+    active subscription, or the subscription's product_id doesn't match a
+    known tier - "used up is used up" must degrade to the smaller cap, never
+    to unlimited.
+    """
+    if (
+        billing_customer is not None
+        and billing_customer.subscription_status in _ACTIVE_SUBSCRIPTION_STATUSES
+    ):
+        tier = _tier_for_product_id(billing_customer.product_id, settings)
+        if tier is not None:
+            return tier, _allowance_for_tier(tier, settings)
+        logger.warning(
+            "Active subscription for user_id=%s has unrecognized "
+            "product_id=%s; falling back to free-tier allowance",
+            billing_customer.user_id,
+            billing_customer.product_id,
+        )
+    return None, settings.free_tier_llm_tokens_allowance
+
 
 def _parse_polar_datetime(value: Any) -> datetime | None:
     if not value:
@@ -92,12 +143,16 @@ async def get_or_create_polar_customer(
 
 
 async def create_checkout_session(
-    user: User, settings: Settings, *, client: PolarClientProtocol | None = None
+    user: User,
+    settings: Settings,
+    tier: str,
+    *,
+    client: PolarClientProtocol | None = None,
 ) -> str:
     resolved_client = client or get_polar_client(settings)
     await get_or_create_polar_customer(user, settings, client=resolved_client)
     response = await resolved_client.create_checkout_session(
-        product_id=settings.polar_product_id,
+        product_id=_product_id_for_tier(tier, settings),
         customer_external_id=str(user.id),
         success_url=settings.polar_success_url,
     )
@@ -120,9 +175,13 @@ async def create_customer_portal_session(
 async def check_quota_and_raise(
     user_id: UUID, quantity: int, settings: Settings
 ) -> None:
-    """Raise ``UsageQuotaExceededError`` if this action would exceed the free
-    tier's LLM token allowance and the user has no active Polar subscription.
-    No-op for subscribers.
+    """Raise ``UsageQuotaExceededError`` if this action would exceed the
+    user's effective LLM token allowance (free tier, or their subscribed
+    tier's cap if they have an active Polar subscription).
+
+    Every tier - free, plus, pro - is a hard cap: once exhausted, further
+    chat/report actions are blocked until the next period or an upgrade.
+    There is no "unlimited" tier.
 
     Fails open: an unexpected error while checking quota (e.g. a Mongo
     hiccup) is logged and swallowed rather than propagated, so a billing-side
@@ -131,17 +190,12 @@ async def check_quota_and_raise(
     """
     try:
         billing_customer = await BillingCustomer.find_one({"user_id": user_id})
-        if (
-            billing_customer is not None
-            and billing_customer.subscription_status in _ACTIVE_SUBSCRIPTION_STATUSES
-        ):
-            return
+        _tier, allowance_limit = _resolve_effective_allowance(
+            billing_customer, settings
+        )
 
         allowance = await get_or_create_usage_allowance(user_id)
-        exceeded = (
-            allowance.llm_tokens_used + quantity
-            > settings.free_tier_llm_tokens_allowance
-        )
+        exceeded = allowance.llm_tokens_used + quantity > allowance_limit
     except Exception:
         logger.exception(
             "Failed to check usage quota for user_id=%s; allowing request through",
@@ -254,27 +308,34 @@ async def get_usage_summary(user_id: UUID, settings: Settings) -> UsageSummaryRe
         billing_customer is not None
         and billing_customer.subscription_status in _ACTIVE_SUBSCRIPTION_STATUSES
     )
+    tier, allowance_limit = _resolve_effective_allowance(billing_customer, settings)
     return UsageSummaryResponse(
         period_start=allowance.period_start,
         period_end=allowance.period_end,
         llm_tokens_used=allowance.llm_tokens_used,
-        llm_tokens_allowance=settings.free_tier_llm_tokens_allowance,
+        llm_tokens_allowance=allowance_limit,
         is_subscription_active=is_active,
+        tier=tier,
     )
 
 
-async def get_subscription_status(user_id: UUID) -> SubscriptionStatusResponse:
+async def get_subscription_status(
+    user_id: UUID, settings: Settings
+) -> SubscriptionStatusResponse:
     billing_customer = await BillingCustomer.find_one({"user_id": user_id})
     if billing_customer is None:
         return SubscriptionStatusResponse(
             subscription_status=None,
             current_period_start=None,
             current_period_end=None,
+            tier=None,
         )
+    tier, _allowance_limit = _resolve_effective_allowance(billing_customer, settings)
     return SubscriptionStatusResponse(
         subscription_status=billing_customer.subscription_status,
         current_period_start=billing_customer.current_period_start,
         current_period_end=billing_customer.current_period_end,
+        tier=tier,
     )
 
 
@@ -350,6 +411,9 @@ async def handle_webhook_event(payload: dict[str, Any]) -> None:
     }:
         billing_customer.subscription_id = data.get("id")
         billing_customer.subscription_status = data.get("status")
+        billing_customer.product_id = data.get("product_id") or (
+            data.get("product") or {}
+        ).get("id")
         billing_customer.current_period_start = _parse_polar_datetime(
             data.get("current_period_start")
         )
