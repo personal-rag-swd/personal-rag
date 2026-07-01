@@ -409,10 +409,7 @@ def verify_webhook_signature(
             "Polar webhook rejected: signature mismatch - "
             "configured POLAR_WEBHOOK_SECRET doesn't match the secret Polar "
             "used to sign this delivery (wrong secret for this endpoint, or "
-            "env var not actually redeployed). Runtime secret fingerprint=%s "
-            "len=%d",
-            secret_fingerprint,
-            len(secret),
+            "env var not actually redeployed)"
         )
         raise WebhookSignatureInvalidError()
 
