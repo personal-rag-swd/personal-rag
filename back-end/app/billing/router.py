@@ -8,6 +8,7 @@ from app.billing.exceptions import (
     WebhookSignatureInvalidError,
 )
 from app.billing.schemas import (
+    CheckoutRequest,
     CheckoutSessionResponse,
     CustomerPortalResponse,
     SubscriptionStatusResponse,
@@ -32,18 +33,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/billing", tags=["Billing"])
 
 
-def _require_billing_configured(settings: Settings) -> None:
-    if not settings.polar_api_key or not settings.polar_product_id:
+def _require_billing_configured(settings: Settings, product_id: str) -> None:
+    if not settings.polar_api_key or not product_id:
         raise BillingNotConfiguredError()
 
 
 @router.post("/checkout", response_model=CheckoutSessionResponse)
 async def checkout(
+    body: CheckoutRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> CheckoutSessionResponse:
-    _require_billing_configured(settings)
-    url = await create_checkout_session(current_user, settings)
+    product_id = (
+        settings.polar_plus_product_id
+        if body.tier == "plus"
+        else settings.polar_pro_product_id
+    )
+    _require_billing_configured(settings, product_id)
+    url = await create_checkout_session(current_user, settings, body.tier)
     return CheckoutSessionResponse(url=url)
 
 
@@ -52,7 +59,8 @@ async def portal(
     current_user: Annotated[User, Depends(get_current_user)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> CustomerPortalResponse:
-    _require_billing_configured(settings)
+    if not settings.polar_api_key:
+        raise BillingNotConfiguredError()
     url = await create_customer_portal_session(current_user, settings)
     return CustomerPortalResponse(url=url)
 
@@ -68,8 +76,9 @@ async def usage(
 @router.get("/subscription", response_model=SubscriptionStatusResponse)
 async def subscription(
     current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> SubscriptionStatusResponse:
-    return await get_subscription_status(current_user.id)
+    return await get_subscription_status(current_user.id, settings)
 
 
 @router.post("/webhooks/polar", status_code=status.HTTP_200_OK)
