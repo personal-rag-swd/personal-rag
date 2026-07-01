@@ -578,6 +578,7 @@ function SourcePreviewDialog({
   const canRenderInline = preview ? canRenderPreviewInline(preview) : false
   const sourceUrl = preview?.url ?? null
   const isPdfPreview = preview ? isPdfDocument(preview) : false
+  const isImagePreview = preview ? isImageDocument(preview) : false
   // Production blocked embedded cross-origin MinIO presigned PDFs, so PDF iframe
   // preview uses a same-origin backend proxy while Open/Download keep the URL.
   const iframeUrl =
@@ -622,8 +623,8 @@ function SourcePreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92dvh] gap-4 overflow-hidden sm:max-w-5xl">
-        <DialogHeader className="pr-10">
+      <DialogContent className="flex max-h-[92dvh] flex-col gap-4 overflow-hidden sm:max-w-5xl">
+        <DialogHeader className="shrink-0 pr-10">
           <DialogTitle className="truncate" title={document.filename}>
             {document.filename}
           </DialogTitle>
@@ -632,38 +633,44 @@ function SourcePreviewDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="min-h-[55dvh] overflow-hidden rounded-2xl border bg-muted/30">
+        <div className="h-[70dvh] min-h-0 overflow-hidden rounded-2xl border bg-muted/30">
           {isLoading ? (
-            <div className="flex h-[55dvh] items-center justify-center text-sm text-muted-foreground">
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               <Loader2Icon className="mr-2 size-4 animate-spin" />
               Loading preview
             </div>
           ) : error ? (
-            <div className="flex h-[55dvh] flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
+            <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
               <AlertCircleIcon className="size-5 text-destructive" />
               <p>{errorMessage}</p>
             </div>
           ) : preview?.previewType === "text" ? (
-            <ScrollArea className="h-[55dvh]">
+            <ScrollArea className="h-full">
               <pre className="whitespace-pre-wrap break-words p-4 font-mono text-xs leading-relaxed text-foreground">
                 {preview.content}
               </pre>
             </ScrollArea>
+          ) : sourceUrl && isImagePreview ? (
+            <img
+              src={sourceUrl}
+              alt={preview?.filename ?? document.filename}
+              className="h-full w-full object-contain"
+            />
           ) : iframeUrl && canRenderInline ? (
             <iframe
               title={preview?.filename ?? "Document"}
               src={iframeUrl}
-              className="h-[55dvh] w-full bg-background"
+              className="h-full w-full bg-background"
             />
           ) : (
-            <div className="flex h-[55dvh] flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
+            <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
               <FileTextIcon className="size-8" />
               <p>Preview is available as a separate document view.</p>
             </div>
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0">
           {sourceUrl || preview ? (
             <>
               {sourceUrl ? (
@@ -809,6 +816,16 @@ function isPdfDocument(preview: NotebookDocumentPreview) {
   return (
     normalizeContentType(preview.contentType) === "application/pdf" ||
     preview.filename.toLowerCase().endsWith(".pdf")
+  )
+}
+
+function isImageDocument(preview: NotebookDocumentPreview) {
+  const contentType = normalizeContentType(preview.contentType)
+  const filename = preview.filename.toLowerCase()
+
+  return (
+    contentType.startsWith("image/") ||
+    IMAGE_EXTENSIONS.some((ext) => filename.endsWith(ext))
   )
 }
 
