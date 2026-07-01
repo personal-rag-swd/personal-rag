@@ -84,6 +84,22 @@ class Settings(BaseSettings):
     polar_max_product_id: str = ""
     polar_llm_tokens_meter_id: str = ""
     polar_success_url: str = "http://localhost:5173/settings/billing?checkout=success"
+
+    @field_validator(
+        "polar_api_key",
+        "polar_webhook_secret",
+        "polar_organization_id",
+        "polar_pro_product_id",
+        "polar_max_product_id",
+        "polar_llm_tokens_meter_id",
+        mode="before",
+    )
+    @classmethod
+    def strip_polar_credential_whitespace(cls, v: str) -> str:
+        # PaaS env-var UIs (and CRLF-saved .env files) can smuggle in a
+        # trailing \r/\n or stray spaces that silently break HMAC signature
+        # verification and Bearer auth - strip regardless of source.
+        return v.strip() if isinstance(v, str) else v
     polar_usage_emit_interval_seconds: int = 60
     polar_usage_emit_batch_size: int = 100
     polar_usage_emit_max_retries: int = 5
