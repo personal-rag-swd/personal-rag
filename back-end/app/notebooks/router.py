@@ -5,7 +5,7 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Annotated
 from urllib.parse import quote
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import obstore
 from fastapi import (
@@ -21,6 +21,7 @@ from pydantic_ai.capabilities.process_history import ProcessHistory
 from pydantic_ai.run import AgentRunResult
 from pydantic_ai.ui.ag_ui import AGUIAdapter
 
+from app.billing.service import check_quota_and_raise, record_usage_event
 from app.core.config import Settings, get_settings
 from app.core.llm_provider import resolve_chat_provider
 from app.core.s3 import generate_presigned_get_url, get_s3_store
@@ -117,7 +118,10 @@ def _safe_pdf_filename(filename: str) -> str:
 
 
 def _safe_download_filename(filename: str) -> str:
-    return filename.replace("\\", "_").replace("/", "_").replace('"', "'").strip() or "document"
+    return (
+        filename.replace("\\", "_").replace("/", "_").replace('"', "'").strip()
+        or "document"
+    )
 
 
 async def _notebook_event_generator(current_user: User) -> AsyncIterator[str]:
@@ -138,9 +142,18 @@ async def _notebook_event_generator(current_user: User) -> AsyncIterator[str]:
 
 
 async def _persist_chat_history(
-    notebook: Notebook, result: AgentRunResult[object]
+    notebook: Notebook, current_user: User, result: AgentRunResult[object]
 ) -> None:
     await append_notebook_chat_history(notebook, result.new_messages())
+    usage = result.usage
+    if usage.total_tokens:
+        await record_usage_event(
+            user_id=current_user.id,
+            quantity=usage.total_tokens,
+            idempotency_key=f"chat:{notebook.id}:{uuid4()}",
+            notebook_id=notebook.id,
+            event_metadata={"source": "chat"},
+        )
 
 
 async def _run_background_note_ingestion(document_id: UUID) -> None:
@@ -297,7 +310,7 @@ async def read_notebook_document_pdf_inline(
         media_type="application/pdf",
         headers={
             "Content-Disposition": (
-                f"inline; filename=\"{safe_filename}\"; "
+                f'inline; filename="{safe_filename}"; '
                 f"filename*=UTF-8''{quote(safe_filename)}"
             ),
             "Cache-Control": "private, max-age=3600",
@@ -338,7 +351,7 @@ async def download_notebook_document(
         media_type=document.content_type or "application/octet-stream",
         headers={
             "Content-Disposition": (
-                f"attachment; filename=\"{safe_filename}\"; "
+                f'attachment; filename="{safe_filename}"; '
                 f"filename*=UTF-8''{quote(safe_filename)}"
             ),
             "Cache-Control": "private, max-age=3600",
@@ -385,9 +398,11 @@ async def chat_notebook_route(
     message_history = await load_notebook_chat_history(notebook)
     settings = get_settings()
 
+    await check_quota_and_raise(current_user.id, 0, settings)
+
     try:
         request_payload = json.loads(await request.body() or b"{}")
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         request_payload = None
     new_user_message = build_user_message_from_agui_payload(request_payload)
     if new_user_message is not None:
@@ -406,7 +421,7 @@ async def chat_notebook_route(
         deps=deps,
         message_history=message_history,
         conversation_id=str(notebook.id),
-        on_complete=functools.partial(_persist_chat_history, notebook),
+        on_complete=functools.partial(_persist_chat_history, notebook, current_user),
         capabilities=[ProcessHistory(keep_recent_messages)],
     )
 
@@ -488,6 +503,7 @@ async def generate_notebook_report(
     payload: ReportGenerateRequest,
     background_tasks: BackgroundTasks,
     current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> object:
     (
         report,
@@ -495,7 +511,7 @@ async def generate_notebook_report(
         instructions,
         detail_level,
         question_count,
-    ) = await create_pending_report(notebook_id, payload, current_user)
+    ) = await create_pending_report(notebook_id, payload, current_user, settings)
     background_tasks.add_task(
         run_report_generation,
         report_id=report.id,

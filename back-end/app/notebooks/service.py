@@ -7,6 +7,7 @@ from beanie import SortDirection
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelRequest
 
+from app.billing.service import check_quota_and_raise, record_usage_event
 from app.core.config import Settings
 from app.core.event_bus import domain_event_bus
 from app.core.llm_provider import chat_provider_is_configured
@@ -19,6 +20,7 @@ from app.notebooks.agent.report_agents import (
     generate_mindmap,
     generate_quiz,
     generate_study_guide,
+    get_last_report_usage,
 )
 from app.notebooks.domain_events import (
     ReportCancelled,
@@ -324,6 +326,16 @@ async def run_report_generation(
             await domain_event_bus.emit(ReportFailed(report))
         return
 
+    usage = get_last_report_usage()
+    if usage is not None and usage.total_tokens:
+        await record_usage_event(
+            user_id=report.user_id,
+            quantity=usage.total_tokens,
+            idempotency_key=f"report:{report_id}",
+            notebook_id=report.notebook_id,
+            event_metadata={"source": "report", "report_type": report_type},
+        )
+
     report = await NotebookReport.find_one({"_id": report_id})
     if report is None or report.status == "cancelled":
         return
@@ -434,12 +446,17 @@ async def create_note(
 
 
 async def create_pending_report(
-    notebook_id: UUID, payload: ReportGenerateRequest, current_user: User
+    notebook_id: UUID,
+    payload: ReportGenerateRequest,
+    current_user: User,
+    settings: Settings,
 ) -> tuple[NotebookReport, str, str | None, str | None, int | None]:
     notebook = await get_notebook(notebook_id, current_user)
 
     if not chat_provider_is_configured():
         raise LLMNotConfiguredError("openrouter")
+
+    await check_quota_and_raise(current_user.id, 0, settings)
 
     context = await build_report_context(notebook, current_user)
     if not context:

@@ -38,6 +38,14 @@ from scalar_fastapi import get_scalar_api_reference
 
 from app.auth.models import PasswordResetRequest, PendingRegistration, RefreshToken
 from app.auth.router import router as auth_router
+from app.billing.models import (
+    BillingCustomer,
+    ProcessedWebhookEvent,
+    UsageAllowance,
+    UsageEventLog,
+)
+from app.billing.router import router as billing_router
+from app.billing.tasks import run_usage_emission_task
 from app.core.exceptions import AppError
 from app.event_listeners import register_default_event_listeners
 from app.file.router import router as file_router
@@ -135,6 +143,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         NotebookDocument,
         NotebookDocumentChunk,
         NotebookReport,
+        BillingCustomer,
+        UsageEventLog,
+        UsageAllowance,
+        ProcessedWebhookEvent,
     ]
 
     # Use the default database from the connection string
@@ -157,11 +169,16 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     if settings.rabbitmq_consumer_enabled:
         consumer_task = asyncio.create_task(run_notebook_document_consumer(settings))
 
+    usage_emission_task = asyncio.create_task(run_usage_emission_task(settings))
+
     await _recover_pending_reports()
 
     try:
         yield
     finally:
+        usage_emission_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await usage_emission_task
         if consumer_task is not None:
             consumer_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -209,3 +226,4 @@ app.include_router(auth_router, prefix=API_V1_PREFIX)
 app.include_router(users_router, prefix=API_V1_PREFIX)
 app.include_router(file_router, prefix=API_V1_PREFIX)
 app.include_router(notebooks_router, prefix=API_V1_PREFIX)
+app.include_router(billing_router, prefix=API_V1_PREFIX)

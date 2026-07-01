@@ -29,6 +29,11 @@ const NotebookPage = React.lazy(() =>
     default: module.NotebookPage,
   }))
 )
+const BillingSettings = React.lazy(() =>
+  import("@/features/billing/components/BillingSettings").then((module) => ({
+    default: module.BillingSettings,
+  }))
+)
 
 // Premium, beautifully animated full-screen loader
 function FullPageSpinner() {
@@ -107,6 +112,29 @@ function DashboardLayout() {
   )
 }
 
+// Billing settings page, inside the dashboard sidebar shell
+function BillingLayout() {
+  return (
+    <React.Suspense fallback={<FullPageSpinner />}>
+      <SidebarProvider
+        defaultOpen={true}
+        style={
+          {
+            "--sidebar-width": "calc(var(--spacing) * 72)",
+            "--header-height": "calc(var(--spacing) * 12)",
+          } as React.CSSProperties
+        }
+      >
+        <AppSidebar variant="inset" />
+        <SidebarInset>
+          <SiteHeader />
+          <BillingSettings />
+        </SidebarInset>
+      </SidebarProvider>
+    </React.Suspense>
+  )
+}
+
 // Notebook full-page layout (no dashboard sidebar)
 function NotebookLayout() {
   return (
@@ -168,6 +196,14 @@ export function AppRoutes() {
         element={
           <ProtectedRoute>
             <NotebookLayout />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/settings/billing"
+        element={
+          <ProtectedRoute>
+            <BillingLayout />
           </ProtectedRoute>
         }
       />

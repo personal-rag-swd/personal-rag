@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+from contextvars import ContextVar
 
 import logfire
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.models import Model
 from pydantic_ai.run import AgentRunResult
+from pydantic_ai.usage import RunUsage
 
 from app.core.llm_provider import resolve_chat_provider
 from app.notebooks.prompt import (
@@ -72,6 +74,23 @@ flashcards_agent = Agent(
 )
 
 
+# Set by ``_run_agent_with_retry`` after each successful run and read by
+# ``run_report_generation`` right after a ``generate_*`` call returns, so
+# token usage is captured without threading a usage-sink parameter through
+# every report-generation function's signature. Safe across ``await``s within
+# the same task since contextvars propagate through the call stack.
+_last_report_usage: ContextVar[RunUsage | None] = ContextVar(
+    "_last_report_usage", default=None
+)
+
+
+def get_last_report_usage() -> RunUsage | None:
+    """Return (and clear) the usage captured by the most recent report agent run."""
+    usage = _last_report_usage.get()
+    _last_report_usage.set(None)
+    return usage
+
+
 async def _run_agent_with_retry[OutputT](
     agent: Agent[None, OutputT],
     user_msg: str,
@@ -82,7 +101,7 @@ async def _run_agent_with_retry[OutputT](
     delay = initial_delay
     for attempt in range(max_retries):
         try:
-            return await agent.run(user_msg, model=model)
+            result = await agent.run(user_msg, model=model)
         except ModelHTTPError as exc:
             if exc.status_code in (429, 502, 503, 500) and attempt < max_retries - 1:
                 logfire.warning(
@@ -95,6 +114,9 @@ async def _run_agent_with_retry[OutputT](
                 delay *= 2
             else:
                 raise
+        else:
+            _last_report_usage.set(result.usage)
+            return result
     raise RuntimeError("Model retry loop exited without a result")
 
 
