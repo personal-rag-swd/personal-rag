@@ -1,4 +1,4 @@
-export type BillingTier = "plus" | "pro"
+export type BillingTier = "pro" | "max"
 
 export interface UsageSummary {
   periodStart: string

@@ -144,8 +144,8 @@ async def fixture_settings() -> Settings:
         ),
         aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", "minioadmin"),
         aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", "minioadmin"),
-        polar_plus_product_id="test_plus_product",
         polar_pro_product_id="test_pro_product",
+        polar_max_product_id="test_max_product",
     )
 
 

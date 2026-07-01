@@ -28,8 +28,8 @@ const PLANS: {
   price: string
   tokens: string
 }[] = [
-  { tier: "plus", name: "Plus", price: "$20/mo", tokens: "5,000,000 tokens/mo" },
-  { tier: "pro", name: "Pro", price: "$100/mo", tokens: "35,000,000 tokens/mo" },
+  { tier: "pro", name: "Pro", price: "$20/mo", tokens: "5,000,000 tokens/mo" },
+  { tier: "max", name: "Max", price: "$100/mo", tokens: "35,000,000 tokens/mo" },
 ]
 
 function UsageBar({

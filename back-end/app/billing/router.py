@@ -45,9 +45,9 @@ async def checkout(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> CheckoutSessionResponse:
     product_id = (
-        settings.polar_plus_product_id
-        if body.tier == "plus"
-        else settings.polar_pro_product_id
+        settings.polar_pro_product_id
+        if body.tier == "pro"
+        else settings.polar_max_product_id
     )
     _require_billing_configured(settings, product_id)
     url = await create_checkout_session(current_user, settings, body.tier)

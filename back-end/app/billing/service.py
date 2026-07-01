@@ -36,29 +36,29 @@ _ACTIVE_SUBSCRIPTION_STATUSES = {"active", "trialing"}
 _WEBHOOK_TIMESTAMP_TOLERANCE = timedelta(minutes=5)
 _METER_EVENT_NAME = "llm_usage"
 
-_TIER_PLUS = "plus"
 _TIER_PRO = "pro"
+_TIER_MAX = "max"
 
 
 def _product_id_for_tier(tier: str, settings: Settings) -> str:
     return {
-        _TIER_PLUS: settings.polar_plus_product_id,
         _TIER_PRO: settings.polar_pro_product_id,
+        _TIER_MAX: settings.polar_max_product_id,
     }[tier]
 
 
 def _allowance_for_tier(tier: str, settings: Settings) -> int:
     return {
-        _TIER_PLUS: settings.plus_tier_llm_tokens_allowance,
         _TIER_PRO: settings.pro_tier_llm_tokens_allowance,
+        _TIER_MAX: settings.max_tier_llm_tokens_allowance,
     }[tier]
 
 
 def _tier_for_product_id(product_id: str | None, settings: Settings) -> str | None:
-    if product_id and product_id == settings.polar_plus_product_id:
-        return _TIER_PLUS
     if product_id and product_id == settings.polar_pro_product_id:
         return _TIER_PRO
+    if product_id and product_id == settings.polar_max_product_id:
+        return _TIER_MAX
     return None
 
 
@@ -179,7 +179,7 @@ async def check_quota_and_raise(
     user's effective LLM token allowance (free tier, or their subscribed
     tier's cap if they have an active Polar subscription).
 
-    Every tier - free, plus, pro - is a hard cap: once exhausted, further
+    Every tier - free, pro, max - is a hard cap: once exhausted, further
     chat/report actions are blocked until the next period or an upgrade.
     There is no "unlimited" tier.
 

@@ -80,16 +80,16 @@ class Settings(BaseSettings):
     polar_webhook_secret: str = ""
     polar_environment: str = "sandbox"
     polar_organization_id: str = ""
-    polar_plus_product_id: str = ""
     polar_pro_product_id: str = ""
+    polar_max_product_id: str = ""
     polar_llm_tokens_meter_id: str = ""
     polar_success_url: str = "http://localhost:5173/settings/billing?checkout=success"
     polar_usage_emit_interval_seconds: int = 60
     polar_usage_emit_batch_size: int = 100
     polar_usage_emit_max_retries: int = 5
     free_tier_llm_tokens_allowance: int = 50_000
-    plus_tier_llm_tokens_allowance: int = 5_000_000
-    pro_tier_llm_tokens_allowance: int = 35_000_000
+    pro_tier_llm_tokens_allowance: int = 5_000_000
+    max_tier_llm_tokens_allowance: int = 35_000_000
 
     model_config = SettingsConfigDict(
         env_file=".env",

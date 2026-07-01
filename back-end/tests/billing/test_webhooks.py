@@ -103,7 +103,7 @@ class TestPolarWebhook:
                     "id": "sub_2",
                     "status": "active",
                     "customer_id": "cus_product_test",
-                    "product_id": settings.polar_pro_product_id,
+                    "product_id": settings.polar_max_product_id,
                 },
             }
         ).encode()
@@ -116,7 +116,7 @@ class TestPolarWebhook:
 
         updated = await BillingCustomer.find_one({"_id": customer.id})
         assert updated is not None
-        assert updated.product_id == settings.polar_pro_product_id
+        assert updated.product_id == settings.polar_max_product_id
 
     async def test_duplicate_webhook_id_is_a_no_op(
         self, client: AsyncClient, settings: Any
