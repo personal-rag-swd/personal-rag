@@ -624,14 +624,7 @@ function SourcePreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className={cn(
-          "flex max-h-[92dvh] flex-col gap-4 overflow-hidden",
-          isImageDialog
-            ? "w-fit max-w-[calc(100vw-2rem)]"
-            : "sm:max-w-5xl"
-        )}
-      >
+      <DialogContent className="flex max-h-[92dvh] flex-col gap-4 overflow-hidden sm:max-w-5xl">
         <DialogHeader className="shrink-0 pr-10">
           <DialogTitle className="truncate" title={document.filename}>
             {document.filename}
@@ -643,10 +636,8 @@ function SourcePreviewDialog({
 
         <div
           className={cn(
-            "min-h-0 overflow-hidden rounded-2xl border bg-muted/30",
-            isImageDialog
-              ? "flex max-h-[calc(92dvh-9.5rem)] max-w-[calc(100vw-5rem)] items-center justify-center"
-              : "h-[70dvh]"
+            "h-[70dvh] min-h-0 overflow-hidden rounded-2xl border bg-muted/30",
+            isImageDialog && "flex items-center justify-center"
           )}
         >
           {isLoading ? (
@@ -669,7 +660,7 @@ function SourcePreviewDialog({
             <img
               src={sourceUrl}
               alt={preview?.filename ?? document.filename}
-              className="block h-auto max-h-[calc(92dvh-9.5rem)] w-auto max-w-full object-contain"
+              className="block max-h-full max-w-full object-contain"
             />
           ) : iframeUrl && canRenderInline ? (
             <iframe
