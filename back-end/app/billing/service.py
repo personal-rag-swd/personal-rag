@@ -351,13 +351,30 @@ def verify_webhook_signature(
     webhook_timestamp = headers.get("webhook-timestamp")
     webhook_signature = headers.get("webhook-signature")
     if not webhook_id or not webhook_timestamp or not webhook_signature:
+        logger.warning(
+            "Polar webhook rejected: missing standard-webhooks header(s) "
+            "(id=%s, timestamp=%s, signature=%s)",
+            bool(webhook_id),
+            bool(webhook_timestamp),
+            bool(webhook_signature),
+        )
         raise WebhookSignatureInvalidError()
 
     try:
         timestamp = datetime.fromtimestamp(int(webhook_timestamp), tz=UTC)
     except (ValueError, OSError) as exc:
+        logger.warning(
+            "Polar webhook rejected: malformed webhook-timestamp=%r", webhook_timestamp
+        )
         raise WebhookSignatureInvalidError() from exc
-    if abs(datetime.now(UTC) - timestamp) > _WEBHOOK_TIMESTAMP_TOLERANCE:
+    skew = datetime.now(UTC) - timestamp
+    if abs(skew) > _WEBHOOK_TIMESTAMP_TOLERANCE:
+        logger.warning(
+            "Polar webhook rejected: timestamp skew %s exceeds tolerance %s "
+            "(check server clock / delivery delay)",
+            skew,
+            _WEBHOOK_TIMESTAMP_TOLERANCE,
+        )
         raise WebhookSignatureInvalidError()
 
     secret_material = secret.removeprefix("whsec_")
@@ -366,6 +383,10 @@ def verify_webhook_signature(
     try:
         secret_bytes = base64.b64decode(secret_material)
     except (ValueError, TypeError) as exc:
+        logger.warning(
+            "Polar webhook rejected: configured POLAR_WEBHOOK_SECRET is not "
+            "valid base64 after stripping the whsec_ prefix"
+        )
         raise WebhookSignatureInvalidError() from exc
 
     signed_content = f"{webhook_id}.{webhook_timestamp}.{payload_bytes.decode()}"
@@ -380,6 +401,12 @@ def verify_webhook_signature(
         hmac.compare_digest(expected_signature, provided)
         for provided in provided_signatures
     ):
+        logger.warning(
+            "Polar webhook rejected: signature mismatch - "
+            "configured POLAR_WEBHOOK_SECRET doesn't match the secret Polar "
+            "used to sign this delivery (wrong secret for this endpoint, or "
+            "env var not actually redeployed)"
+        )
         raise WebhookSignatureInvalidError()
 
 
