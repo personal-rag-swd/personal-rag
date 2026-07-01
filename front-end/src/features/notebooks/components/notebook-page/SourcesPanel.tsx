@@ -579,6 +579,7 @@ function SourcePreviewDialog({
   const sourceUrl = preview?.url ?? null
   const isPdfPreview = preview ? isPdfDocument(preview) : false
   const isImagePreview = preview ? isImageDocument(preview) : false
+  const isImageDialog = Boolean(sourceUrl && isImagePreview)
   // Production blocked embedded cross-origin MinIO presigned PDFs, so PDF iframe
   // preview uses a same-origin backend proxy while Open/Download keep the URL.
   const iframeUrl =
@@ -623,7 +624,14 @@ function SourcePreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[92dvh] flex-col gap-4 overflow-hidden sm:max-w-5xl">
+      <DialogContent
+        className={cn(
+          "flex max-h-[92dvh] flex-col gap-4 overflow-hidden",
+          isImageDialog
+            ? "w-fit max-w-[calc(100vw-2rem)]"
+            : "sm:max-w-5xl"
+        )}
+      >
         <DialogHeader className="shrink-0 pr-10">
           <DialogTitle className="truncate" title={document.filename}>
             {document.filename}
@@ -633,7 +641,14 @@ function SourcePreviewDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="h-[70dvh] min-h-0 overflow-hidden rounded-2xl border bg-muted/30">
+        <div
+          className={cn(
+            "min-h-0 overflow-hidden rounded-2xl border bg-muted/30",
+            isImageDialog
+              ? "flex max-h-[calc(92dvh-9.5rem)] max-w-[calc(100vw-5rem)] items-center justify-center"
+              : "h-[70dvh]"
+          )}
+        >
           {isLoading ? (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               <Loader2Icon className="mr-2 size-4 animate-spin" />
@@ -654,7 +669,7 @@ function SourcePreviewDialog({
             <img
               src={sourceUrl}
               alt={preview?.filename ?? document.filename}
-              className="h-full w-full object-contain"
+              className="block h-auto max-h-[calc(92dvh-9.5rem)] w-auto max-w-full object-contain"
             />
           ) : iframeUrl && canRenderInline ? (
             <iframe
