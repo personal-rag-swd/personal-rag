@@ -359,7 +359,7 @@ def verify_webhook_signature(
     except WebhookVerificationError as exc:
         logger.warning("Polar webhook rejected: %s", exc)
         raise WebhookSignatureInvalidError() from exc
-    except WebhookUnknownTypeError, ValidationError:
+    except (WebhookUnknownTypeError, ValidationError):
         # The signature is verified before the payload is parsed, so an unknown
         # event type or a schema the pinned SDK does not model is NOT a
         # signature failure. Downstream handling works off the raw JSON dict,
