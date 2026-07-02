@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import base64
-import hashlib
-import hmac
 import json
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from httpx import AsyncClient
+from standardwebhooks.webhooks import Webhook
 
 from app.billing.models import BillingCustomer, ProcessedWebhookEvent
 from tests.conftest import create_user
@@ -17,13 +16,15 @@ pytestmark = pytest.mark.anyio
 
 
 def _sign(secret: str, webhook_id: str, timestamp: str, body: bytes) -> str:
-    material = secret.removeprefix("whsec_")
-    secret_bytes = base64.b64decode(material + "=" * (-len(material) % 4))
-    signed_content = f"{webhook_id}.{timestamp}.{body.decode()}"
-    signature = base64.b64encode(
-        hmac.new(secret_bytes, signed_content.encode(), hashlib.sha256).digest()
-    ).decode()
-    return f"v1,{signature}"
+    # Mirror how Polar signs deliveries: the SDK base64-encodes the whole
+    # secret (whsec_ prefix included) before handing it to the Standard
+    # Webhooks signer. ``Webhook.sign`` returns the full ``v1,<sig>`` value.
+    webhook = Webhook(base64.b64encode(secret.encode()).decode())
+    return webhook.sign(
+        webhook_id,
+        datetime.fromtimestamp(int(timestamp), tz=UTC),
+        body.decode(),
+    )
 
 
 def _webhook_headers(secret: str, body: bytes, *, webhook_id: str) -> dict[str, str]:

@@ -87,16 +87,6 @@ async def polar_webhook(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> Response:
     body = await request.body()
-    print(body)
-    print(dict(request.headers))
-    # TEMPORARY DEBUG ONLY - logs only the last 5 chars + length so it can
-    # be eyeballed against the Polar dashboard without exposing the full
-    # secret. Remove once confirmed.
-    logger.warning(
-        "TEMP DEBUG - runtime POLAR_WEBHOOK_SECRET ends with %r (len=%d)",
-        settings.polar_webhook_secret[-5:],
-        len(settings.polar_webhook_secret),
-    )
     try:
         verify_webhook_signature(
             body, dict(request.headers), settings.polar_webhook_secret

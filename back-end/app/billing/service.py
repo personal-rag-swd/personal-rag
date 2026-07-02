@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
+
+from polar_sdk.webhooks import (
+    WebhookUnknownTypeError,
+    WebhookVerificationError,
+    validate_event,
+)
+from pydantic import ValidationError
 
 from app.billing.exceptions import (
     UsageQuotaExceededError,
@@ -33,7 +37,6 @@ from app.users.models import User
 logger = logging.getLogger(__name__)
 
 _ACTIVE_SUBSCRIPTION_STATUSES = {"active", "trialing"}
-_WEBHOOK_TIMESTAMP_TOLERANCE = timedelta(minutes=5)
 _METER_EVENT_NAME = "llm_usage"
 
 _TIER_PRO = "pro"
@@ -342,87 +345,33 @@ async def get_subscription_status(
 def verify_webhook_signature(
     payload_bytes: bytes, headers: dict[str, str], secret: str
 ) -> None:
-    """Verify a Polar webhook using the Standard Webhooks (svix-compatible) scheme.
+    """Verify a Polar webhook signature using the official Polar SDK.
+
+    Delegates to ``polar_sdk.webhooks.validate_event``, which implements the
+    Standard Webhooks scheme exactly as Polar signs its deliveries (including
+    the non-obvious secret key derivation and the timestamp-tolerance check).
 
     Raises ``WebhookSignatureInvalidError`` on a missing/malformed header, a
     stale timestamp, or a signature mismatch.
     """
-    webhook_id = headers.get("webhook-id")
-    webhook_timestamp = headers.get("webhook-timestamp")
-    webhook_signature = headers.get("webhook-signature")
-    if not webhook_id or not webhook_timestamp or not webhook_signature:
-        logger.warning(
-            "Polar webhook rejected: missing standard-webhooks header(s) "
-            "(id=%s, timestamp=%s, signature=%s)",
-            bool(webhook_id),
-            bool(webhook_timestamp),
-            bool(webhook_signature),
-        )
-        raise WebhookSignatureInvalidError()
-
     try:
-        timestamp = datetime.fromtimestamp(int(webhook_timestamp), tz=UTC)
-    except (ValueError, OSError) as exc:
-        logger.warning(
-            "Polar webhook rejected: malformed webhook-timestamp=%r", webhook_timestamp
-        )
+        validate_event(payload_bytes, headers, secret)
+    except WebhookVerificationError as exc:
+        logger.warning("Polar webhook rejected: %s", exc)
         raise WebhookSignatureInvalidError() from exc
-    skew = datetime.now(UTC) - timestamp
-    if abs(skew) > _WEBHOOK_TIMESTAMP_TOLERANCE:
-        logger.warning(
-            "Polar webhook rejected: timestamp skew %s exceeds tolerance %s "
-            "(check server clock / delivery delay)",
-            skew,
-            _WEBHOOK_TIMESTAMP_TOLERANCE,
-        )
-        raise WebhookSignatureInvalidError()
-
-    secret_material = secret.removeprefix("whsec_")
-    # Polar (like svix) issues this as unpadded base64; re-pad before decoding.
-    secret_material += "=" * (-len(secret_material) % 4)
-    try:
-        secret_bytes = base64.b64decode(secret_material)
-    except (ValueError, TypeError) as exc:
-        logger.warning(
-            "Polar webhook rejected: configured POLAR_WEBHOOK_SECRET is not "
-            "valid base64 after stripping the whsec_ prefix"
-        )
+    except WebhookUnknownTypeError, ValidationError:
+        # The signature is verified before the payload is parsed, so an unknown
+        # event type or a schema the pinned SDK does not model is NOT a
+        # signature failure. Downstream handling works off the raw JSON dict,
+        # so let these through as successfully verified.
+        return
+    except ValueError as exc:
+        # A malformed signature header (non-base64, or missing the "v1," version
+        # prefix) makes the SDK raise a raw decode/parse error before it can
+        # report a mismatch. Pydantic's ValidationError is also a ValueError but
+        # is handled above, so anything reaching here is a bad signature header.
+        logger.warning("Polar webhook rejected: malformed signature header (%s)", exc)
         raise WebhookSignatureInvalidError() from exc
-
-    signed_content = f"{webhook_id}.{webhook_timestamp}.{payload_bytes.decode()}"
-    expected_signature = base64.b64encode(
-        hmac.new(secret_bytes, signed_content.encode(), hashlib.sha256).digest()
-    ).decode()
-
-    provided_signatures = [
-        part.split(",", 1)[1] for part in webhook_signature.split() if "," in part
-    ]
-    if not any(
-        hmac.compare_digest(expected_signature, provided)
-        for provided in provided_signatures
-    ):
-        # None of these values are secrets (signatures/timestamps/body hash
-        # are already visible in plaintext HTTP headers/body on the wire and
-        # in the Polar dashboard) - safe to log in full for diagnosis.
-        secret_fingerprint = hashlib.sha256(secret.encode()).hexdigest()[:8]
-        body_hash = hashlib.sha256(payload_bytes).hexdigest()[:12]
-        logger.warning(
-            "Polar webhook rejected: signature mismatch. "
-            "webhook_id=%s webhook_timestamp=%s body_len=%d body_sha256=%s "
-            "signed_content_len=%d expected_signature=%s "
-            "provided_signatures=%s runtime_secret_fingerprint=%s "
-            "runtime_secret_len=%d",
-            webhook_id,
-            webhook_timestamp,
-            len(payload_bytes),
-            body_hash,
-            len(signed_content),
-            expected_signature,
-            provided_signatures,
-            secret_fingerprint,
-            len(secret),
-        )
-        raise WebhookSignatureInvalidError()
 
 
 async def handle_webhook_event(payload: dict[str, Any]) -> None:
