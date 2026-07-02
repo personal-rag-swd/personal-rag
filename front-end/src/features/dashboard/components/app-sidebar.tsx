@@ -19,11 +19,7 @@ import {
 import { Dialog } from "@/components/ui/dialog"
 import { useNotebooks } from "@/features/notebooks/store/notebook-store"
 import { CreateNotebookDialogContent } from "./dashboard-client"
-import {
-  CreditCardIcon,
-  LayoutDashboardIcon,
-  SearchIcon,
-} from "lucide-react"
+import { LayoutDashboardIcon, SearchIcon } from "lucide-react"
 
 const data = {
   user: {
@@ -43,11 +39,6 @@ const data = {
       title: "Search",
       url: "#",
       icon: <SearchIcon />,
-    },
-    {
-      title: "Billing",
-      url: "/settings/billing",
-      icon: <CreditCardIcon />,
     },
   ],
 }

@@ -1,3 +1,5 @@
+import { Link } from "react-router-dom"
+
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   DropdownMenu,
@@ -105,7 +107,7 @@ export function NavUser({
                 <CircleUserRoundIcon />
                 Account
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem render={<Link to="/settings/billing" />}>
                 <CreditCardIcon />
                 Billing
               </DropdownMenuItem>
