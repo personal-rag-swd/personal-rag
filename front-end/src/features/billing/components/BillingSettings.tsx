@@ -1,5 +1,12 @@
 import { toast } from "sonner"
-import { CreditCardIcon, SparklesIcon } from "lucide-react"
+import { format } from "date-fns"
+import {
+  CalendarClockIcon,
+  CheckIcon,
+  CreditCardIcon,
+  GaugeIcon,
+  SparklesIcon,
+} from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -8,11 +15,12 @@ import {
   CardAction,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
 import { Progress, ProgressTrack, ProgressIndicator } from "@/components/ui/progress"
-import { getErrorMessage } from "@/lib/utils"
+import { cn, getErrorMessage } from "@/lib/utils"
 
 import {
   useCreateCheckoutMutation,
@@ -22,14 +30,29 @@ import {
 } from "../api"
 import type { BillingTier } from "../types"
 
+const FREE_TIER_TOKENS = "1,500,000 tokens/mo"
+
 const PLANS: {
   tier: BillingTier
   name: string
   price: string
   tokens: string
+  perks: string[]
 }[] = [
-  { tier: "pro", name: "Pro", price: "$20/mo", tokens: "5,000,000 tokens/mo" },
-  { tier: "max", name: "Max", price: "$100/mo", tokens: "35,000,000 tokens/mo" },
+  {
+    tier: "pro",
+    name: "Pro",
+    price: "$20/mo",
+    tokens: "5,000,000 tokens/mo",
+    perks: ["Priority ingestion", "Longer chat context", "Email support"],
+  },
+  {
+    tier: "max",
+    name: "Max",
+    price: "$100/mo",
+    tokens: "35,000,000 tokens/mo",
+    perks: ["Priority ingestion", "Longest chat context", "Priority support"],
+  },
 ]
 
 function UsageBar({
@@ -42,12 +65,14 @@ function UsageBar({
   allowance: number
 }) {
   const percent = allowance > 0 ? Math.min(100, (used / allowance) * 100) : 0
+  const remaining = Math.max(0, allowance - used)
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between text-sm">
         <span className="font-medium">{label}</span>
         <span className="text-muted-foreground tabular-nums">
-          {used.toLocaleString()} / {allowance.toLocaleString()}
+          {used.toLocaleString()} / {allowance.toLocaleString()} (
+          {percent.toFixed(1)}%)
         </span>
       </div>
       <Progress value={percent}>
@@ -57,6 +82,9 @@ function UsageBar({
           />
         </ProgressTrack>
       </Progress>
+      <p className="text-xs text-muted-foreground">
+        {remaining.toLocaleString()} tokens remaining this period
+      </p>
     </div>
   )
 }
@@ -69,6 +97,7 @@ export function BillingSettings() {
 
   const isActive = usageQuery.data?.isSubscriptionActive ?? false
   const currentTier = subscriptionQuery.data?.tier ?? null
+  const currentPlan = PLANS.find((plan) => plan.tier === currentTier) ?? null
 
   const handleUpgrade = async (tier: BillingTier) => {
     try {
@@ -93,64 +122,71 @@ export function BillingSettings() {
   }
 
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CreditCardIcon className="size-5" />
-            Billing
-          </CardTitle>
-          <CardDescription>
-            Manage your subscription and monitor AI token usage against the
-            free tier.
-          </CardDescription>
-          <CardAction>
-            {isActive ? (
-              <Badge variant="secondary">
-                {currentTier
-                  ? `${currentTier} — ${subscriptionQuery.data?.subscriptionStatus ?? "active"}`
-                  : (subscriptionQuery.data?.subscriptionStatus ?? "active")}
-              </Badge>
-            ) : (
-              <Badge variant="outline">Free tier</Badge>
+    <div className="mx-auto flex max-w-4xl flex-col gap-6 p-6">
+      <div className="flex flex-col gap-1">
+        <h1 className="flex items-center gap-2 text-2xl font-semibold">
+          <CreditCardIcon className="size-6" />
+          Billing
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          Manage your subscription, track AI token usage, and compare plans.
+        </p>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <GaugeIcon className="size-5" />
+              Current plan
+            </CardTitle>
+            <CardDescription>
+              {currentPlan
+                ? `${currentPlan.name} · ${currentPlan.price} · ${currentPlan.tokens}`
+                : `Free tier · ${FREE_TIER_TOKENS}`}
+            </CardDescription>
+            <CardAction>
+              {isActive ? (
+                <Badge variant="secondary">
+                  {currentTier
+                    ? `${currentTier} — ${subscriptionQuery.data?.subscriptionStatus ?? "active"}`
+                    : (subscriptionQuery.data?.subscriptionStatus ?? "active")}
+                </Badge>
+              ) : (
+                <Badge variant="outline">Free tier</Badge>
+              )}
+            </CardAction>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-5">
+            {usageQuery.data && (
+              <UsageBar
+                label="LLM tokens (this period)"
+                used={usageQuery.data.llmTokensUsed}
+                allowance={usageQuery.data.llmTokensAllowance}
+              />
             )}
-          </CardAction>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-6">
-          {usageQuery.data && (
-            <UsageBar
-              label="LLM tokens (this period)"
-              used={usageQuery.data.llmTokensUsed}
-              allowance={usageQuery.data.llmTokensAllowance}
-            />
-          )}
 
-          {!isActive && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {PLANS.map((plan) => (
-                <Card key={plan.tier}>
-                  <CardHeader>
-                    <CardTitle>{plan.name}</CardTitle>
-                    <CardDescription>
-                      {plan.price} · {plan.tokens}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <Button
-                      className="w-full"
-                      onClick={() => void handleUpgrade(plan.tier)}
-                      disabled={checkoutMutation.isPending}
-                    >
-                      <SparklesIcon className="size-4" />
-                      Upgrade to {plan.name}
-                    </Button>
-                  </CardContent>
-                </Card>
-              ))}
+            <div className="flex flex-wrap gap-4 text-sm">
+              {usageQuery.data && (
+                <div className="flex items-center gap-1.5 text-muted-foreground">
+                  <CalendarClockIcon className="size-4" />
+                  Usage resets{" "}
+                  {format(new Date(usageQuery.data.periodEnd), "MMM d, yyyy")}
+                </div>
+              )}
+              {isActive && subscriptionQuery.data?.currentPeriodEnd && (
+                <div className="flex items-center gap-1.5 text-muted-foreground">
+                  <CreditCardIcon className="size-4" />
+                  Next renewal{" "}
+                  {format(
+                    new Date(subscriptionQuery.data.currentPeriodEnd),
+                    "MMM d, yyyy"
+                  )}
+                </div>
+              )}
             </div>
-          )}
-
-          <div className="flex flex-wrap gap-3">
+          </CardContent>
+          <CardFooter>
             <Button
               variant="outline"
               onClick={() => void handleManageBilling()}
@@ -158,9 +194,71 @@ export function BillingSettings() {
             >
               Manage billing
             </Button>
-          </div>
-        </CardContent>
-      </Card>
+          </CardFooter>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Free tier</CardTitle>
+            <CardDescription>{FREE_TIER_TOKENS}</CardDescription>
+            <CardAction>
+              {currentTier === null && <Badge variant="outline">Current</Badge>}
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            <ul className="flex flex-col gap-1.5 text-sm text-muted-foreground">
+              <li className="flex items-center gap-1.5">
+                <CheckIcon className="size-3.5" />
+                Chat with your notebooks
+              </li>
+              <li className="flex items-center gap-1.5">
+                <CheckIcon className="size-3.5" />
+                Document ingestion & citations
+              </li>
+            </ul>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        {PLANS.map((plan) => {
+          const isCurrent = currentTier === plan.tier
+          return (
+            <Card
+              key={plan.tier}
+              className={cn(isCurrent && "ring-2 ring-primary")}
+            >
+              <CardHeader>
+                <CardTitle>{plan.name}</CardTitle>
+                <CardDescription>
+                  {plan.price} · {plan.tokens}
+                </CardDescription>
+                <CardAction>
+                  {isCurrent && <Badge variant="secondary">Current</Badge>}
+                </CardAction>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                <ul className="flex flex-col gap-1.5 text-sm text-muted-foreground">
+                  {plan.perks.map((perk) => (
+                    <li key={perk} className="flex items-center gap-1.5">
+                      <CheckIcon className="size-3.5" />
+                      {perk}
+                    </li>
+                  ))}
+                </ul>
+                <Button
+                  className="w-full"
+                  onClick={() => void handleUpgrade(plan.tier)}
+                  disabled={checkoutMutation.isPending || isCurrent}
+                >
+                  <SparklesIcon className="size-4" />
+                  {isCurrent ? "Current plan" : `Upgrade to ${plan.name}`}
+                </Button>
+              </CardContent>
+            </Card>
+          )
+        })}
+      </div>
     </div>
   )
 }
