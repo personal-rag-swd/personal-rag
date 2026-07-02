@@ -119,6 +119,77 @@ class TestPolarWebhook:
         assert updated is not None
         assert updated.product_id == settings.polar_max_product_id
 
+    async def test_customer_state_changed_activates_subscription(
+        self, client: AsyncClient, settings: Any
+    ) -> None:
+        secret = "whsec_" + base64.b64encode(b"secret").decode()
+        settings.polar_webhook_secret = secret
+
+        user = await create_user()
+        customer = await BillingCustomer(
+            user_id=user.id, polar_customer_id="cus_state_test"
+        ).insert()
+
+        # customer.state_changed puts the customer id at data["id"] and the
+        # subscription(s) under data["active_subscriptions"] - not customer_id.
+        body = json.dumps(
+            {
+                "type": "customer.state_changed",
+                "data": {
+                    "id": "cus_state_test",
+                    "active_subscriptions": [
+                        {
+                            "id": "sub_state_1",
+                            "status": "active",
+                            "product_id": settings.polar_pro_product_id,
+                        }
+                    ],
+                },
+            }
+        ).encode()
+        headers = _webhook_headers(secret, body, webhook_id="msg_state_1")
+
+        response = await client.post(
+            "/api/v1/billing/webhooks/polar", content=body, headers=headers
+        )
+        assert response.status_code == 200
+
+        updated = await BillingCustomer.find_one({"_id": customer.id})
+        assert updated is not None
+        assert updated.subscription_status == "active"
+        assert updated.subscription_id == "sub_state_1"
+        assert updated.product_id == settings.polar_pro_product_id
+
+    async def test_customer_state_changed_without_subscriptions_downgrades(
+        self, client: AsyncClient, settings: Any
+    ) -> None:
+        secret = "whsec_" + base64.b64encode(b"secret").decode()
+        settings.polar_webhook_secret = secret
+
+        user = await create_user()
+        customer = await BillingCustomer(
+            user_id=user.id,
+            polar_customer_id="cus_state_down",
+            subscription_status="active",
+        ).insert()
+
+        body = json.dumps(
+            {
+                "type": "customer.state_changed",
+                "data": {"id": "cus_state_down", "active_subscriptions": []},
+            }
+        ).encode()
+        headers = _webhook_headers(secret, body, webhook_id="msg_state_down_1")
+
+        response = await client.post(
+            "/api/v1/billing/webhooks/polar", content=body, headers=headers
+        )
+        assert response.status_code == 200
+
+        updated = await BillingCustomer.find_one({"_id": customer.id})
+        assert updated is not None
+        assert updated.subscription_status == "canceled"
+
     async def test_duplicate_webhook_id_is_a_no_op(
         self, client: AsyncClient, settings: Any
     ) -> None:

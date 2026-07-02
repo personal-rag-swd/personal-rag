@@ -359,7 +359,7 @@ def verify_webhook_signature(
     except WebhookVerificationError as exc:
         logger.warning("Polar webhook rejected: %s", exc)
         raise WebhookSignatureInvalidError() from exc
-    except WebhookUnknownTypeError, ValidationError:
+    except (WebhookUnknownTypeError, ValidationError):
         # The signature is verified before the payload is parsed, so an unknown
         # event type or a schema the pinned SDK does not model is NOT a
         # signature failure. Downstream handling works off the raw JSON dict,
@@ -374,9 +374,80 @@ def verify_webhook_signature(
         raise WebhookSignatureInvalidError() from exc
 
 
+def _apply_subscription_fields(
+    billing_customer: BillingCustomer, subscription: dict[str, Any]
+) -> None:
+    """Copy a Polar subscription object's fields onto a ``BillingCustomer``.
+
+    Works for both the ``subscription.*`` event payloads (where ``data`` *is*
+    the subscription) and the ``active_subscriptions`` entries inside a
+    ``customer.state_changed`` payload - the field names match.
+    """
+    billing_customer.subscription_id = subscription.get("id")
+    billing_customer.subscription_status = subscription.get("status")
+    billing_customer.product_id = subscription.get("product_id") or (
+        subscription.get("product") or {}
+    ).get("id")
+    billing_customer.current_period_start = _parse_polar_datetime(
+        subscription.get("current_period_start")
+    )
+    billing_customer.current_period_end = _parse_polar_datetime(
+        subscription.get("current_period_end")
+    )
+    billing_customer.updated_at = datetime.now(UTC)
+
+
+async def _handle_customer_state_changed(data: dict[str, Any]) -> None:
+    """Reconcile a customer's tier from a ``customer.state_changed`` event.
+
+    Polar recommends this event as the canonical source of subscription state:
+    its ``data`` is the customer object (id at ``data["id"]``, not
+    ``customer_id``), carrying the full ``active_subscriptions`` list. We mirror
+    the first active/trialing subscription onto the customer, and downgrade to
+    ``canceled`` when there are none.
+    """
+    polar_customer_id = data.get("id")
+    if not polar_customer_id:
+        logger.warning(
+            "Polar webhook customer.state_changed missing customer id; skipping"
+        )
+        return
+
+    billing_customer = await BillingCustomer.find_one(
+        {"polar_customer_id": polar_customer_id}
+    )
+    if billing_customer is None:
+        logger.warning(
+            "Polar webhook customer.state_changed for unknown customer %s; skipping",
+            polar_customer_id,
+        )
+        return
+
+    active_subscriptions = data.get("active_subscriptions") or []
+    active_subscription = next(
+        (
+            sub
+            for sub in active_subscriptions
+            if sub.get("status") in _ACTIVE_SUBSCRIPTION_STATUSES
+        ),
+        None,
+    )
+    if active_subscription is not None:
+        _apply_subscription_fields(billing_customer, active_subscription)
+    else:
+        billing_customer.subscription_status = "canceled"
+        billing_customer.updated_at = datetime.now(UTC)
+    await billing_customer.save()
+
+
 async def handle_webhook_event(payload: dict[str, Any]) -> None:
     event_type = payload.get("type", "")
     data = payload.get("data", {}) or {}
+
+    if event_type == "customer.state_changed":
+        await _handle_customer_state_changed(data)
+        return
+
     polar_customer_id = data.get("customer_id") or (data.get("customer") or {}).get(
         "id"
     )
@@ -400,18 +471,7 @@ async def handle_webhook_event(payload: dict[str, Any]) -> None:
         "subscription.active",
         "subscription.updated",
     }:
-        billing_customer.subscription_id = data.get("id")
-        billing_customer.subscription_status = data.get("status")
-        billing_customer.product_id = data.get("product_id") or (
-            data.get("product") or {}
-        ).get("id")
-        billing_customer.current_period_start = _parse_polar_datetime(
-            data.get("current_period_start")
-        )
-        billing_customer.current_period_end = _parse_polar_datetime(
-            data.get("current_period_end")
-        )
-        billing_customer.updated_at = datetime.now(UTC)
+        _apply_subscription_fields(billing_customer, data)
         await billing_customer.save()
     elif event_type in {"subscription.canceled", "subscription.revoked"}:
         billing_customer.subscription_status = "canceled"
