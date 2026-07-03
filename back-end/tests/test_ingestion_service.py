@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 
 from app.notebooks.models import NotebookDocument
-from app.notebooks.rag import ingestion_service
+from app.notebooks.rag import document_repository, ingestion_service
 
 pytestmark = pytest.mark.anyio
 
@@ -58,7 +58,7 @@ async def test_run_document_ingestion_embeds_chunks(
             new=AsyncMock(side_effect=fake_insert_many),
         ),
         patch.object(
-            ingestion_service,
+            document_repository,
             "domain_event_bus",
             SimpleNamespace(emit=AsyncMock()),
         ),

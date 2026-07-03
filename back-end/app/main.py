@@ -59,75 +59,9 @@ from app.notebooks.models import (
     NotebookReport,
 )
 from app.notebooks.router import router as notebooks_router
-from app.notebooks.service import run_report_generation
+from app.notebooks.service import recover_pending_reports
 from app.users.models import User
 from app.users.router import router as users_router
-
-_recovered_tasks: set[asyncio.Task[None]] = set()
-
-
-async def _recover_pending_reports() -> None:
-    logger = logging.getLogger("app.startup")
-
-    try:
-        stuck_reports = await NotebookReport.find(
-            {"status": {"$in": ["pending", "generating"]}}
-        ).to_list()
-
-        if not stuck_reports:
-            return
-
-        logger.info(
-            "Recovering %d pending/generating report(s) after restart",
-            len(stuck_reports),
-        )
-
-        for report in stuck_reports:
-            if report.status == "generating":
-                report.status = "pending"
-                await report.save()
-
-            notebook = await Notebook.find_one({"_id": report.notebook_id})
-            user = await User.find_one({"_id": report.user_id})
-            if notebook is None or user is None:
-                logger.warning(
-                    "Skipping report %s: notebook or user not found",
-                    report.id,
-                )
-                report.status = "failed"
-                report.error_message = (
-                    "Recovery failed: associated notebook or user no longer exists."
-                )
-                await report.save()
-                continue
-
-            from app.notebooks.service import build_report_context
-
-            context = await build_report_context(notebook, user)
-            if not context:
-                logger.warning(
-                    "Skipping report %s: no indexed documents available for context",
-                    report.id,
-                )
-                report.status = "failed"
-                report.error_message = "Recovery failed: no indexed documents found."
-                await report.save()
-                continue
-
-            task = asyncio.create_task(
-                run_report_generation(
-                    report_id=report.id,
-                    report_type=report.report_type,
-                    context=context,
-                    instructions=report.additional_instructions,
-                    detail_level=report.detail_level,
-                )
-            )
-            _recovered_tasks.add(task)
-            task.add_done_callback(_recovered_tasks.discard)
-            logger.info("Re-queued report %s (type=%s)", report.id, report.report_type)
-    except Exception:
-        logger.exception("Failed to recover pending reports")
 
 
 @asynccontextmanager
@@ -173,7 +107,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     usage_emission_task = asyncio.create_task(run_usage_emission_task(settings))
 
-    await _recover_pending_reports()
+    await recover_pending_reports()
 
     try:
         yield
