@@ -52,6 +52,7 @@ class TestBillingRouter:
             user_id=user.id,
             quantity=250,
             idempotency_key="test:router:usage",
+            settings=settings,
         )
         response = await client.get("/api/v1/billing/usage", headers=headers)
         assert response.json()["llm_tokens_used"] == 250

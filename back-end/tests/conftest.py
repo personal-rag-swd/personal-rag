@@ -23,6 +23,7 @@ from app.billing.models import (
     ProcessedWebhookEvent,
     UsageAllowance,
     UsageEventLog,
+    UsageWindowCounter,
 )
 from app.billing.router import router as billing_router
 from app.core.config import Settings, get_settings
@@ -60,6 +61,7 @@ DOCUMENT_MODELS = [
     BillingCustomer,
     UsageEventLog,
     UsageAllowance,
+    UsageWindowCounter,
     ProcessedWebhookEvent,
 ]
 
