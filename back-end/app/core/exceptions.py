@@ -3,6 +3,15 @@ from typing import Any
 from fastapi import status
 
 
+class TransientProviderError(RuntimeError):
+    """A retryable upstream provider failure (rate limit, 5xx, network).
+
+    Raised by the provider layers (e.g. embeddings) so callers can distinguish
+    "try again later" from a permanently failing input without knowing each
+    provider SDK's exception hierarchy.
+    """
+
+
 class AppError(Exception):
     def __init__(
         self,

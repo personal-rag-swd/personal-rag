@@ -32,6 +32,13 @@ async def search_notebook_chunks(
     top_k: int = 6,
     document_ids: list[UUID] | None = None,
 ) -> list[RetrievedChunk]:
+    # Guard degenerate queries here so every caller is covered: an empty query
+    # would otherwise burn an LLM rewrite call and an embedding call for
+    # meaningless results (and some embedding providers reject empty input).
+    query = query.strip()
+    if not query:
+        return []
+
     query = await rewrite_query_text(query, settings)
     query_vector = await embed_text(query)
 
@@ -52,34 +59,40 @@ async def search_notebook_chunks(
                 "queryVector": query_vector,
                 "numCandidates": top_k * 10,
                 "limit": top_k,
-                "similarity": "cosine",
                 "filter": search_filter,
             }
         },
     ]
 
     results = await NotebookDocumentChunk.aggregate(pipeline).to_list()
+    if not results:
+        return []
 
-    # Raw aggregate rows carry document_id as a BSON value; RetrievedChunk's
-    # ``UUID`` field coerces it so the downstream lookup uses real UUIDs.
-    chunks = [
-        RetrievedChunk(
-            document_id=row["document_id"],
-            filename="",
-            chunk_index=row["chunk_index"],
-            content=row["content"],
-            metadata=row.get("chunk_metadata", {}),
-        )
-        for row in results
-    ]
-
-    doc_ids = {chunk.document_id for chunk in chunks}
+    doc_ids = {_as_uuid(row["document_id"]) for row in results}
     documents = await NotebookDocument.find({"_id": {"$in": list(doc_ids)}}).to_list()
     filename_by_id = {doc.id: doc.filename for doc in documents}
 
-    for chunk in chunks:
-        chunk.filename = filename_by_id.get(chunk.document_id, "unknown")
-        if chunk.metadata.get("chunk_type") == "image":
-            chunk.chunk_type = "image"
-
+    chunks = []
+    for row in results:
+        document_id = _as_uuid(row["document_id"])
+        metadata = row.get("chunk_metadata", {})
+        chunks.append(
+            RetrievedChunk(
+                document_id=document_id,
+                filename=filename_by_id.get(document_id, "unknown"),
+                chunk_index=row["chunk_index"],
+                content=row["content"],
+                metadata=metadata,
+                chunk_type="image" if metadata.get("chunk_type") == "image" else "text",
+            )
+        )
     return chunks
+
+
+def _as_uuid(value: object) -> UUID:
+    """Coerce a raw aggregate row's BSON document_id to a real UUID."""
+    if isinstance(value, Binary):
+        return value.as_uuid()
+    if isinstance(value, UUID):
+        return value
+    return UUID(str(value))

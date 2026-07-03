@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     enable_query_rewrite: bool = True
     notebook_chunk_size: int = 1000
     notebook_chunk_overlap: int = 200
+    # Ingestion ceilings: bound embedding spend, vector rows, and processing
+    # time for a single uploaded document.
+    notebook_max_document_bytes: int = 50 * 1024 * 1024
+    notebook_max_chunks_per_document: int = 5000
     file_ingestion_processing_timeout_minutes: int = 15
     rabbitmq_consumer_enabled: bool = False
     # When disabled, use process_unprocessed_notebook_documents() polling fallback

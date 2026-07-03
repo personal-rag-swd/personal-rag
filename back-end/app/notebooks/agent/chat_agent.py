@@ -6,14 +6,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-import obstore
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.messages import BinaryContent
+from pydantic_ai.messages import BinaryContent, ToolReturn
 
 from app.core.config import Settings
-from app.core.s3 import get_s3_store
+from app.core.s3 import get_object_bytes, get_s3_store
 from app.notebooks.models import Notebook
 from app.notebooks.prompt import CHAT_SYSTEM_INSTRUCTIONS, build_context_block
+from app.notebooks.prompt.context_prompts import chunk_to_source
 from app.notebooks.rag.search_service import RetrievedChunk, search_notebook_chunks
 from app.users.models import User
 
@@ -40,21 +40,40 @@ notebook_chat_agent = Agent(
 @notebook_chat_agent.tool
 async def search_notebook_context(
     ctx: RunContext[NotebookChatDeps], query: str
-) -> str | list[str | BinaryContent]:
+) -> ToolReturn:
     """Search indexed notebook sources and return labeled excerpts to cite."""
-    chunks = await search_notebook_chunks(
-        notebook=ctx.deps.notebook,
-        current_user=ctx.deps.current_user,
-        query=query,
-        settings=ctx.deps.settings,
-        top_k=ctx.deps.settings.notebook_retrieval_top_k,
-        document_ids=ctx.deps.document_ids,
-    )
+    # One error boundary for the whole retrieval path (rewrite, embed, vector
+    # search): a transient provider or database failure must degrade the answer,
+    # not abort the AG-UI stream mid-turn.
+    try:
+        chunks = await search_notebook_chunks(
+            notebook=ctx.deps.notebook,
+            current_user=ctx.deps.current_user,
+            query=query,
+            settings=ctx.deps.settings,
+            top_k=ctx.deps.settings.notebook_retrieval_top_k,
+            document_ids=ctx.deps.document_ids,
+        )
+    except Exception:
+        logger.exception(
+            "Notebook search failed for notebook %s; degrading without sources",
+            ctx.deps.notebook.id,
+        )
+        return ToolReturn(
+            return_value=(
+                "Notebook search is temporarily unavailable. Answer from the "
+                "conversation so far and tell the user that source retrieval failed."
+            )
+        )
     context_block = build_context_block(chunks)
+    # Structured sources ride on the tool message's metadata (persisted with
+    # history, never sent to the LLM) so transcripts don't have to re-parse
+    # the prompt text.
+    metadata = {"sources": [chunk_to_source(chunk) for chunk in chunks]}
 
     image_chunks = [chunk for chunk in chunks if chunk.chunk_type == "image"]
     if not image_chunks:
-        return context_block
+        return ToolReturn(return_value=context_block, metadata=metadata)
 
     store = get_s3_store(ctx.deps.settings)
     fetched = await asyncio.gather(
@@ -62,7 +81,7 @@ async def search_notebook_context(
     )
     parts: list[str | BinaryContent] = [context_block]
     parts.extend(part for part in fetched if part is not None)
-    return parts
+    return ToolReturn(return_value=parts, metadata=metadata)
 
 
 async def _fetch_image_content(
@@ -75,8 +94,7 @@ async def _fetch_image_content(
         return None
 
     try:
-        result = await obstore.get_async(store, s3_key)
-        data = bytes(await result.bytes_async())
+        data = await get_object_bytes(store, s3_key)
         return BinaryContent(data=data, media_type=media_type)
     except Exception:
         logger.warning(

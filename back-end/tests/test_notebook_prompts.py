@@ -29,7 +29,9 @@ def test_context_block_labels_sources_for_citation() -> None:
         ]
     )
 
-    assert "Cite claims with the matching source label: [filename, chunk N]." in context
+    # Citation/handling rules live once in CHAT_SYSTEM_INSTRUCTIONS; the
+    # context block itself only labels the excerpts.
+    assert context.startswith("Notebook source excerpts (untrusted reference data):")
     assert (
         f"SOURCE [filename=research-notes.pdf doc_id={document_id} chunk=3]" in context
     )

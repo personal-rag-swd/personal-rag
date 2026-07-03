@@ -17,8 +17,13 @@ from pydantic_ai.messages import BinaryContent
 from app.core.config import Settings
 from app.core.embedding_provider import embed_texts
 from app.core.event_bus import domain_event_bus
-from app.core.llm_provider import chat_provider_is_configured, resolve_chat_provider
-from app.core.s3 import get_s3_store
+from app.core.exceptions import TransientProviderError
+from app.core.llm_provider import (
+    chat_provider_is_configured,
+    resolve_chat_provider,
+    run_agent_with_retry,
+)
+from app.core.s3 import get_object_bytes, get_s3_store
 from app.notebooks.domain_events import (
     DocumentEvent,
     DocumentFailed,
@@ -82,11 +87,17 @@ def _image_chunk_document(
 
 
 async def _describe_image(image_bytes: bytes, label: str, media_type: str) -> str:
-    """Call the vision LLM to describe an image; fall back to label on any failure."""
+    """Call the vision LLM to describe an image; fall back to label on any failure.
+
+    Retries transient provider errors first (via the shared helper) — a fallback
+    placeholder is baked into the index permanently, degrading every future
+    retrieval for the document, so it should be a last resort.
+    """
     if not chat_provider_is_configured():
         return f"Image: {label}"
     try:
-        result = await image_description_agent.run(
+        result = await run_agent_with_retry(
+            image_description_agent,
             [BinaryContent(data=image_bytes, media_type=media_type)],
             model=resolve_chat_provider(),
         )
@@ -478,9 +489,14 @@ async def _run_document_ingestion(
                 "Cannot fetch document from S3 without bucket/key for ingestion"
             )
 
-        result = await obstore.get_async(store, document.s3_key)
-        body = bytes(await result.bytes_async())
+        body = await get_object_bytes(store, document.s3_key)
         source_key = document.s3_key
+
+    if len(body) > settings.notebook_max_document_bytes:
+        raise ValueError(
+            f"Document is {len(body)} bytes, above the "
+            f"{settings.notebook_max_document_bytes}-byte ingestion limit"
+        )
 
     logger.info(
         "Ingesting document %s (%s bytes): starting chunking...",
@@ -503,7 +519,7 @@ async def _run_document_ingestion(
     else:
         # chunk_document is pure CPU (pymupdf/docx parsing) — keep it off the
         # event loop so ingestion doesn't stall the API server.
-        split_docs = await asyncio.to_thread(
+        chunking = asyncio.to_thread(
             chunk_document,
             ChunkingRequest(
                 content=body,
@@ -514,17 +530,29 @@ async def _run_document_ingestion(
             settings,
         )
         if suffix == ".pdf" and document.s3_bucket and document.s3_key and store:
-            split_docs = split_docs + await _extract_pdf_images(document, body, store)
+            # Text chunking and embedded-image extraction are independent
+            # passes over the same bytes — run them concurrently.
+            split_docs, image_docs = await asyncio.gather(
+                chunking, _extract_pdf_images(document, body, store)
+            )
+            split_docs = split_docs + image_docs
+        else:
+            split_docs = await chunking
 
     split_docs = [doc for doc in split_docs if doc.page_content.strip()]
     if not split_docs:
         raise ValueError("No extractable text content in document")
+    if len(split_docs) > settings.notebook_max_chunks_per_document:
+        raise ValueError(
+            f"Document produced {len(split_docs)} chunks, above the "
+            f"{settings.notebook_max_chunks_per_document}-chunk ingestion limit"
+        )
     chunk_texts = [doc.page_content for doc in split_docs]
 
     logger.info(
         "Document %s split into %d chunk(s).", document.filename, len(chunk_texts)
     )
-    if len("".join(chunk_texts).strip()) < 20:
+    if sum(len(text) for text in chunk_texts) < 20:
         logger.warning(
             "Extracted unusually small text content from %s", document.filename
         )
@@ -615,18 +643,18 @@ async def ingest_document_by_id(
     try:
         resolved_store = store or get_s3_store(settings)
         await _run_document_ingestion(document, settings, resolved_store)
+    except (obstore.exceptions.BaseError, TransientProviderError) as exc:
+        logger.exception(
+            "Notebook document ingestion hit a transient error for %s", document_id
+        )
+        await _record_ingestion_outcome(
+            document_id,
+            status="uploaded",
+            error_message=None,
+            event=DocumentUploaded,
+        )
+        raise TransientIngestionError(str(exc)) from exc
     except Exception as exc:
-        if isinstance(exc, obstore.exceptions.BaseError):
-            logger.exception(
-                "Notebook document ingestion hit a transient error for %s", document_id
-            )
-            await _record_ingestion_outcome(
-                document_id,
-                status="uploaded",
-                error_message=None,
-                event=DocumentUploaded,
-            )
-            raise TransientIngestionError(str(exc)) from exc
         logger.exception("Notebook document ingestion failed for %s", document_id)
         await _record_ingestion_outcome(
             document_id,

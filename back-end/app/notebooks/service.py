@@ -48,6 +48,8 @@ from app.notebooks.models import (
     NotebookMessage,
     NotebookReport,
 )
+from app.notebooks.prompt.context_prompts import source_block
+from app.notebooks.rag.search_service import RetrievedChunk
 from app.notebooks.schemas import (
     BlogPostReport,
     BriefingDocReport,
@@ -220,9 +222,19 @@ async def build_report_context(notebook: Notebook, current_user: User) -> str:
     parts: list[str] = []
     total = 0
     for chunk in chunks:
-        filename = doc_map.get(str(chunk.document_id), "unknown")
-        header = f"[file={filename} chunk={chunk.chunk_index}]"
-        block = f"{header}\n{chunk.content}"
+        metadata = chunk.chunk_metadata or {}
+        # Same SOURCE grammar as chat context blocks, so models see one
+        # labeling convention and any citations they emit resolve the same way.
+        block = source_block(
+            RetrievedChunk(
+                document_id=chunk.document_id,
+                filename=doc_map.get(str(chunk.document_id), "unknown"),
+                chunk_index=chunk.chunk_index,
+                content=chunk.content,
+                metadata=metadata,
+                chunk_type="image" if metadata.get("chunk_type") == "image" else "text",
+            )
+        )
         if total + len(block) > _REPORT_CONTEXT_CHAR_LIMIT:
             break
         parts.append(block)

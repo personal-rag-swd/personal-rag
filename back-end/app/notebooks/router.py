@@ -7,7 +7,6 @@ from typing import Annotated
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
-import obstore
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -23,8 +22,8 @@ from pydantic_ai.ui.ag_ui import AGUIAdapter
 
 from app.billing.service import check_quota_and_raise, record_usage_event
 from app.core.config import Settings, get_settings
-from app.core.llm_provider import resolve_chat_provider
-from app.core.s3 import generate_presigned_get_url, get_s3_store
+from app.core.llm_provider import chat_provider_is_configured, resolve_chat_provider
+from app.core.s3 import generate_presigned_get_url, get_object_bytes, get_s3_store
 from app.notebooks.agent import (
     NotebookChatDeps,
     notebook_chat_agent,
@@ -37,6 +36,7 @@ from app.notebooks.events import (
 from app.notebooks.exceptions import (
     DocumentContentUnavailableError,
     DocumentNotFoundError,
+    LLMNotConfiguredError,
 )
 from app.notebooks.memory import (
     append_notebook_chat_history,
@@ -299,10 +299,9 @@ async def read_notebook_document_pdf_inline(
         raise DocumentContentUnavailableError()
 
     try:
-        result = await obstore.get_async(get_s3_store(settings), document.s3_key)
+        pdf_bytes = await get_object_bytes(get_s3_store(settings), document.s3_key)
     except FileNotFoundError as exc:
         raise DocumentNotFoundError() from exc
-    pdf_bytes = bytes(await result.bytes_async())
     safe_filename = _safe_pdf_filename(document.filename)
 
     async def stream_pdf() -> AsyncIterator[bytes]:
@@ -341,10 +340,9 @@ async def download_notebook_document(
         if not document.s3_key:
             raise DocumentContentUnavailableError()
         try:
-            result = await obstore.get_async(get_s3_store(settings), document.s3_key)
+            body = await get_object_bytes(get_s3_store(settings), document.s3_key)
         except FileNotFoundError as exc:
             raise DocumentNotFoundError() from exc
-        body = bytes(await result.bytes_async())
 
     async def stream_document() -> AsyncIterator[bytes]:
         yield body
@@ -397,8 +395,13 @@ async def chat_notebook_route(
     request: Request,
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> Response:
+    if not chat_provider_is_configured():
+        raise LLMNotConfiguredError("openrouter")
+
     notebook = await get_notebook(notebook_id, current_user)
-    message_history = await load_notebook_chat_history(notebook)
+    # keep_recent_messages only keeps the last ~15 conversational messages, so
+    # cap the read instead of loading a long-lived notebook's entire history.
+    message_history = await load_notebook_chat_history(notebook, limit=50)
     settings = get_settings()
 
     await check_quota_and_raise(current_user.id, 0, settings)
