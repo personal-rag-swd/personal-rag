@@ -14,8 +14,6 @@ from app.notebooks.models import Notebook, NotebookDocumentChunk
 from app.notebooks.rag.document_chunker import (
     ChunkingRequest,
     chunk_document,
-    chunk_docx,
-    chunk_pdf,
 )
 from app.notebooks.rag.query_rewrite_agent import (
     rewrite_query_text,
@@ -44,7 +42,7 @@ def settings() -> Settings:
     )
 
 
-def test_docx_chunking_includes_table_text() -> None:
+def test_docx_chunking_includes_table_text(settings: Settings) -> None:
     doc = DocxDocument()
     doc.add_paragraph("Intro paragraph")
     table = doc.add_table(rows=1, cols=2)
@@ -54,15 +52,14 @@ def test_docx_chunking_includes_table_text() -> None:
     buffer = io.BytesIO()
     doc.save(buffer)
 
-    chunks = chunk_docx(
+    chunks = chunk_document(
         ChunkingRequest(
             content=buffer.getvalue(),
             filename="sample.docx",
             source="docx-source",
             document_id="doc-1",
         ),
-        chunk_size=1000,
-        chunk_overlap=200,
+        settings,
     )
 
     combined = "\n".join(chunk.page_content for chunk in chunks)
@@ -70,7 +67,9 @@ def test_docx_chunking_includes_table_text() -> None:
     assert "Header A | Header B" in combined
 
 
-def test_pdf_chunking_extracts_simple_text(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pdf_chunking_extracts_simple_text(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
     monkeypatch.setattr(chunking_module.pymupdf, "open", lambda **kwargs: "fake_doc")
     monkeypatch.setattr(
         chunking_module.pymupdf4llm,
@@ -78,15 +77,14 @@ def test_pdf_chunking_extracts_simple_text(monkeypatch: pytest.MonkeyPatch) -> N
         lambda doc: "PDF text",
     )
 
-    chunks = chunk_pdf(
+    chunks = chunk_document(
         ChunkingRequest(
             content=b"%PDF-1.7",
             filename="sample.pdf",
             source="pdf-source",
             document_id="doc-2",
         ),
-        chunk_size=1000,
-        chunk_overlap=200,
+        settings,
     )
 
     assert any("PDF text" in chunk.page_content for chunk in chunks)
@@ -95,17 +93,22 @@ def test_pdf_chunking_extracts_simple_text(monkeypatch: pytest.MonkeyPatch) -> N
 def test_chunk_document_uses_settings_for_docx(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, int] = {}
 
-    def fake_chunk_docx(
-        request: ChunkingRequest,
+    def fake_split_text(
+        text: str,
         *,
+        source: str,
+        document_id: str,
         chunk_size: int,
         chunk_overlap: int,
-    ):
+    ) -> list:
         captured["chunk_size"] = chunk_size
         captured["chunk_overlap"] = chunk_overlap
         return []
 
-    monkeypatch.setitem(chunking_module.ENGINE_BY_EXTENSION, ".docx", fake_chunk_docx)
+    monkeypatch.setitem(
+        chunking_module.EXTRACTOR_BY_EXTENSION, ".docx", lambda request: "docx text"
+    )
+    monkeypatch.setattr(chunking_module, "split_text", fake_split_text)
 
     request = ChunkingRequest(
         content=b"docx-bytes",
@@ -129,7 +132,7 @@ def test_chunk_document_uses_settings_for_docx(monkeypatch: pytest.MonkeyPatch) 
     assert captured == {"chunk_size": 2048, "chunk_overlap": 128}
 
 
-def test_chunk_document_rejects_unsupported_extension() -> None:
+def test_chunk_document_rejects_unsupported_extension(settings: Settings) -> None:
     request = ChunkingRequest(
         content=b"plain text",
         filename="sample.csv",
@@ -138,7 +141,7 @@ def test_chunk_document_rejects_unsupported_extension() -> None:
     )
 
     with pytest.raises(ValueError, match=r"Unsupported file type: \.csv"):
-        chunk_document(request)
+        chunk_document(request, settings)
 
 
 @pytest.mark.anyio

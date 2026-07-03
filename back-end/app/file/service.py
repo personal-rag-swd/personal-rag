@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from uuid import UUID
 
@@ -8,7 +8,6 @@ import obstore
 import obstore.exceptions
 
 from app.core.config import Settings
-from app.core.event_bus import domain_event_bus
 from app.core.s3 import (
     _build_s3_store,
     generate_presigned_get_url,
@@ -27,8 +26,10 @@ from app.file.schemas import (
     PresignedUrlResponse,
     UploadFailedRequest,
 )
-from app.notebooks.domain_events import DocumentFailed
-from app.notebooks.models import NotebookDocument
+from app.notebooks.rag.ingestion_service import (
+    mark_document_upload_failed,
+    register_pending_notebook_document,
+)
 from app.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -106,16 +107,14 @@ async def generate_presigned_url_service(
         raise PresignedUrlGenerationFailedError() from exc
 
     if operation == "upload" and request.notebook_id is not None:
-        document = NotebookDocument(
+        await register_pending_notebook_document(
             notebook_id=request.notebook_id,
             user_id=current_user.id,
-            s3_bucket=settings.s3_bucket,
-            s3_key=s3_key,
+            bucket=settings.s3_bucket,
+            key=s3_key,
             filename=cleaned_name,
             content_type=request.content_type,
-            status="pending",
         )
-        await document.insert()
 
     return PresignedUrlResponse(url=presigned_url, key=s3_key)
 
@@ -123,19 +122,9 @@ async def generate_presigned_url_service(
 async def mark_upload_failed(
     request: UploadFailedRequest, user_id: UUID
 ) -> dict[str, object]:
-    document = await NotebookDocument.find_one(
-        {"s3_key": request.key, "user_id": user_id},
+    updated = await mark_document_upload_failed(
+        key=request.key,
+        user_id=user_id,
+        error_message=request.error_message,
     )
-    if document is None:
-        return {"status": "ok", "updated": False}
-    if document.status in {"indexed", "processing", "uploaded"}:
-        return {"status": "ok", "updated": True}
-    document.status = "failed"
-    document.error_message = (
-        request.error_message
-        or "Upload failed before object storage accepted the file."
-    )[:4000]
-    document.updated_at = datetime.now(UTC)
-    await document.save()
-    await domain_event_bus.emit(DocumentFailed(document))
-    return {"status": "ok", "updated": True}
+    return {"status": "ok", "updated": updated}

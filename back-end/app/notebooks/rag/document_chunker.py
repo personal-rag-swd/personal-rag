@@ -4,19 +4,20 @@ import io
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pymupdf
 import pymupdf4llm
 from docx import Document as DocxDocument
+from docx.table import Table as DocxTable
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from app.core.config import Settings
+if TYPE_CHECKING:
+    from app.core.config import Settings
 
 logger = logging.getLogger(__name__)
 
-CHUNK_SIZE = 1000
-CHUNK_OVERLAP = 200
 # Extensions handled by chunk_document() (text-extraction engines below).
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
 # Canonical IANA image MIME types keyed by bare extension (no leading dot).
@@ -48,8 +49,8 @@ def split_text(
     *,
     source: str,
     document_id: str,
-    chunk_size: int = CHUNK_SIZE,
-    chunk_overlap: int = CHUNK_OVERLAP,
+    chunk_size: int,
+    chunk_overlap: int,
 ) -> list[Document]:
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
@@ -64,124 +65,75 @@ def split_text(
     return docs
 
 
-def chunk_pdf(
-    request: ChunkingRequest,
-    *,
-    chunk_size: int = CHUNK_SIZE,
-    chunk_overlap: int = CHUNK_OVERLAP,
-) -> list[Document]:
-    logger.info(
-        "Extracting text from PDF: filename=%s, source=%s, size=%d bytes",
-        request.filename,
-        request.source,
-        len(request.content),
-    )
+def _extract_pdf_text(request: ChunkingRequest) -> str:
     doc = pymupdf.open(stream=request.content, filetype="pdf")
     extracted_text = pymupdf4llm.to_markdown(doc)
     if not isinstance(extracted_text, str):
         raise TypeError(
             f"pymupdf4llm.to_markdown returned unexpected type: {type(extracted_text)}"
         )
-    return split_text(
-        extracted_text,
-        source=request.source,
-        document_id=request.document_id,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-    )
+    return extracted_text
 
 
-def chunk_docx(
-    request: ChunkingRequest,
-    *,
-    chunk_size: int = CHUNK_SIZE,
-    chunk_overlap: int = CHUNK_OVERLAP,
-) -> list[Document]:
-    logger.info(
-        "Extracting text from DOCX: filename=%s, source=%s, size=%d bytes",
-        request.filename,
-        request.source,
-        len(request.content),
-    )
+def _docx_table_rows(table: DocxTable) -> list[str]:
+    rows: list[str] = []
+    for row in table.rows:
+        # Deduplicate adjacent merged cells that repeat the same text
+        seen: set[str] = set()
+        cells: list[str] = []
+        for cell in row.cells:
+            text = cell.text.strip()
+            if text and text not in seen:
+                seen.add(text)
+                cells.append(text)
+        if cells:
+            rows.append(" | ".join(cells))
+    return rows
+
+
+def _extract_docx_text(request: ChunkingRequest) -> str:
     doc = DocxDocument(io.BytesIO(request.content))
-    paragraphs = [
-        paragraph.text.strip() for paragraph in doc.paragraphs if paragraph.text.strip()
-    ]
-    table_rows: list[str] = []
-    for table in doc.tables:
-        for row in table.rows:
-            # Deduplicate adjacent merged cells that repeat the same text
-            seen: set[str] = set()
-            cells: list[str] = []
-            for cell in row.cells:
-                text = cell.text.strip()
-                if text and text not in seen:
-                    seen.add(text)
-                    cells.append(text)
-            if cells:
-                table_rows.append(" | ".join(cells))
-    extracted_parts = paragraphs + table_rows
-    extracted_text = "\n".join(extracted_parts)
-    return split_text(
-        extracted_text,
-        source=request.source,
-        document_id=request.document_id,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-    )
+    parts: list[str] = []
+    # iter_inner_content yields paragraphs and tables in document order,
+    # unlike doc.paragraphs + doc.tables which regroups them by kind.
+    for item in doc.iter_inner_content():
+        if isinstance(item, DocxTable):
+            parts.extend(_docx_table_rows(item))
+        elif item.text.strip():
+            parts.append(item.text.strip())
+    return "\n".join(parts)
 
 
-def chunk_text(
-    request: ChunkingRequest,
-    *,
-    chunk_size: int = CHUNK_SIZE,
-    chunk_overlap: int = CHUNK_OVERLAP,
-) -> list[Document]:
-    logger.info(
-        "Extracting text from plain/markdown text: filename=%s, source=%s, size=%d bytes",
-        request.filename,
-        request.source,
-        len(request.content),
-    )
-    extracted_text = request.content.decode("utf-8", errors="ignore")
-    return split_text(
-        extracted_text,
-        source=request.source,
-        document_id=request.document_id,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-    )
+def _extract_plain_text(request: ChunkingRequest) -> str:
+    return request.content.decode("utf-8", errors="ignore")
 
 
-ENGINE_BY_EXTENSION = {
-    ".pdf": chunk_pdf,
-    ".docx": chunk_docx,
-    ".txt": chunk_text,
-    ".md": chunk_text,
+EXTRACTOR_BY_EXTENSION = {
+    ".pdf": _extract_pdf_text,
+    ".docx": _extract_docx_text,
+    ".txt": _extract_plain_text,
+    ".md": _extract_plain_text,
 }
 
 
-def chunk_document(
-    request: ChunkingRequest, settings: Settings | None = None
-) -> list[Document]:
+def chunk_document(request: ChunkingRequest, settings: Settings) -> list[Document]:
     suffix = Path(request.filename).suffix.lower()
     if suffix not in SUPPORTED_EXTENSIONS:
         raise ValueError(f"Unsupported file type: {suffix or 'unknown'}")
 
-    engine = ENGINE_BY_EXTENSION[suffix]
-    chunk_size = settings.notebook_chunk_size if settings is not None else CHUNK_SIZE
-    chunk_overlap = (
-        settings.notebook_chunk_overlap if settings is not None else CHUNK_OVERLAP
-    )
     logger.info(
-        "Starting chunk_document processing: filename=%s, size=%d bytes, format=%s, chunk_size=%d",
+        "Extracting text: filename=%s, source=%s, size=%d bytes, format=%s, chunk_size=%d",
         request.filename,
+        request.source,
         len(request.content),
         suffix,
-        chunk_size,
+        settings.notebook_chunk_size,
     )
-    return engine(
-        request,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
+    extracted_text = EXTRACTOR_BY_EXTENSION[suffix](request)
+    return split_text(
+        extracted_text,
+        source=request.source,
+        document_id=request.document_id,
+        chunk_size=settings.notebook_chunk_size,
+        chunk_overlap=settings.notebook_chunk_overlap,
     )

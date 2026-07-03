@@ -40,11 +40,6 @@ class DocumentProcessing(DocumentEvent):
 
 
 @dataclass(frozen=True, eq=False)
-class DocumentIndexing(DocumentEvent):
-    """Chunks were stored; awaiting the vector index (status ``indexing``)."""
-
-
-@dataclass(frozen=True, eq=False)
 class DocumentIndexed(DocumentEvent):
     """Ingestion finished and the document is searchable (status ``indexed``)."""
 

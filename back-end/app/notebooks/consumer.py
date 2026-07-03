@@ -15,7 +15,6 @@ from pydantic import BaseModel
 from app.core.config import Settings
 from app.notebooks.models import NotebookDocument
 from app.notebooks.rag.ingestion_service import (
-    claim_document_for_ingestion,
     fail_stale_pending_documents,
     fail_stale_processing_documents,
     ingest_document_by_id,
@@ -104,23 +103,14 @@ def parse_minio_object_created_events(
                 )
         return events
 
-    if (
-        _is_object_created_event(parsed.EventName or parsed.eventName)
-        and parsed.bucket
-        and parsed.Key
-    ):
+    # Flat payloads come in two casings ("EventName"/"Key" and "eventName"/"key").
+    event_name = parsed.EventName or parsed.eventName
+    key = parsed.Key or parsed.key
+    if _is_object_created_event(event_name) and parsed.bucket and key:
         events.append(
             ParsedMinioEvent(
                 bucket=parsed.bucket,
-                key=_normalize_object_key(parsed.bucket, parsed.Key),
-                size=parsed.size,
-            )
-        )
-    elif _is_object_created_event(parsed.eventName) and parsed.bucket and parsed.key:
-        events.append(
-            ParsedMinioEvent(
-                bucket=parsed.bucket,
-                key=_normalize_object_key(parsed.bucket, parsed.key),
+                key=_normalize_object_key(parsed.bucket, key),
                 size=parsed.size,
             )
         )
@@ -211,19 +201,9 @@ async def _process_message(body: bytes, settings: Settings) -> None:
             )
             continue
 
-        claimed = await claim_document_for_ingestion(document.id, size=event.size)
-        if claimed is None:
-            logger.info("Skipping already-claimed document %s", document.id)
-            continue
-
+        await ingest_document_by_id(document.id, settings, size=event.size)
         logger.info(
-            "Claimed document %s (%s) for ingestion", claimed.id, claimed.filename
-        )
-        await ingest_document_by_id(
-            claimed.id, settings, require_processing_status=True
-        )
-        logger.info(
-            "Ingestion complete for document %s (%s)", claimed.id, claimed.filename
+            "Ingestion handled for document %s (%s)", document.id, document.filename
         )
 
 
