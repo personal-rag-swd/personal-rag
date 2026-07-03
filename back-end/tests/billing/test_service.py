@@ -10,6 +10,7 @@ from uuid import uuid4
 import pytest
 
 from app.billing.exceptions import (
+    NoActiveBillingCustomerError,
     UsageQuotaExceededError,
     WebhookSignatureInvalidError,
 )
@@ -20,6 +21,7 @@ from app.billing.models import (
     UsageWindowCounter,
 )
 from app.billing.service import (
+    change_subscription_plan,
     check_quota_and_raise,
     create_checkout_session,
     create_customer_portal_session,
@@ -321,6 +323,56 @@ class TestPolarCustomerAndCheckout:
         fake_client = FakePolarClient()
         url = await create_customer_portal_session(user, settings, client=fake_client)
         assert url == "https://sandbox.polar.sh/portal/fake"
+
+
+class TestChangeSubscriptionPlan:
+    async def test_updates_existing_subscription_instead_of_checkout(
+        self, app: Any, settings: Any
+    ) -> None:
+        user = await create_user()
+        await BillingCustomer(
+            user_id=user.id,
+            polar_customer_id="cus_change",
+            subscription_id="sub_change_1",
+            subscription_status="active",
+            product_id=settings.polar_pro_product_id,
+        ).insert()
+        fake_client = FakePolarClient()
+
+        updated = await change_subscription_plan(
+            user, settings, "max", client=fake_client
+        )
+
+        assert updated.product_id == settings.polar_max_product_id
+        assert len(fake_client.subscription_update_calls) == 1
+        assert fake_client.subscription_update_calls[0] == {
+            "subscription_id": "sub_change_1",
+            "product_id": settings.polar_max_product_id,
+        }
+        assert fake_client.checkout_calls == []
+
+    async def test_raises_when_no_active_subscription(
+        self, app: Any, settings: Any
+    ) -> None:
+        user = await create_user()
+        fake_client = FakePolarClient()
+        with pytest.raises(NoActiveBillingCustomerError):
+            await change_subscription_plan(user, settings, "pro", client=fake_client)
+
+    async def test_raises_when_subscription_canceled(
+        self, app: Any, settings: Any
+    ) -> None:
+        user = await create_user()
+        await BillingCustomer(
+            user_id=user.id,
+            polar_customer_id="cus_canceled",
+            subscription_id="sub_canceled_1",
+            subscription_status="canceled",
+            product_id=settings.polar_pro_product_id,
+        ).insert()
+        fake_client = FakePolarClient()
+        with pytest.raises(NoActiveBillingCustomerError):
+            await change_subscription_plan(user, settings, "max", client=fake_client)
 
 
 class TestUsageEmission:

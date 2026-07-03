@@ -23,6 +23,7 @@ import { Progress, ProgressTrack, ProgressIndicator } from "@/components/ui/prog
 import { cn, getErrorMessage } from "@/lib/utils"
 
 import {
+  useChangePlanMutation,
   useCreateCheckoutMutation,
   useCustomerPortalMutation,
   useSubscriptionStatusQuery,
@@ -93,6 +94,7 @@ export function BillingSettings() {
   const usageQuery = useUsageSummaryQuery()
   const subscriptionQuery = useSubscriptionStatusQuery()
   const checkoutMutation = useCreateCheckoutMutation()
+  const changePlanMutation = useChangePlanMutation()
   const portalMutation = useCustomerPortalMutation()
 
   const isActive = usageQuery.data?.isSubscriptionActive ?? false
@@ -101,11 +103,19 @@ export function BillingSettings() {
 
   const handleUpgrade = async (tier: BillingTier) => {
     try {
+      if (isActive) {
+        // Polar refuses to checkout a second product while a subscription
+        // is active - switching tiers must go through the subscription
+        // update flow instead of bouncing through checkout again.
+        await changePlanMutation.mutateAsync(tier)
+        toast.success(`Switched to the ${tier === "pro" ? "Pro" : "Max"} plan.`)
+        return
+      }
       const url = await checkoutMutation.mutateAsync(tier)
       window.location.assign(url)
     } catch (error) {
       toast.error(
-        getErrorMessage(error, "Could not start checkout. Please try again.")
+        getErrorMessage(error, "Could not change your plan. Please try again.")
       )
     }
   }
@@ -113,7 +123,7 @@ export function BillingSettings() {
   const handleManageBilling = async () => {
     try {
       const url = await portalMutation.mutateAsync()
-      window.location.href = url
+      window.open(url, "_blank", "noopener,noreferrer")
     } catch (error) {
       toast.error(
         getErrorMessage(error, "Could not open the billing portal.")
@@ -261,7 +271,11 @@ export function BillingSettings() {
                 <Button
                   className="w-full"
                   onClick={() => void handleUpgrade(plan.tier)}
-                  disabled={checkoutMutation.isPending || isCurrent}
+                  disabled={
+                    checkoutMutation.isPending ||
+                    changePlanMutation.isPending ||
+                    isCurrent
+                  }
                 >
                   <SparklesIcon className="size-4" />
                   {isCurrent ? "Current plan" : `Upgrade to ${plan.name}`}

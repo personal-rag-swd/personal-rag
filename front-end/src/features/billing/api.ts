@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { apiFetch } from "@/lib/api-client"
 
@@ -69,6 +69,22 @@ export function useCreateCheckoutMutation() {
         data: { tier },
       })
       return data.url
+    },
+  })
+}
+
+export function useChangePlanMutation() {
+  const queryClient = useQueryClient()
+  return useMutation<SubscriptionStatus, Error, BillingTier>({
+    mutationFn: async (tier: BillingTier) => {
+      const data = await apiFetch<SubscriptionStatusApiPayload>(
+        "/api/v1/billing/change-plan",
+        { method: "POST", data: { tier } }
+      )
+      return mapSubscriptionStatus(data)
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["billing"] })
     },
   })
 }
