@@ -1,0 +1,16 @@
+[build-system]
+build-backend = "setuptools.build_meta:__legacy__"
+requires = ["setuptools >= 40.8.0", "wheel"]
+
+[tool.mypy]
+strict = true
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "T20", "W"]
+ignore = ["E203", "E501", "E711", "E712", "N803"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true

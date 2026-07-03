@@ -497,7 +497,10 @@ function SourceItem({ document }: { document: NotebookDocument }) {
               onClick={handleDeleteSource}
             >
               {deleteDocumentMutation.isPending ? (
-                <Loader2Icon data-icon="inline-start" className="animate-spin" />
+                <Loader2Icon
+                  data-icon="inline-start"
+                  className="animate-spin"
+                />
               ) : (
                 <Trash2Icon data-icon="inline-start" />
               )}
@@ -579,6 +582,7 @@ function SourcePreviewDialog({
   const sourceUrl = preview?.url ?? null
   const isPdfPreview = preview ? isPdfDocument(preview) : false
   const isImagePreview = preview ? isImageDocument(preview) : false
+  const isMarkdownPreview = preview ? isMarkdownDocument(preview) : false
   const isImageDialog = Boolean(sourceUrl && isImagePreview)
   // Production blocked embedded cross-origin MinIO presigned PDFs, so PDF iframe
   // preview uses a same-origin backend proxy while Open/Download keep the URL.
@@ -591,6 +595,29 @@ function SourcePreviewDialog({
   const [isDownloading, setIsDownloading] = React.useState(false)
   const errorMessage =
     error instanceof Error ? error.message : "The document could not be opened."
+  const {
+    data: markdownContent,
+    error: markdownError,
+    isLoading: isMarkdownLoading,
+  } = useQuery({
+    queryKey: [
+      "notebooks",
+      document.notebookId,
+      "documents",
+      document.id,
+      "markdown-preview",
+    ],
+    queryFn: async () => {
+      const blob = await getNotebookDocumentDownloadBlob(
+        document.notebookId,
+        document.id
+      )
+      const bytes = new Uint8Array(await blob.arrayBuffer())
+      return decodeMarkdownBytes(bytes, blob.type || preview?.contentType)
+    },
+    enabled: open && Boolean(preview) && isMarkdownPreview,
+    staleTime: 55 * 60 * 1000,
+  })
 
   const handleDownload = async () => {
     if (!preview) {
@@ -630,7 +657,8 @@ function SourcePreviewDialog({
             {document.filename}
           </DialogTitle>
           <DialogDescription>
-            {formatBytes(document.size)} / {getDocumentStatus(document.status).label}
+            {formatBytes(document.size)} /{" "}
+            {getDocumentStatus(document.status).label}
           </DialogDescription>
         </DialogHeader>
 
@@ -650,9 +678,32 @@ function SourcePreviewDialog({
               <AlertCircleIcon className="size-5 text-destructive" />
               <p>{errorMessage}</p>
             </div>
+          ) : isMarkdownPreview ? (
+            isMarkdownLoading ? (
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                <Loader2Icon className="mr-2 size-4 animate-spin" />
+                Decoding markdown
+              </div>
+            ) : markdownError ? (
+              <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
+                <AlertCircleIcon className="size-5 text-destructive" />
+                <p>
+                  {getErrorMessage(
+                    markdownError,
+                    "The markdown preview could not be decoded."
+                  )}
+                </p>
+              </div>
+            ) : (
+              <ScrollArea className="h-full">
+                <pre className="p-4 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap text-foreground">
+                  {markdownContent ?? ""}
+                </pre>
+              </ScrollArea>
+            )
           ) : preview?.previewType === "text" ? (
             <ScrollArea className="h-full">
-              <pre className="whitespace-pre-wrap break-words p-4 font-mono text-xs leading-relaxed text-foreground">
+              <pre className="p-4 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap text-foreground">
                 {preview.content}
               </pre>
             </ScrollArea>
@@ -696,7 +747,10 @@ function SourcePreviewDialog({
                 disabled={!preview || isDownloading}
               >
                 {isDownloading ? (
-                  <Loader2Icon data-icon="inline-start" className="animate-spin" />
+                  <Loader2Icon
+                    data-icon="inline-start"
+                    className="animate-spin"
+                  />
                 ) : (
                   <DownloadIcon data-icon="inline-start" />
                 )}
@@ -799,6 +853,9 @@ function getDocumentStatus(status: string) {
 }
 
 function canRenderPreviewInline(preview: NotebookDocumentPreview) {
+  if (isMarkdownDocument(preview)) {
+    return false
+  }
   const contentType = normalizeContentType(preview.contentType)
   const filename = preview.filename.toLowerCase()
   if (contentType) {
@@ -830,8 +887,125 @@ function isImageDocument(preview: NotebookDocumentPreview) {
   )
 }
 
+function isMarkdownDocument(preview: NotebookDocumentPreview) {
+  const contentType = normalizeContentType(preview.contentType)
+  const filename = preview.filename.toLowerCase()
+
+  return (
+    contentType === "text/markdown" ||
+    contentType === "text/x-markdown" ||
+    filename.endsWith(".md")
+  )
+}
+
 function normalizeContentType(contentType: string | null | undefined) {
   return contentType?.split(";")[0]?.trim().toLowerCase() ?? ""
+}
+
+function decodeMarkdownBytes(
+  bytes: Uint8Array,
+  contentType: string | null | undefined
+) {
+  const bomEncoding = detectBomEncoding(bytes)
+  const explicitEncoding = parseCharset(contentType)
+  const candidateEncodings = dedupeEncodings([
+    bomEncoding,
+    explicitEncoding,
+    "utf-8",
+    "utf-16le",
+    "utf-16be",
+    "windows-1258",
+    "windows-1252",
+  ])
+
+  const bestMatch = candidateEncodings
+    .map((encoding) => ({
+      text: decodeWithEncoding(bytes, encoding),
+      score: scoreDecodedMarkdown(decodeWithEncoding(bytes, encoding)),
+    }))
+    .sort((left, right) => right.score - left.score)
+
+  return bestMatch[0]?.text ?? ""
+}
+
+function detectBomEncoding(bytes: Uint8Array) {
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    return "utf-8"
+  }
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) {
+    return "utf-16le"
+  }
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) {
+    return "utf-16be"
+  }
+  return null
+}
+
+function parseCharset(contentType: string | null | undefined) {
+  const match = contentType?.match(/charset=([^;]+)/i)
+  return match?.[1]?.trim().toLowerCase() ?? null
+}
+
+function dedupeEncodings(encodings: Array<string | null>) {
+  return [
+    ...new Set(
+      encodings.filter((encoding): encoding is string => Boolean(encoding))
+    ),
+  ]
+}
+
+function decodeWithEncoding(bytes: Uint8Array, encoding: string) {
+  try {
+    return new TextDecoder(encoding).decode(bytes)
+  } catch {
+    return ""
+  }
+}
+
+function scoreDecodedMarkdown(text: string) {
+  if (!text) {
+    return Number.NEGATIVE_INFINITY
+  }
+
+  const replacementCount = (text.match(/\uFFFD/g) ?? []).length
+  const mojibakeCount = (
+    text.match(/(?:Ã.|Â.|Ä.|áº|á»|â€|â€œ|â€\u009d)/g) ?? []
+  ).length
+  const markdownHintCount = countMarkdownHintCharacters(text)
+  const controlCount = countControlCharacters(text)
+
+  return (
+    markdownHintCount * 2 -
+    replacementCount * 40 -
+    mojibakeCount * 12 -
+    controlCount * 8
+  )
+}
+
+function countMarkdownHintCharacters(text: string) {
+  let count = 0
+  for (const character of text) {
+    if ("#*_`-[]()".includes(character)) {
+      count += 1
+    }
+  }
+  return count
+}
+
+function countControlCharacters(text: string) {
+  let count = 0
+  for (const character of text) {
+    const code = character.charCodeAt(0)
+    if (
+      (code >= 0 && code <= 8) ||
+      code === 11 ||
+      code === 12 ||
+      (code >= 14 && code <= 31)
+    ) {
+      count += 1
+    }
+  }
+  return count
 }
 
 async function uploadNotebookSource(
