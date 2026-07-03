@@ -31,6 +31,10 @@ class PolarClientProtocol(Protocol):
 
     async def create_customer_session(self, *, customer_id: str) -> dict[str, Any]: ...
 
+    async def update_subscription_product(
+        self, *, subscription_id: str, product_id: str
+    ) -> dict[str, Any]: ...
+
     async def ingest_events(self, events: list[dict[str, Any]]) -> dict[str, Any]: ...
 
 
@@ -105,6 +109,21 @@ class PolarClient:
             "POST",
             "/v1/customer-sessions/",
             json={"customer_id": customer_id},
+        )
+
+    async def update_subscription_product(
+        self, *, subscription_id: str, product_id: str
+    ) -> dict[str, Any]:
+        """Swap an existing subscription to a different product ("change plan").
+
+        Polar refuses to let a customer with an active subscription pay for a
+        second one through checkout - switching tiers must go through this
+        update endpoint instead (proration handled by Polar's org default).
+        """
+        return await self._request(
+            "PATCH",
+            f"/v1/subscriptions/{subscription_id}",
+            json={"product_id": product_id},
         )
 
     async def ingest_events(self, events: list[dict[str, Any]]) -> dict[str, Any]:
