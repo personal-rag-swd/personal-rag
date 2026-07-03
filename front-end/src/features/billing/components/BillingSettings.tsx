@@ -159,11 +159,23 @@ export function BillingSettings() {
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
             {usageQuery.data && (
-              <UsageBar
-                label="LLM tokens (this period)"
-                used={usageQuery.data.llmTokensUsed}
-                allowance={usageQuery.data.llmTokensAllowance}
-              />
+              <>
+                <UsageBar
+                  label="LLM tokens (this month)"
+                  used={usageQuery.data.llmTokensUsed}
+                  allowance={usageQuery.data.llmTokensAllowance}
+                />
+                <UsageBar
+                  label="LLM tokens (this week)"
+                  used={usageQuery.data.weeklyTokensUsed}
+                  allowance={usageQuery.data.weeklyTokensAllowance}
+                />
+                <UsageBar
+                  label="LLM tokens (current 5h session)"
+                  used={usageQuery.data.sessionTokensUsed}
+                  allowance={usageQuery.data.sessionTokensAllowance}
+                />
+              </>
             )}
 
             <div className="flex flex-wrap gap-4 text-sm">

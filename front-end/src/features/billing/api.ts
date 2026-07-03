@@ -18,6 +18,12 @@ function mapUsageSummary(payload: UsageSummaryApiPayload): UsageSummary {
     llmTokensAllowance: payload.llm_tokens_allowance,
     isSubscriptionActive: payload.is_subscription_active,
     tier: payload.tier,
+    sessionTokensUsed: payload.session_tokens_used,
+    sessionTokensAllowance: payload.session_tokens_allowance,
+    sessionResetAt: payload.session_reset_at,
+    weeklyTokensUsed: payload.weekly_tokens_used,
+    weeklyTokensAllowance: payload.weekly_tokens_allowance,
+    weeklyResetAt: payload.weekly_reset_at,
   }
 }
 
@@ -39,6 +45,7 @@ export function useUsageSummaryQuery() {
       const data = await apiFetch<UsageSummaryApiPayload>("/api/v1/billing/usage")
       return mapUsageSummary(data)
     },
+    refetchInterval: 30_000,
   })
 }
 

@@ -7,7 +7,11 @@ import {
 import { AssistantRuntimeProvider } from "@assistant-ui/react"
 import { useAgUiRuntime } from "@assistant-ui/react-ag-ui"
 import type { ThreadHistoryAdapter } from "@assistant-ui/core"
+import { toast } from "sonner"
+import { formatDistanceToNow } from "date-fns"
 
+import { QuotaBanner } from "@/features/billing/components/QuotaBanner"
+import type { QuotaExceededDetail } from "@/features/billing/types"
 import {
   fetchNotebookChatHistory,
   useNotebookDocumentsQuery,
@@ -51,6 +55,37 @@ class CredentialedHttpAgent extends HttpAgent {
 export function ChatPanel({ notebookId }: { notebookId: string }) {
   const apiBaseUrl = import.meta.env.VITE_API_URL
 
+  const [quotaExceeded, setQuotaExceeded] = React.useState<QuotaExceededDetail | null>(
+    null
+  )
+
+  const quotaAwareFetch = React.useMemo(
+    () =>
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const response = await window.fetch(input, init)
+        if (response.ok) {
+          setQuotaExceeded(null)
+        } else if (response.status === 402) {
+          try {
+            const body = await response.clone().json()
+            const detail = body?.detail as QuotaExceededDetail | undefined
+            if (detail?.message) {
+              setQuotaExceeded(detail)
+              toast.error(detail.message, {
+                description: detail.reset_at
+                  ? `Try again ${formatDistanceToNow(new Date(detail.reset_at), { addSuffix: true })}.`
+                  : undefined,
+              })
+            }
+          } catch {
+            // Response body wasn't JSON — nothing to surface.
+          }
+        }
+        return response
+      },
+    []
+  )
+
   const { data: documents } = useNotebookDocumentsQuery(notebookId)
   const indexedDocuments = React.useMemo(
     () =>
@@ -86,10 +121,10 @@ export function ChatPanel({ notebookId }: { notebookId: string }) {
           ? `${apiBaseUrl.replace(/\/$/, "")}/api/v1/notebooks/${notebookId}/chat`
           : `/api/v1/notebooks/${notebookId}/chat`,
         agentId: "notebook-chat",
-        fetch: window.fetch.bind(window),
+        fetch: quotaAwareFetch,
         documentIdsRef: scopedDocumentIdsRef,
       }),
-    [apiBaseUrl, notebookId]
+    [apiBaseUrl, notebookId, quotaAwareFetch]
   )
 
   const historyAdapter = React.useMemo<ThreadHistoryAdapter>(
@@ -123,6 +158,7 @@ export function ChatPanel({ notebookId }: { notebookId: string }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-card">
+      <QuotaBanner override={quotaExceeded} />
       <div className="min-h-0 flex-1 overflow-hidden bg-card [&_.aui-thread-root]:bg-card [&_.aui-thread-viewport-footer]:bg-card [&_.aui-thread-welcome-suggestion]:bg-card">
         <AssistantRuntimeProvider runtime={runtime}>
           <Thread

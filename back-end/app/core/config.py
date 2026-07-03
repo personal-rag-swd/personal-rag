@@ -100,12 +100,22 @@ class Settings(BaseSettings):
         # trailing \r/\n or stray spaces that silently break HMAC signature
         # verification and Bearer auth - strip regardless of source.
         return v.strip() if isinstance(v, str) else v
+
     polar_usage_emit_interval_seconds: int = 60
     polar_usage_emit_batch_size: int = 100
     polar_usage_emit_max_retries: int = 5
     free_tier_llm_tokens_allowance: int = 50_000
     pro_tier_llm_tokens_allowance: int = 5_000_000
     max_tier_llm_tokens_allowance: int = 35_000_000
+
+    session_window_hours: int = 5
+    weekly_window_days: int = 7
+    free_tier_session_tokens_allowance: int = 2_500
+    pro_tier_session_tokens_allowance: int = 250_000
+    max_tier_session_tokens_allowance: int = 1_750_000
+    free_tier_weekly_tokens_allowance: int = 12_000
+    pro_tier_weekly_tokens_allowance: int = 1_200_000
+    max_tier_weekly_tokens_allowance: int = 8_000_000
 
     model_config = SettingsConfigDict(
         env_file=".env",

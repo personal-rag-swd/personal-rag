@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -13,13 +13,20 @@ from app.billing.exceptions import (
     UsageQuotaExceededError,
     WebhookSignatureInvalidError,
 )
-from app.billing.models import BillingCustomer, UsageAllowance, UsageEventLog
+from app.billing.models import (
+    BillingCustomer,
+    UsageAllowance,
+    UsageEventLog,
+    UsageWindowCounter,
+)
 from app.billing.service import (
     check_quota_and_raise,
     create_checkout_session,
     create_customer_portal_session,
     emit_pending_usage_events_to_polar,
     get_or_create_polar_customer,
+    get_or_create_window_counter,
+    get_usage_summary,
     record_usage_event,
     verify_webhook_signature,
 )
@@ -38,6 +45,7 @@ class TestRecordUsageEvent:
             user_id=user.id,
             quantity=100,
             idempotency_key=f"test:{uuid4()}",
+            settings=settings,
         )
         allowance = await UsageAllowance.find_one({"user_id": user.id})
         assert allowance is not None
@@ -52,11 +60,13 @@ class TestRecordUsageEvent:
             user_id=user.id,
             quantity=1,
             idempotency_key=key,
+            settings=settings,
         )
         await record_usage_event(
             user_id=user.id,
             quantity=1,
             idempotency_key=key,
+            settings=settings,
         )
         logs = await UsageEventLog.find({"idempotency_key": key}).to_list()
         assert len(logs) == 1
@@ -74,6 +84,7 @@ class TestQuotaGating:
             user_id=user.id,
             quantity=settings.free_tier_llm_tokens_allowance,
             idempotency_key=f"test:{uuid4()}",
+            settings=settings,
         )
         with pytest.raises(UsageQuotaExceededError):
             await check_quota_and_raise(user.id, 1, settings)
@@ -99,6 +110,7 @@ class TestQuotaGating:
             user_id=user.id,
             quantity=settings.free_tier_llm_tokens_allowance + 5,
             idempotency_key=f"test:{uuid4()}",
+            settings=settings,
         )
         await check_quota_and_raise(user.id, 1, settings)
 
@@ -116,6 +128,7 @@ class TestQuotaGating:
             user_id=user.id,
             quantity=settings.pro_tier_llm_tokens_allowance,
             idempotency_key=f"test:{uuid4()}",
+            settings=settings,
         )
         with pytest.raises(UsageQuotaExceededError):
             await check_quota_and_raise(user.id, 1, settings)
@@ -123,6 +136,7 @@ class TestQuotaGating:
     async def test_max_tier_uses_its_own_larger_cap(
         self, app: Any, settings: Any
     ) -> None:
+        """A Max subscriber isn't blocked by Pro's (smaller) session cap."""
         user = await create_user()
         await BillingCustomer(
             user_id=user.id,
@@ -132,8 +146,9 @@ class TestQuotaGating:
         ).insert()
         await record_usage_event(
             user_id=user.id,
-            quantity=settings.pro_tier_llm_tokens_allowance + 5,
+            quantity=settings.pro_tier_session_tokens_allowance + 5,
             idempotency_key=f"test:{uuid4()}",
+            settings=settings,
         )
         await check_quota_and_raise(user.id, 1, settings)
 
@@ -155,6 +170,7 @@ class TestQuotaGating:
             user_id=user.id,
             quantity=settings.free_tier_llm_tokens_allowance,
             idempotency_key=f"test:{uuid4()}",
+            settings=settings,
         )
         with pytest.raises(UsageQuotaExceededError):
             await check_quota_and_raise(user.id, 1, settings)
@@ -174,6 +190,95 @@ class TestQuotaGating:
         monkeypatch.setattr(BillingCustomer, "find_one", _boom)
 
         await check_quota_and_raise(user.id, 1, settings)
+
+
+class TestUsageWindows:
+    async def test_creates_window_counter_on_first_use(
+        self, app: Any, settings: Any
+    ) -> None:
+        user = await create_user()
+        counter = await get_or_create_window_counter(user.id, "session", settings)
+        assert counter.llm_tokens_used == 0
+        assert counter.window_end > counter.window_start
+
+    async def test_reuses_counter_within_window(self, app: Any, settings: Any) -> None:
+        user = await create_user()
+        first = await get_or_create_window_counter(user.id, "session", settings)
+        second = await get_or_create_window_counter(user.id, "session", settings)
+        assert first.id == second.id
+
+    async def test_rolls_over_after_window_expires(
+        self, app: Any, settings: Any
+    ) -> None:
+        user = await create_user()
+        expired = UsageWindowCounter(
+            user_id=user.id,
+            window_type="session",
+            window_start=datetime.now(UTC) - timedelta(hours=10),
+            window_end=datetime.now(UTC) - timedelta(hours=5),
+            llm_tokens_used=999,
+        )
+        await expired.insert()
+        fresh = await get_or_create_window_counter(user.id, "session", settings)
+        assert fresh.id != expired.id
+        assert fresh.llm_tokens_used == 0
+
+    async def test_session_cap_blocks_before_monthly_cap(
+        self, app: Any, settings: Any
+    ) -> None:
+        """The session window is far tighter than the monthly cap, so it
+        should be the one that trips first."""
+        user = await create_user()
+        await record_usage_event(
+            user_id=user.id,
+            quantity=settings.free_tier_session_tokens_allowance,
+            idempotency_key=f"test:{uuid4()}",
+            settings=settings,
+        )
+        with pytest.raises(UsageQuotaExceededError) as exc_info:
+            await check_quota_and_raise(user.id, 1, settings)
+        assert exc_info.value.window == "session"
+
+    async def test_record_usage_event_increments_all_windows(
+        self, app: Any, settings: Any
+    ) -> None:
+        user = await create_user()
+        await record_usage_event(
+            user_id=user.id,
+            quantity=10,
+            idempotency_key=f"test:{uuid4()}",
+            settings=settings,
+        )
+        session_counter = await UsageWindowCounter.find_one(
+            {"user_id": user.id, "window_type": "session"}
+        )
+        weekly_counter = await UsageWindowCounter.find_one(
+            {"user_id": user.id, "window_type": "weekly"}
+        )
+        assert session_counter is not None
+        assert session_counter.llm_tokens_used == 10
+        assert weekly_counter is not None
+        assert weekly_counter.llm_tokens_used == 10
+
+    async def test_usage_summary_includes_window_fields(
+        self, app: Any, settings: Any
+    ) -> None:
+        user = await create_user()
+        await record_usage_event(
+            user_id=user.id,
+            quantity=10,
+            idempotency_key=f"test:{uuid4()}",
+            settings=settings,
+        )
+        summary = await get_usage_summary(user.id, settings)
+        assert summary.session_tokens_used == 10
+        assert summary.session_tokens_allowance == (
+            settings.free_tier_session_tokens_allowance
+        )
+        assert summary.weekly_tokens_used == 10
+        assert summary.weekly_tokens_allowance == (
+            settings.free_tier_weekly_tokens_allowance
+        )
 
 
 class TestPolarCustomerAndCheckout:
@@ -227,6 +332,7 @@ class TestUsageEmission:
             user_id=user.id,
             quantity=42,
             idempotency_key=f"test:{uuid4()}",
+            settings=settings,
         )
         fake_client = FakePolarClient()
         stats = await emit_pending_usage_events_to_polar(settings, client=fake_client)
@@ -243,6 +349,7 @@ class TestUsageEmission:
             user_id=user.id,
             quantity=42,
             idempotency_key=f"test:{uuid4()}",
+            settings=settings,
         )
         fake_client = FakePolarClient(fail_ingest=True)
         stats = await emit_pending_usage_events_to_polar(settings, client=fake_client)
