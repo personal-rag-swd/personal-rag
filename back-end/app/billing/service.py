@@ -145,6 +145,13 @@ async def get_or_create_usage_allowance(user_id: UUID) -> UsageAllowance:
         {"user_id": user_id, "period_start": period_start},
     )
     if allowance is not None:
+        # PyMongo decodes BSON datetimes as naive (UTC) - normalize before
+        # returning so callers serializing these fields (e.g. UsageSummaryResponse)
+        # don't emit an offset-less timestamp the frontend would misread as local time.
+        if allowance.period_start.tzinfo is None:
+            allowance.period_start = allowance.period_start.replace(tzinfo=UTC)
+        if allowance.period_end.tzinfo is None:
+            allowance.period_end = allowance.period_end.replace(tzinfo=UTC)
         return allowance
     allowance = UsageAllowance(
         user_id=user_id, period_start=period_start, period_end=period_end
@@ -167,8 +174,18 @@ async def get_or_create_window_counter(
         {"user_id": user_id, "window_type": window_type},
         sort=[("window_start", -1)],
     )
-    if existing is not None and existing.window_end > now:
-        return existing
+    if existing is not None:
+        # PyMongo decodes BSON datetimes as naive (UTC) - normalize before
+        # comparing against (or returning alongside) an aware `now`, which
+        # would otherwise raise TypeError on every read after the first
+        # (naive vs. aware compare) or serialize reset_at without a UTC
+        # offset, causing the frontend to parse it as local time.
+        if existing.window_start.tzinfo is None:
+            existing.window_start = existing.window_start.replace(tzinfo=UTC)
+        if existing.window_end.tzinfo is None:
+            existing.window_end = existing.window_end.replace(tzinfo=UTC)
+        if existing.window_end > now:
+            return existing
 
     duration = _WINDOW_DURATIONS[window_type](settings)
     counter = UsageWindowCounter(
