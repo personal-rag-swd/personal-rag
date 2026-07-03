@@ -15,6 +15,7 @@ from app.billing.schemas import (
     UsageSummaryResponse,
 )
 from app.billing.service import (
+    change_subscription_plan,
     create_checkout_session,
     create_customer_portal_session,
     get_subscription_status,
@@ -52,6 +53,22 @@ async def checkout(
     _require_billing_configured(settings, product_id)
     url = await create_checkout_session(current_user, settings, body.tier)
     return CheckoutSessionResponse(url=url)
+
+
+@router.post("/change-plan", response_model=SubscriptionStatusResponse)
+async def change_plan(
+    body: CheckoutRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> SubscriptionStatusResponse:
+    product_id = (
+        settings.polar_pro_product_id
+        if body.tier == "pro"
+        else settings.polar_max_product_id
+    )
+    _require_billing_configured(settings, product_id)
+    await change_subscription_plan(current_user, settings, body.tier)
+    return await get_subscription_status(current_user.id, settings)
 
 
 @router.get("/portal", response_model=CustomerPortalResponse)

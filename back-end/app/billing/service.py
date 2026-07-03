@@ -13,6 +13,7 @@ from polar_sdk.webhooks import (
 from pydantic import ValidationError
 
 from app.billing.exceptions import (
+    NoActiveBillingCustomerError,
     UsageQuotaExceededError,
     WebhookSignatureInvalidError,
 )
@@ -245,6 +246,44 @@ async def create_customer_portal_session(
         customer_id=customer.polar_customer_id
     )
     return response["customer_portal_url"]
+
+
+async def change_subscription_plan(
+    user: User,
+    settings: Settings,
+    tier: str,
+    *,
+    client: PolarClientProtocol | None = None,
+) -> BillingCustomer:
+    """Switch an already-subscribed user to a different tier in place.
+
+    Polar refuses to checkout a second product while a subscription is
+    active, so switching tiers must go through the subscription update
+    endpoint instead of ``create_checkout_session``. Requires an existing
+    active subscription; use ``create_checkout_session`` for a first-time
+    subscribe.
+    """
+    billing_customer = await BillingCustomer.find_one({"user_id": user.id})
+    if (
+        billing_customer is None
+        or billing_customer.subscription_id is None
+        or billing_customer.subscription_status not in _ACTIVE_SUBSCRIPTION_STATUSES
+    ):
+        raise NoActiveBillingCustomerError()
+
+    resolved_client = client or get_polar_client(settings)
+    await resolved_client.update_subscription_product(
+        subscription_id=billing_customer.subscription_id,
+        product_id=_product_id_for_tier(tier, settings),
+    )
+
+    # Reflect the change immediately rather than waiting on the Polar
+    # webhook, which arrives asynchronously; the webhook handler is
+    # idempotent and will simply confirm this once it lands.
+    billing_customer.product_id = _product_id_for_tier(tier, settings)
+    billing_customer.updated_at = datetime.now(UTC)
+    await billing_customer.save()
+    return billing_customer
 
 
 async def check_quota_and_raise(

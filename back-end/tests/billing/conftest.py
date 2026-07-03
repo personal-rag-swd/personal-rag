@@ -17,6 +17,7 @@ class FakePolarClient:
         self.created_customers: list[dict[str, Any]] = []
         self.checkout_calls: list[dict[str, Any]] = []
         self.customer_session_calls: list[dict[str, Any]] = []
+        self.subscription_update_calls: list[dict[str, Any]] = []
         self.ingested_events: list[dict[str, Any]] = []
         self._next_customer_id = 1
 
@@ -41,6 +42,14 @@ class FakePolarClient:
     async def create_customer_session(self, *, customer_id: str) -> dict[str, Any]:
         self.customer_session_calls.append({"customer_id": customer_id})
         return {"customer_portal_url": "https://sandbox.polar.sh/portal/fake"}
+
+    async def update_subscription_product(
+        self, *, subscription_id: str, product_id: str
+    ) -> dict[str, Any]:
+        self.subscription_update_calls.append(
+            {"subscription_id": subscription_id, "product_id": product_id}
+        )
+        return {"id": subscription_id, "product_id": product_id}
 
     async def ingest_events(self, events: list[dict[str, Any]]) -> dict[str, Any]:
         if self.fail_ingest:
