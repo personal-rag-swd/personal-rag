@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import base64
-import hashlib
-import hmac
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
 import pytest
+from standardwebhooks.webhooks import Webhook
 
 from app.billing.exceptions import (
     NoActiveBillingCustomerError,
@@ -414,13 +413,12 @@ class TestUsageEmission:
 
 class TestWebhookSignatureVerification:
     def _sign(self, secret: str, webhook_id: str, timestamp: str, body: bytes) -> str:
-        material = secret.removeprefix("whsec_")
-        secret_bytes = base64.b64decode(material + "=" * (-len(material) % 4))
-        signed_content = f"{webhook_id}.{timestamp}.{body.decode()}"
-        signature = base64.b64encode(
-            hmac.new(secret_bytes, signed_content.encode(), hashlib.sha256).digest()
-        ).decode()
-        return f"v1,{signature}"
+        webhook = Webhook(base64.b64encode(secret.encode()).decode())
+        return webhook.sign(
+            webhook_id,
+            datetime.fromtimestamp(int(timestamp), tz=UTC),
+            body.decode(),
+        )
 
     def test_valid_signature_passes(self) -> None:
         secret = "whsec_" + base64.b64encode(b"test-secret").decode()
