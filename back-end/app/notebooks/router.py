@@ -5,7 +5,7 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Annotated
 from urllib.parse import quote
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import (
     APIRouter,
@@ -17,15 +17,12 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 from pydantic_ai.capabilities.process_history import ProcessHistory
-from pydantic_ai.run import AgentRunResult
 from pydantic_ai.ui.ag_ui import AGUIAdapter
 
-from app.billing.service import check_quota_and_raise, record_usage_event
 from app.core.config import Settings, get_settings
-from app.core.llm_provider import chat_provider_is_configured, resolve_chat_provider
-from app.core.s3 import generate_presigned_get_url, get_object_bytes, get_s3_store
+from app.core.llm_provider import resolve_chat_provider
+from app.core.s3 import generate_presigned_get_url
 from app.notebooks.agent import (
-    NotebookChatDeps,
     notebook_chat_agent,
 )
 from app.notebooks.events import (
@@ -35,18 +32,11 @@ from app.notebooks.events import (
 )
 from app.notebooks.exceptions import (
     DocumentContentUnavailableError,
-    DocumentNotFoundError,
-    LLMNotConfiguredError,
 )
 from app.notebooks.memory import (
-    append_notebook_chat_history,
-    build_user_message_from_agui_payload,
     extract_notebook_chat_transcript,
-    extract_scoped_document_ids,
     keep_recent_messages,
-    load_notebook_chat_history,
 )
-from app.notebooks.models import Notebook, NotebookDocument
 from app.notebooks.rag.ingestion_service import ingest_document_by_id
 from app.notebooks.schemas import (
     NotebookChatHistoryMessage,
@@ -72,14 +62,17 @@ from app.notebooks.service import (
     get_chunks_by_document_id,
     get_chunks_by_filename,
     get_notebook,
+    get_owned_document,
     get_report,
     get_single_chunk,
     get_user_event_snapshot,
     list_notebook_documents,
     list_notebooks,
     list_reports,
+    load_document_bytes,
+    persist_notebook_chat_result,
     populate_notebook_metrics,
-    resolve_scoped_document_ids,
+    prepare_notebook_chat,
     run_report_generation,
     touch_notebook,
     update_notebook,
@@ -94,21 +87,9 @@ router = APIRouter(prefix="/notebooks", tags=["Notebooks"])
 SSE_PING_SECONDS = 30.0
 
 
-async def _get_owned_notebook_document(
-    notebook_id: UUID,
-    document_id: UUID,
-    current_user: User,
-) -> NotebookDocument:
-    document = await NotebookDocument.find_one(
-        {
-            "_id": document_id,
-            "notebook_id": notebook_id,
-            "user_id": current_user.id,
-        }
-    )
-    if document is None:
-        raise DocumentNotFoundError()
-    return document
+def _content_disposition(disposition: str, filename: str) -> str:
+    """Build a ``Content-Disposition`` value with both plain and UTF-8 filenames."""
+    return f"{disposition}; filename=\"{filename}\"; filename*=UTF-8''{quote(filename)}"
 
 
 def _safe_pdf_filename(filename: str) -> str:
@@ -141,22 +122,6 @@ async def _notebook_event_generator(current_user: User) -> AsyncIterator[str]:
                 yield f"data: {json.dumps(event)}\n\n"
             except TimeoutError:
                 yield ": ping\n\n"
-
-
-async def _persist_chat_history(
-    notebook: Notebook, current_user: User, result: AgentRunResult[object]
-) -> None:
-    await append_notebook_chat_history(notebook, result.new_messages())
-    usage = result.usage
-    if usage.total_tokens:
-        await record_usage_event(
-            user_id=current_user.id,
-            quantity=usage.total_tokens,
-            idempotency_key=f"chat:{notebook.id}:{uuid4()}",
-            settings=get_settings(),
-            notebook_id=notebook.id,
-            event_metadata={"source": "chat"},
-        )
 
 
 async def _run_background_note_ingestion(document_id: UUID) -> None:
@@ -249,11 +214,7 @@ async def read_notebook_document_preview(
     current_user: Annotated[User, Depends(get_current_user)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> NotebookDocumentPreviewRead:
-    document = await _get_owned_notebook_document(
-        notebook_id,
-        document_id,
-        current_user,
-    )
+    document = await get_owned_document(notebook_id, document_id, current_user)
 
     if document.content is not None:
         return NotebookDocumentPreviewRead(
@@ -290,18 +251,8 @@ async def read_notebook_document_pdf_inline(
     current_user: Annotated[User, Depends(get_current_user)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> StreamingResponse:
-    document = await _get_owned_notebook_document(
-        notebook_id,
-        document_id,
-        current_user,
-    )
-    if not document.s3_key:
-        raise DocumentContentUnavailableError()
-
-    try:
-        pdf_bytes = await get_object_bytes(get_s3_store(settings), document.s3_key)
-    except FileNotFoundError as exc:
-        raise DocumentNotFoundError() from exc
+    document = await get_owned_document(notebook_id, document_id, current_user)
+    pdf_bytes = await load_document_bytes(document, settings)
     safe_filename = _safe_pdf_filename(document.filename)
 
     async def stream_pdf() -> AsyncIterator[bytes]:
@@ -311,10 +262,7 @@ async def read_notebook_document_pdf_inline(
         stream_pdf(),
         media_type="application/pdf",
         headers={
-            "Content-Disposition": (
-                f'inline; filename="{safe_filename}"; '
-                f"filename*=UTF-8''{quote(safe_filename)}"
-            ),
+            "Content-Disposition": _content_disposition("inline", safe_filename),
             "Cache-Control": "private, max-age=3600",
         },
     )
@@ -327,22 +275,9 @@ async def download_notebook_document(
     current_user: Annotated[User, Depends(get_current_user)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> StreamingResponse:
-    document = await _get_owned_notebook_document(
-        notebook_id,
-        document_id,
-        current_user,
-    )
+    document = await get_owned_document(notebook_id, document_id, current_user)
     safe_filename = _safe_download_filename(document.filename)
-
-    if document.content is not None:
-        body = document.content.encode("utf-8")
-    else:
-        if not document.s3_key:
-            raise DocumentContentUnavailableError()
-        try:
-            body = await get_object_bytes(get_s3_store(settings), document.s3_key)
-        except FileNotFoundError as exc:
-            raise DocumentNotFoundError() from exc
+    body = await load_document_bytes(document, settings)
 
     async def stream_document() -> AsyncIterator[bytes]:
         yield body
@@ -351,10 +286,7 @@ async def download_notebook_document(
         stream_document(),
         media_type=document.content_type or "application/octet-stream",
         headers={
-            "Content-Disposition": (
-                f'attachment; filename="{safe_filename}"; '
-                f"filename*=UTF-8''{quote(safe_filename)}"
-            ),
+            "Content-Disposition": _content_disposition("attachment", safe_filename),
             "Cache-Control": "private, max-age=3600",
         },
     )
@@ -395,48 +327,25 @@ async def chat_notebook_route(
     request: Request,
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> Response:
-    if not chat_provider_is_configured():
-        raise LLMNotConfiguredError("openrouter")
-
-    notebook = await get_notebook(notebook_id, current_user)
-    # keep_recent_messages only keeps the last ~15 conversational messages, so
-    # cap the read instead of loading a long-lived notebook's entire history.
-    message_history = await load_notebook_chat_history(notebook, limit=50)
-    settings = get_settings()
-
-    await check_quota_and_raise(current_user.id, 0, settings)
-
     try:
         request_payload = json.loads(await request.body() or b"{}")
     except ValueError, TypeError:
         request_payload = None
 
-    # Validate the optional document scope before persisting the user turn, so a
-    # rejected scope (deleted/foreign/malformed id) doesn't leave an orphaned
-    # user message in the history with no assistant reply.
-    scoped_document_ids = await resolve_scoped_document_ids(
-        notebook, current_user, extract_scoped_document_ids(request_payload)
-    )
-
-    new_user_message = build_user_message_from_agui_payload(request_payload)
-    if new_user_message is not None:
-        await append_notebook_chat_history(notebook, [new_user_message])
-
-    deps = NotebookChatDeps(
-        notebook=notebook,
-        current_user=current_user,
-        settings=settings,
-        document_ids=scoped_document_ids,
+    chat = await prepare_notebook_chat(
+        notebook_id, current_user, request_payload, get_settings()
     )
 
     return await AGUIAdapter.dispatch_request(
         request,
         agent=notebook_chat_agent,
         model=resolve_chat_provider(),
-        deps=deps,
-        message_history=message_history,
-        conversation_id=str(notebook.id),
-        on_complete=functools.partial(_persist_chat_history, notebook, current_user),
+        deps=chat.deps,
+        message_history=chat.message_history,
+        conversation_id=str(chat.notebook.id),
+        on_complete=functools.partial(
+            persist_notebook_chat_result, chat.notebook, current_user
+        ),
         capabilities=[ProcessHistory(keep_recent_messages)],
     )
 
@@ -520,23 +429,17 @@ async def generate_notebook_report(
     current_user: Annotated[User, Depends(get_current_user)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> object:
-    (
-        report,
-        context,
-        instructions,
-        detail_level,
-        question_count,
-    ) = await create_pending_report(notebook_id, payload, current_user, settings)
+    plan = await create_pending_report(notebook_id, payload, current_user, settings)
     background_tasks.add_task(
         run_report_generation,
-        report_id=report.id,
+        report_id=plan.report.id,
         report_type=payload.report_type,
-        context=context,
-        instructions=instructions,
-        detail_level=detail_level,
-        question_count=question_count,
+        context=plan.context,
+        instructions=plan.instructions,
+        detail_level=plan.detail_level,
+        question_count=plan.question_count,
     )
-    return report
+    return plan.report
 
 
 @router.post(

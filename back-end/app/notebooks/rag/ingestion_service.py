@@ -1,35 +1,32 @@
+"""Document ingestion pipeline: load source bytes → chunk (+ describe images) →
+embed → index, plus the top-level orchestration and the poll-based fallback.
+
+Persistence/state transitions live in :mod:`document_repository` and image
+handling in :mod:`image_ingestion`; this module composes them. The repository
+functions used by other packages (``register_pending_notebook_document``,
+``mark_document_upload_failed``, ``claim_document_for_ingestion``,
+``fail_stale_*``) are re-exported here so the historical
+``app.notebooks.rag.ingestion_service`` import surface is preserved.
+"""
+
 import asyncio
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 from uuid import UUID
 
-import obstore
 import obstore.exceptions
-import pymupdf
 from beanie import SortDirection
-from beanie.odm.queries.update import UpdateResponse
 from langchain_core.documents import Document
-from pydantic_ai import Agent
-from pydantic_ai.messages import BinaryContent
 
 from app.core.config import Settings
 from app.core.embedding_provider import embed_texts
-from app.core.event_bus import domain_event_bus
 from app.core.exceptions import TransientProviderError
-from app.core.llm_provider import (
-    chat_provider_is_configured,
-    resolve_chat_provider,
-    run_agent_with_retry,
-)
 from app.core.s3 import get_object_bytes, get_s3_store
 from app.notebooks.domain_events import (
-    DocumentEvent,
     DocumentFailed,
     DocumentIndexed,
-    DocumentProcessing,
-    DocumentRegistered,
     DocumentUploaded,
 )
 from app.notebooks.exceptions import TransientIngestionError
@@ -40,323 +37,264 @@ from app.notebooks.rag.document_chunker import (
     ChunkingRequest,
     chunk_document,
 )
+from app.notebooks.rag.document_repository import (
+    claim_document_for_ingestion,
+    fail_stale_pending_documents,
+    fail_stale_processing_documents,
+    mark_document_upload_failed,
+    mark_pending_document_uploaded_if_object_exists,
+    record_ingestion_outcome,
+    register_pending_notebook_document,
+    transition_document,
+)
+from app.notebooks.rag.image_ingestion import (
+    build_image_chunk_document,
+    describe_image,
+    extract_pdf_images,
+)
 
 if TYPE_CHECKING:
     from obstore.store import S3Store
 
 logger = logging.getLogger(__name__)
 
-CLAIMABLE_DOCUMENT_STATUSES = {"pending", "uploaded"}
-INGESTION_FAILED_MESSAGE = (
-    "Ingestion timed out while processing. Please retry the upload."
-)
-UPLOAD_FAILED_MESSAGE = (
-    "Upload timed out. The file was not received by storage. Please retry the upload."
-)
-
-image_description_agent = Agent(
-    instructions=(
-        "Describe this image concisely for a RAG retrieval system. "
-        "Include all visible text, objects, charts, diagrams, tables, and visual layout."
-    )
-)
+__all__ = [
+    "claim_document_for_ingestion",
+    "fail_stale_pending_documents",
+    "fail_stale_processing_documents",
+    "ingest_document_by_id",
+    "mark_document_upload_failed",
+    "mark_pending_document_uploaded_if_object_exists",
+    "process_unprocessed_notebook_documents",
+    "register_pending_notebook_document",
+]
 
 
-def _image_chunk_document(
-    *,
-    description: str,
+async def _load_source_bytes(
     document: NotebookDocument,
-    source: str,
-    s3_key: str | None,
-    media_type: str,
-) -> Document:
-    """Build the ``image`` chunk Document shared by the direct-image upload and
-    embedded-PDF-image paths (same metadata shape, only ``source``/``s3_key`` vary).
+    settings: Settings,
+    store: S3Store | None,
+) -> tuple[bytes, str]:
+    """Resolve the raw bytes for a document (DB note vs S3 object) and its
+    ``source`` key, enforcing the max-document-size limit.
     """
-    return Document(
-        page_content=description,
-        metadata={
-            "source": source,
-            "document_id": str(document.id),
-            "chunk_type": "image",
-            "s3_key": s3_key,
-            "s3_bucket": document.s3_bucket,
-            "media_type": media_type,
-        },
-    )
-
-
-async def _describe_image(image_bytes: bytes, label: str, media_type: str) -> str:
-    """Call the vision LLM to describe an image; fall back to label on any failure.
-
-    Retries transient provider errors first (via the shared helper) — a fallback
-    placeholder is baked into the index permanently, degrading every future
-    retrieval for the document, so it should be a last resort.
-    """
-    if not chat_provider_is_configured():
-        return f"Image: {label}"
-    try:
-        result = await run_agent_with_retry(
-            image_description_agent,
-            [BinaryContent(data=image_bytes, media_type=media_type)],
-            model=resolve_chat_provider(),
+    if document.content is not None:
+        body = document.content.encode("utf-8")
+        source_key = f"db-notes/{document.id}"
+        logger.info(
+            "Reading document content from database (note type) for "
+            "document_id=%s, key=%s",
+            document.id,
+            source_key,
         )
-        return result.output.strip() or f"Image: {label}"
-    except Exception:
-        logger.warning("LLM image description failed for %s", label)
-        return f"Image: {label}"
-
-
-# Embedded images smaller than this (in either dimension, px) are almost always
-# logos, icons, bullets, or spacers — not worth a vision call or an index entry.
-_MIN_EMBEDDED_IMAGE_DIMENSION = 64
-
-# Cap concurrent vision-LLM calls so an image-heavy PDF doesn't fan out hundreds
-# of simultaneous requests (provider rate limits / 429s / ingestion timeout).
-# Module-level semaphore so the cap applies across all concurrent ingestion tasks.
-_PDF_IMAGE_VISION_CONCURRENCY = 5
-_pdf_image_vision_semaphore = asyncio.Semaphore(_PDF_IMAGE_VISION_CONCURRENCY)
-
-
-async def _transition_document(
-    document: NotebookDocument,
-    status: str,
-    *,
-    error_message: str | None = None,
-    event_cls: type[DocumentEvent],
-) -> None:
-    """Persist a status transition and emit its domain event."""
-    document.status = status
-    document.error_message = error_message
-    document.updated_at = datetime.now(UTC)
-    await document.save()
-    await domain_event_bus.emit(event_cls(document))
-
-
-def _extract_pdf_image_bytes(
-    pdf_doc: pymupdf.Document, xref: int
-) -> tuple[bytes, str, str]:
-    """Return ``(image_bytes, extension, media_type)`` for an embedded image.
-
-    Follows the official PyMuPDF recipe: ``extract_image`` yields the image in
-    its native encoding; formats a vision model/browser cannot read are
-    re-rendered to RGB PNG via a ``Pixmap`` (handling CMYK/alpha).
-    """
-    base = pdf_doc.extract_image(xref)
-    ext = base["ext"].lower()
-    media_type = IMAGE_MEDIA_TYPES.get(ext)
-    if media_type is not None:
-        return base["image"], ext, media_type
-
-    pix = pymupdf.Pixmap(pdf_doc, xref)
-    if pix.n - pix.alpha > 3:  # CMYK / multi-channel → convert to RGB first
-        pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
-    return pix.tobytes("png"), "png", "image/png"
-
-
-def _collect_pdf_images(
-    pdf_bytes: bytes,
-    key_prefix: str,
-    filename: str,
-) -> list[tuple[str, bytes, str, str]]:
-    """Extract embedded PDF images, returning (s3_key, bytes, media_type, label).
-
-    Uses the official ``page.get_images`` + ``Document.extract_image`` recipe so
-    only images actually embedded in the document are processed — each xref once
-    — rather than rendering every page. Pure CPU work; run via asyncio.to_thread.
-    """
-    seen_xrefs: set[int] = set()
-    images: list[tuple[str, bytes, str, str]] = []
-    pdf_doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
-    try:
-        for page_index in range(len(pdf_doc)):
-            # get_images(full=True) tuple: (xref, smask, width, height, ...).
-            for img in pdf_doc[page_index].get_images(full=True):
-                xref, width, height = img[0], img[2], img[3]
-                if xref in seen_xrefs:
-                    continue
-                seen_xrefs.add(xref)
-
-                # Skip logos/icons/spacers before the costlier extract_image call.
-                if (
-                    width < _MIN_EMBEDDED_IMAGE_DIMENSION
-                    or height < _MIN_EMBEDDED_IMAGE_DIMENSION
-                ):
-                    continue
-
-                image_bytes, ext, media_type = _extract_pdf_image_bytes(pdf_doc, xref)
-                image_key = f"{key_prefix}/images/img_{xref}.{ext}"
-                label = f"image on page {page_index + 1} of {filename}"
-                images.append((image_key, image_bytes, media_type, label))
-    finally:
-        pdf_doc.close()
-    return images
-
-
-async def _extract_pdf_images(
-    document: NotebookDocument,
-    pdf_bytes: bytes,
-    store: S3Store,
-) -> list[Document]:
-    """Extract embedded images from a PDF, upload them to S3, and describe them."""
-    if not document.s3_key or not document.s3_bucket:
-        raise ValueError(
-            "Cannot extract embedded images from a PDF without S3 bucket/key"
+    else:
+        logger.info(
+            "Fetching document content from S3: bucket=%s, key=%s",
+            document.s3_bucket,
+            document.s3_key,
         )
-
-    key_prefix = document.s3_key.rsplit("/", 1)[0]
-    images = await asyncio.to_thread(
-        _collect_pdf_images, pdf_bytes, key_prefix, document.filename
-    )
-    if not images:
-        logger.info("No embedded images found in PDF %s", document.filename)
-        return []
-
-    await asyncio.gather(
-        *(
-            obstore.put_async(
-                store,
-                image_key,
-                image_bytes,
-                attributes={"Content-Type": media_type},
+        if not store:
+            raise ValueError("S3 store must be provided for S3-based ingestion")
+        if not document.s3_bucket or not document.s3_key:
+            raise ValueError(
+                "Cannot fetch document from S3 without bucket/key for ingestion"
             )
-            for image_key, image_bytes, media_type, _ in images
-        )
-    )
+        body = await get_object_bytes(store, document.s3_key)
+        source_key = document.s3_key
 
-    # Describe images concurrently but bounded — sequential vision calls on an
-    # image-heavy PDF can exceed the ingestion timeout, while an unbounded
-    # gather can hammer the provider into rate limits. The module-level semaphore
-    # caps concurrency across all concurrent ingestion tasks, not just within one PDF.
-    async def _bounded(data: bytes, label: str, media_type: str) -> str:
-        async with _pdf_image_vision_semaphore:
-            return await _describe_image(data, label, media_type)
+    if len(body) > settings.notebook_max_document_bytes:
+        raise ValueError(
+            f"Document is {len(body)} bytes, above the "
+            f"{settings.notebook_max_document_bytes}-byte ingestion limit"
+        )
+    return body, source_key
 
-    descriptions = await asyncio.gather(
-        *(_bounded(data, label, media_type) for _, data, media_type, label in images)
-    )
-    image_docs = [
-        _image_chunk_document(
-            description=description,
-            document=document,
-            source=document.s3_key,
-            s3_key=image_key,
-            media_type=media_type,
-        )
-        for (image_key, _, media_type, _), description in zip(
-            images, descriptions, strict=True
-        )
-    ]
+
+async def _build_split_documents(
+    document: NotebookDocument,
+    body: bytes,
+    source_key: str,
+    settings: Settings,
+    store: S3Store | None,
+) -> list[Document]:
+    """Turn raw bytes into non-empty chunk Documents (text chunks plus, for
+    PDFs, described embedded images), enforcing the per-document chunk limit.
+    """
     logger.info(
-        "Extracted %d embedded image(s) from PDF %s",
-        len(image_docs),
+        "Ingesting document %s (%s bytes): starting chunking...",
+        document.filename,
+        len(body),
+    )
+    suffix = Path(document.filename).suffix.lower()
+    if suffix in IMAGE_EXTENSIONS:
+        media_type = IMAGE_MEDIA_TYPES.get(suffix.lstrip("."), "image/jpeg")
+        description = await describe_image(body, document.filename, media_type)
+        split_docs: list[Document] = [
+            build_image_chunk_document(
+                description=description,
+                document=document,
+                source=source_key,
+                s3_key=document.s3_key,
+                media_type=media_type,
+            )
+        ]
+    else:
+        # chunk_document is pure CPU (pymupdf/docx parsing) — keep it off the
+        # event loop so ingestion doesn't stall the API server.
+        chunking = asyncio.to_thread(
+            chunk_document,
+            ChunkingRequest(
+                content=body,
+                filename=document.filename,
+                source=source_key,
+                document_id=str(document.id),
+            ),
+            settings,
+        )
+        if suffix == ".pdf" and document.s3_bucket and document.s3_key and store:
+            # Text chunking and embedded-image extraction are independent
+            # passes over the same bytes — run them concurrently.
+            split_docs, image_docs = await asyncio.gather(
+                chunking, extract_pdf_images(document, body, store)
+            )
+            split_docs = split_docs + image_docs
+        else:
+            split_docs = await chunking
+
+    split_docs = [doc for doc in split_docs if doc.page_content.strip()]
+    if not split_docs:
+        raise ValueError("No extractable text content in document")
+    if len(split_docs) > settings.notebook_max_chunks_per_document:
+        raise ValueError(
+            f"Document produced {len(split_docs)} chunks, above the "
+            f"{settings.notebook_max_chunks_per_document}-chunk ingestion limit"
+        )
+    return split_docs
+
+
+async def _embed_and_persist_chunks(
+    document: NotebookDocument,
+    split_docs: list[Document],
+) -> None:
+    """Embed the chunk texts and replace the document's stored chunks."""
+    chunk_texts = [doc.page_content for doc in split_docs]
+
+    logger.info(
+        "Document %s split into %d chunk(s).", document.filename, len(chunk_texts)
+    )
+    if sum(len(text) for text in chunk_texts) < 20:
+        logger.warning(
+            "Extracted unusually small text content from %s", document.filename
+        )
+
+    logger.info(
+        "Generating embeddings for %d chunks of %s...",
+        len(split_docs),
         document.filename,
     )
-    return image_docs
+    embeddings = await embed_texts(chunk_texts)
+    if len(embeddings) != len(chunk_texts):
+        raise ValueError(
+            f"Embedding provider returned {len(embeddings)} embeddings for "
+            f"{len(chunk_texts)} chunks in document {document.filename!r}"
+        )
 
-
-async def _fail_stale_documents(
-    query: dict[str, Any],
-    error_message: str,
-    warning_log_template: str,
-) -> int:
-    stale_docs = await NotebookDocument.find(query).to_list()
-    if not stale_docs:
-        return 0
+    logger.info(
+        "Indexing %d chunks in database for %s...", len(split_docs), document.filename
+    )
+    await NotebookDocumentChunk.find({"document_id": document.id}).delete()
     now = datetime.now(UTC)
-    await NotebookDocument.find(query).update_many(
-        {
-            "$set": {
-                "status": "failed",
-                "error_message": error_message,
-                "updated_at": now,
-            }
-        }
-    )
-    for doc in stale_docs:
-        doc.status = "failed"
-        doc.error_message = error_message
-        doc.updated_at = now
-        await domain_event_bus.emit(DocumentFailed(doc))
-    logger.warning(warning_log_template, len(stale_docs))
-    return len(stale_docs)
-
-
-async def fail_stale_processing_documents(
-    settings: Settings,
-) -> int:
-    timeout_threshold = datetime.now(UTC) - timedelta(
-        minutes=settings.file_ingestion_processing_timeout_minutes,
-    )
-    return await _fail_stale_documents(
-        query={
-            "status": "processing",
-            "updated_at": {"$lte": timeout_threshold},
-        },
-        error_message=INGESTION_FAILED_MESSAGE,
-        warning_log_template="Marked %s stale processing documents as failed",
+    await NotebookDocumentChunk.insert_many(
+        [
+            NotebookDocumentChunk(
+                document_id=document.id,
+                notebook_id=document.notebook_id,
+                user_id=document.user_id,
+                chunk_index=idx,
+                content=split_doc.page_content,
+                embedding=embeddings[idx],
+                chunk_metadata=split_doc.metadata,
+                created_at=now,
+                updated_at=now,
+            )
+            for idx, split_doc in enumerate(split_docs)
+        ]
     )
 
 
-async def fail_stale_pending_documents(
-    settings: Settings,
-) -> int:
-    timeout_threshold = datetime.now(UTC) - timedelta(
-        minutes=settings.file_ingestion_processing_timeout_minutes,
-    )
-    return await _fail_stale_documents(
-        query={"status": "pending", "created_at": {"$lte": timeout_threshold}},
-        error_message=UPLOAD_FAILED_MESSAGE,
-        warning_log_template="Marked %s stale pending documents as failed",
-    )
-
-
-async def register_pending_notebook_document(
-    *,
-    notebook_id: UUID,
-    user_id: UUID,
-    bucket: str,
-    key: str,
-    filename: str,
-    content_type: str | None,
-) -> NotebookDocument:
-    document = NotebookDocument(
-        notebook_id=notebook_id,
-        user_id=user_id,
-        s3_bucket=bucket,
-        s3_key=key,
-        filename=filename,
-        content_type=content_type,
-        status="pending",
-    )
-    await document.insert()
-    await domain_event_bus.emit(DocumentRegistered(document))
-    return document
-
-
-async def mark_pending_document_uploaded_if_object_exists(
+async def _run_document_ingestion(
     document: NotebookDocument,
     settings: Settings,
-    *,
     store: S3Store | None,
-) -> bool:
-    if document.status != "pending":
-        return document.status == "uploaded"
+) -> None:
+    body, source_key = await _load_source_bytes(document, settings, store)
+    split_docs = await _build_split_documents(
+        document, body, source_key, settings, store
+    )
+    await _embed_and_persist_chunks(document, split_docs)
+    await transition_document(document, "indexed", event_cls=DocumentIndexed)
+    logger.info(
+        "Successfully ingested and indexed document %s (%d chunks).",
+        document.filename,
+        len(split_docs),
+    )
 
-    resolved_store = store or get_s3_store(settings)
-    if not document.s3_bucket or not document.s3_key:
-        raise ValueError(
-            "Cannot check S3 object existence for a pending document without bucket/key"
+
+async def ingest_document_by_id(
+    document_id: UUID,
+    settings: Settings,
+    *,
+    store: S3Store | None = None,
+    size: int | None = None,
+) -> None:
+    document = await claim_document_for_ingestion(document_id, size=size)
+    if document is None:
+        logger.info(
+            "Skipping ingestion for document %s: missing or not claimable",
+            document_id,
         )
-    try:
-        metadata = await obstore.head_async(resolved_store, document.s3_key)
-    except FileNotFoundError:
-        logger.debug("Notebook document upload is not visible yet: %s", document.id)
-        return False
+        return
+    logger.info(
+        "Claimed document %s (%s) for ingestion", document_id, document.filename
+    )
 
-    document.size = metadata["size"]
-    await _transition_document(document, "uploaded", event_cls=DocumentUploaded)
-    return True
+    try:
+        resolved_store = store or get_s3_store(settings)
+        await _run_document_ingestion(document, settings, resolved_store)
+    except (obstore.exceptions.BaseError, TransientProviderError) as exc:
+        logger.exception(
+            "Notebook document ingestion hit a transient error for %s", document_id
+        )
+        await record_ingestion_outcome(
+            document_id,
+            status="uploaded",
+            error_message=None,
+            event=DocumentUploaded,
+        )
+        raise TransientIngestionError(str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Notebook document ingestion failed for %s", document_id)
+        await record_ingestion_outcome(
+            document_id,
+            status="failed",
+            error_message=str(exc)[:4000],
+            event=DocumentFailed,
+            only_if_processing=True,
+        )
+    except BaseException:
+        # CancelledError (and other BaseException subclasses) must not leave the
+        # document permanently stuck at "processing". Mark it failed so the stale
+        # timeout doesn't need to clean it up, then re-raise so the cancellation
+        # propagates normally.
+        logger.warning("Ingestion cancelled for document %s", document_id)
+        await record_ingestion_outcome(
+            document_id,
+            status="failed",
+            error_message="Ingestion was interrupted. Please retry the upload.",
+            event=DocumentFailed,
+            only_if_processing=True,
+        )
+        raise
 
 
 async def process_unprocessed_notebook_documents(
@@ -413,267 +351,3 @@ async def process_unprocessed_notebook_documents(
         stats["ingested"] += 1
 
     return stats
-
-
-async def claim_document_for_ingestion(
-    document_id: UUID,
-    *,
-    size: int | None = None,
-) -> NotebookDocument | None:
-    set_fields: dict[str, Any] = {
-        "status": "processing",
-        "error_message": None,
-        "updated_at": datetime.now(UTC),
-    }
-    if size is not None:
-        set_fields["size"] = size
-    document = cast(
-        NotebookDocument | None,
-        await NotebookDocument.find_one(
-            {"_id": document_id, "status": {"$in": list(CLAIMABLE_DOCUMENT_STATUSES)}},
-        ).update_one({"$set": set_fields}, response_type=UpdateResponse.NEW_DOCUMENT),
-    )
-    if document is None:
-        return None
-    await domain_event_bus.emit(DocumentProcessing(document))
-    return document
-
-
-async def mark_document_upload_failed(
-    *,
-    key: str,
-    user_id: UUID,
-    error_message: str | None = None,
-) -> bool:
-    document = await NotebookDocument.find_one(
-        {"s3_key": key, "user_id": user_id},
-    )
-    if document is None:
-        return False
-    if document.status in {"indexed", "processing", "uploaded"}:
-        return True
-    await _transition_document(
-        document,
-        "failed",
-        error_message=(
-            error_message or "Upload failed before object storage accepted the file."
-        )[:4000],
-        event_cls=DocumentFailed,
-    )
-    return True
-
-
-async def _run_document_ingestion(
-    document: NotebookDocument,
-    settings: Settings,
-    store: S3Store | None,
-) -> None:
-    if document.content is not None:
-        body = document.content.encode("utf-8")
-        source_key = f"db-notes/{document.id}"
-        logger.info(
-            "Reading document content from database (note type) for document_id=%s, key=%s",
-            document.id,
-            source_key,
-        )
-    else:
-        logger.info(
-            "Fetching document content from S3: bucket=%s, key=%s",
-            document.s3_bucket,
-            document.s3_key,
-        )
-        if not store:
-            raise ValueError("S3 store must be provided for S3-based ingestion")
-        if not document.s3_bucket or not document.s3_key:
-            raise ValueError(
-                "Cannot fetch document from S3 without bucket/key for ingestion"
-            )
-
-        body = await get_object_bytes(store, document.s3_key)
-        source_key = document.s3_key
-
-    if len(body) > settings.notebook_max_document_bytes:
-        raise ValueError(
-            f"Document is {len(body)} bytes, above the "
-            f"{settings.notebook_max_document_bytes}-byte ingestion limit"
-        )
-
-    logger.info(
-        "Ingesting document %s (%s bytes): starting chunking...",
-        document.filename,
-        len(body),
-    )
-    suffix = Path(document.filename).suffix.lower()
-    if suffix in IMAGE_EXTENSIONS:
-        media_type = IMAGE_MEDIA_TYPES.get(suffix.lstrip("."), "image/jpeg")
-        description = await _describe_image(body, document.filename, media_type)
-        split_docs: list[Document] = [
-            _image_chunk_document(
-                description=description,
-                document=document,
-                source=source_key,
-                s3_key=document.s3_key,
-                media_type=media_type,
-            )
-        ]
-    else:
-        # chunk_document is pure CPU (pymupdf/docx parsing) — keep it off the
-        # event loop so ingestion doesn't stall the API server.
-        chunking = asyncio.to_thread(
-            chunk_document,
-            ChunkingRequest(
-                content=body,
-                filename=document.filename,
-                source=source_key,
-                document_id=str(document.id),
-            ),
-            settings,
-        )
-        if suffix == ".pdf" and document.s3_bucket and document.s3_key and store:
-            # Text chunking and embedded-image extraction are independent
-            # passes over the same bytes — run them concurrently.
-            split_docs, image_docs = await asyncio.gather(
-                chunking, _extract_pdf_images(document, body, store)
-            )
-            split_docs = split_docs + image_docs
-        else:
-            split_docs = await chunking
-
-    split_docs = [doc for doc in split_docs if doc.page_content.strip()]
-    if not split_docs:
-        raise ValueError("No extractable text content in document")
-    if len(split_docs) > settings.notebook_max_chunks_per_document:
-        raise ValueError(
-            f"Document produced {len(split_docs)} chunks, above the "
-            f"{settings.notebook_max_chunks_per_document}-chunk ingestion limit"
-        )
-    chunk_texts = [doc.page_content for doc in split_docs]
-
-    logger.info(
-        "Document %s split into %d chunk(s).", document.filename, len(chunk_texts)
-    )
-    if sum(len(text) for text in chunk_texts) < 20:
-        logger.warning(
-            "Extracted unusually small text content from %s", document.filename
-        )
-
-    logger.info(
-        "Generating embeddings for %d chunks of %s...",
-        len(split_docs),
-        document.filename,
-    )
-    embeddings = await embed_texts(chunk_texts)
-    if len(embeddings) != len(chunk_texts):
-        raise ValueError(
-            f"Embedding provider returned {len(embeddings)} embeddings for "
-            f"{len(chunk_texts)} chunks in document {document.filename!r}"
-        )
-
-    logger.info(
-        "Indexing %d chunks in database for %s...", len(split_docs), document.filename
-    )
-    await NotebookDocumentChunk.find({"document_id": document.id}).delete()
-    now = datetime.now(UTC)
-    await NotebookDocumentChunk.insert_many(
-        [
-            NotebookDocumentChunk(
-                document_id=document.id,
-                notebook_id=document.notebook_id,
-                user_id=document.user_id,
-                chunk_index=idx,
-                content=split_doc.page_content,
-                embedding=embeddings[idx],
-                chunk_metadata=split_doc.metadata,
-                created_at=now,
-                updated_at=now,
-            )
-            for idx, split_doc in enumerate(split_docs)
-        ]
-    )
-
-    await _transition_document(document, "indexed", event_cls=DocumentIndexed)
-    logger.info(
-        "Successfully ingested and indexed document %s (%d chunks).",
-        document.filename,
-        len(split_docs),
-    )
-
-
-async def _record_ingestion_outcome(
-    document_id: UUID,
-    *,
-    status: str,
-    error_message: str | None,
-    event: type[DocumentUploaded] | type[DocumentFailed],
-    only_if_processing: bool = False,
-) -> None:
-    """Re-fetch the document and persist a terminal/transient ingestion outcome.
-
-    The ``ingest_document_by_id`` exception handlers run after the in-hand
-    ``document`` may be stale, so the row is re-read before updating. When
-    ``only_if_processing`` is set, a document no longer in ``"processing"`` is
-    left untouched (a concurrent handler already finalized it).
-    """
-    document = await NotebookDocument.find_one({"_id": document_id})
-    if document is None or (only_if_processing and document.status != "processing"):
-        return
-    await _transition_document(
-        document, status, error_message=error_message, event_cls=event
-    )
-
-
-async def ingest_document_by_id(
-    document_id: UUID,
-    settings: Settings,
-    *,
-    store: S3Store | None = None,
-    size: int | None = None,
-) -> None:
-    document = await claim_document_for_ingestion(document_id, size=size)
-    if document is None:
-        logger.info(
-            "Skipping ingestion for document %s: missing or not claimable",
-            document_id,
-        )
-        return
-    logger.info(
-        "Claimed document %s (%s) for ingestion", document_id, document.filename
-    )
-
-    try:
-        resolved_store = store or get_s3_store(settings)
-        await _run_document_ingestion(document, settings, resolved_store)
-    except (obstore.exceptions.BaseError, TransientProviderError) as exc:
-        logger.exception(
-            "Notebook document ingestion hit a transient error for %s", document_id
-        )
-        await _record_ingestion_outcome(
-            document_id,
-            status="uploaded",
-            error_message=None,
-            event=DocumentUploaded,
-        )
-        raise TransientIngestionError(str(exc)) from exc
-    except Exception as exc:
-        logger.exception("Notebook document ingestion failed for %s", document_id)
-        await _record_ingestion_outcome(
-            document_id,
-            status="failed",
-            error_message=str(exc)[:4000],
-            event=DocumentFailed,
-            only_if_processing=True,
-        )
-    except BaseException:
-        # CancelledError (and other BaseException subclasses) must not leave the
-        # document permanently stuck at "processing". Mark it failed so the stale
-        # timeout doesn't need to clean it up, then re-raise so the cancellation
-        # propagates normally.
-        logger.warning("Ingestion cancelled for document %s", document_id)
-        await _record_ingestion_outcome(
-            document_id,
-            status="failed",
-            error_message="Ingestion was interrupted. Please retry the upload.",
-            event=DocumentFailed,
-            only_if_processing=True,
-        )
-        raise
