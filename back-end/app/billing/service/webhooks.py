@@ -5,25 +5,17 @@ reconciliation onto ``BillingCustomer`` rows.
 from __future__ import annotations
 
 import base64
-import hashlib
-import hmac
 import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from polar_sdk.webhooks import (
-    WebhookUnknownTypeError,
-    WebhookVerificationError,
-    validate_event,
-)
-from pydantic import ValidationError
+from standardwebhooks.webhooks import Webhook, WebhookVerificationError
 
 from app.billing.exceptions import WebhookSignatureInvalidError
 from app.billing.models import BillingCustomer, ProcessedWebhookEvent
 from app.billing.service.allowances import ACTIVE_SUBSCRIPTION_STATUSES
 
 logger = logging.getLogger(__name__)
-WEBHOOK_TOLERANCE_SECONDS = 300
 
 
 def _parse_polar_datetime(value: Any) -> datetime | None:
@@ -40,88 +32,30 @@ def _parse_polar_datetime(value: Any) -> datetime | None:
 def verify_webhook_signature(
     payload_bytes: bytes, headers: dict[str, str], secret: str
 ) -> None:
-    """Verify a Polar webhook signature using the official Polar SDK.
+    """Verify a Polar webhook signature using the Standard Webhooks signer.
 
-    Delegates to ``polar_sdk.webhooks.validate_event``, which implements the
-    Standard Webhooks scheme exactly as Polar signs its deliveries (including
-    the non-obvious secret key derivation and the timestamp-tolerance check).
+    Polar's Python SDK base64-encodes the full webhook secret string
+    (including the ``whsec_`` prefix) before constructing the
+    ``standardwebhooks.Webhook`` verifier. We mirror that exact behavior here
+    while intentionally avoiding the SDK's event-schema parsing step, because
+    this app handles the raw JSON payload itself.
 
     Raises ``WebhookSignatureInvalidError`` on a missing/malformed header, a
     stale timestamp, or a signature mismatch.
     """
     try:
-        validate_event(payload_bytes, headers, secret)
+        base64_secret = base64.b64encode(secret.encode()).decode()
+        webhook = Webhook(base64_secret)
+        webhook.verify(payload_bytes, headers)
     except WebhookVerificationError as exc:
-        if _verify_standard_webhook_signature_fallback(
-            payload_bytes, headers, secret
-        ):
-            logger.info(
-                "Polar webhook verified via Standard Webhooks fallback after SDK rejection"
-            )
-            return
         logger.warning("Polar webhook rejected: %s", exc)
         raise WebhookSignatureInvalidError() from exc
-    except (WebhookUnknownTypeError, ValidationError):
-        # The signature is verified before the payload is parsed, so an unknown
-        # event type or a schema the pinned SDK does not model is NOT a
-        # signature failure. Downstream handling works off the raw JSON dict,
-        # so let these through as successfully verified.
-        return
     except ValueError as exc:
         # A malformed signature header (non-base64, or missing the "v1," version
-        # prefix) makes the SDK raise a raw decode/parse error before it can
-        # report a mismatch. Pydantic's ValidationError is also a ValueError but
-        # is handled above, so anything reaching here is a bad signature header.
+        # prefix) makes the verifier raise a raw decode/parse error before it
+        # can report a mismatch.
         logger.warning("Polar webhook rejected: malformed signature header (%s)", exc)
         raise WebhookSignatureInvalidError() from exc
-
-
-def _verify_standard_webhook_signature_fallback(
-    payload_bytes: bytes, headers: dict[str, str], secret: str
-) -> bool:
-    """Fallback signature check decoupled from Polar SDK payload parsing.
-
-    ``polar_sdk.validate_event`` currently couples signature verification with
-    event-schema parsing. When the pinned SDK lags newer payload shapes such as
-    ``customer.state_changed``, valid deliveries can be rejected before the app
-    sees the raw JSON. This fallback verifies the Standard Webhooks MAC only.
-    """
-    webhook_id = headers.get("webhook-id", "")
-    webhook_timestamp = headers.get("webhook-timestamp", "")
-    signature_header = headers.get("webhook-signature", "")
-    if not webhook_id or not webhook_timestamp or not signature_header or not secret:
-        return False
-
-    try:
-        timestamp = int(webhook_timestamp)
-    except ValueError:
-        return False
-
-    now = int(datetime.now(UTC).timestamp())
-    if abs(now - timestamp) > WEBHOOK_TOLERANCE_SECONDS:
-        return False
-
-    try:
-        payload_text = payload_bytes.decode("utf-8")
-    except UnicodeDecodeError:
-        return False
-
-    signed_content = f"{webhook_id}.{webhook_timestamp}.{payload_text}".encode(
-        "utf-8"
-    )
-    expected_signature = base64.b64encode(
-        hmac.new(secret.encode("utf-8"), signed_content, hashlib.sha256).digest()
-    ).decode("ascii")
-
-    candidate_signatures = [
-        part.split(",", 1)[1]
-        for part in signature_header.split()
-        if part.startswith("v1,") and "," in part
-    ]
-    return any(
-        hmac.compare_digest(signature, expected_signature)
-        for signature in candidate_signatures
-    )
 
 
 def _apply_subscription_fields(

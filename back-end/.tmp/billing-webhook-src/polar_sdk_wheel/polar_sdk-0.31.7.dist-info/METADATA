@@ -1,0 +1,952 @@
+Metadata-Version: 2.4
+Name: polar-sdk
+Version: 0.31.7
+Summary: Polar SDK for Python
+Author: Polar
+Requires-Python: >=3.9.2
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: 3.14
+Requires-Dist: httpcore (>=1.0.9)
+Requires-Dist: httpx (>=0.28.1)
+Requires-Dist: jsonpath-python (>=1.0.6)
+Requires-Dist: pydantic (>=2.11.2)
+Requires-Dist: standardwebhooks (>=1.0.0,<2.0.0)
+Project-URL: Repository, https://github.com/polarsource/polar-python.git
+Description-Content-Type: text/markdown
+
+# polar-sdk
+
+<div align="left">
+    <a href="https://www.speakeasy.com/?utm_source=polar-sdk&utm_campaign=python"><img src="https://custom-icon-badges.demolab.com/badge/-Built%20By%20Speakeasy-212015?style=for-the-badge&logoColor=FBE331&logo=speakeasy&labelColor=545454" /></a>
+    <a href="https://opensource.org/licenses/MIT">
+        <img src="https://img.shields.io/badge/License-MIT-blue.svg" style="width: 100px; height: 28px;" />
+    </a>
+</div>
+
+<!-- Start Table of Contents [toc] -->
+## Table of Contents
+<!-- $toc-max-depth=2 -->
+* [polar-sdk](https://github.com/polarsource/polar-python/blob/master/#polar-sdk)
+  * [SDK Installation](https://github.com/polarsource/polar-python/blob/master/#sdk-installation)
+  * [IDE Support](https://github.com/polarsource/polar-python/blob/master/#ide-support)
+  * [SDK Example Usage](https://github.com/polarsource/polar-python/blob/master/#sdk-example-usage)
+  * [Webhook support](https://github.com/polarsource/polar-python/blob/master/#webhook-support)
+  * [Available Resources and Operations](https://github.com/polarsource/polar-python/blob/master/#available-resources-and-operations)
+  * [Retries](https://github.com/polarsource/polar-python/blob/master/#retries)
+  * [Error Handling](https://github.com/polarsource/polar-python/blob/master/#error-handling)
+  * [Server Selection](https://github.com/polarsource/polar-python/blob/master/#server-selection)
+  * [Custom HTTP Client](https://github.com/polarsource/polar-python/blob/master/#custom-http-client)
+  * [Authentication](https://github.com/polarsource/polar-python/blob/master/#authentication)
+  * [Resource Management](https://github.com/polarsource/polar-python/blob/master/#resource-management)
+  * [Debugging](https://github.com/polarsource/polar-python/blob/master/#debugging)
+  * [Pagination](https://github.com/polarsource/polar-python/blob/master/#pagination)
+* [Development](https://github.com/polarsource/polar-python/blob/master/#development)
+  * [Maturity](https://github.com/polarsource/polar-python/blob/master/#maturity)
+  * [Contributions](https://github.com/polarsource/polar-python/blob/master/#contributions)
+
+<!-- End Table of Contents [toc] -->
+
+<!-- Start SDK Installation [installation] -->
+## SDK Installation
+
+> [!NOTE]
+> **Python version upgrade policy**
+>
+> Once a Python version reaches its [official end of life date](https://devguide.python.org/versions/), a 3-month grace period is provided for users to upgrade. Following this grace period, the minimum python version supported in the SDK will be updated.
+
+The SDK can be installed with *uv*, *pip*, or *poetry* package managers.
+
+### uv
+
+*uv* is a fast Python package installer and resolver, designed as a drop-in replacement for pip and pip-tools. It's recommended for its speed and modern Python tooling capabilities.
+
+```bash
+uv add polar-sdk
+```
+
+### PIP
+
+*PIP* is the default package installer for Python, enabling easy installation and management of packages from PyPI via the command line.
+
+```bash
+pip install polar-sdk
+```
+
+### Poetry
+
+*Poetry* is a modern tool that simplifies dependency management and package publishing by using a single `pyproject.toml` file to handle project metadata and dependencies.
+
+```bash
+poetry add polar-sdk
+```
+
+### Shell and script usage with `uv`
+
+You can use this SDK in a Python shell with [uv](https://docs.astral.sh/uv/) and the `uvx` command that comes with it like so:
+
+```shell
+uvx --from polar-sdk python
+```
+
+It's also possible to write a standalone Python script without needing to set up a whole project like so:
+
+```python
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.9"
+# dependencies = [
+#     "polar-sdk",
+# ]
+# ///
+
+from polar_sdk import Polar
+
+sdk = Polar(
+  # SDK arguments
+)
+
+# Rest of script here...
+```
+
+Once that is saved to a file, you can run it with `uv run script.py` where
+`script.py` can be replaced with the actual file name.
+<!-- End SDK Installation [installation] -->
+
+<!-- Start IDE Support [idesupport] -->
+## IDE Support
+
+### PyCharm
+
+Generally, the SDK will work well with most IDEs out of the box. However, when using PyCharm, you can enjoy much better integration with Pydantic by installing an additional plugin.
+
+- [PyCharm Pydantic Plugin](https://docs.pydantic.dev/latest/integrations/pycharm/)
+<!-- End IDE Support [idesupport] -->
+
+<!-- Start SDK Example Usage [usage] -->
+## SDK Example Usage
+
+### Example
+
+```python
+# Synchronous Example
+from polar_sdk import Polar
+
+
+with Polar(
+    access_token="<YOUR_BEARER_TOKEN_HERE>",
+) as polar:
+
+    res = polar.organizations.list_organizations(page=1, limit=10)
+
+    while res is not None:
+        # Handle items
+
+        res = res.next()
+```
+
+</br>
+
+The same SDK client can also be used to make asynchronous requests by importing asyncio.
+
+```python
+# Asynchronous Example
+import asyncio
+from polar_sdk import Polar
+
+async def main():
+
+    async with Polar(
+        access_token="<YOUR_BEARER_TOKEN_HERE>",
+    ) as polar:
+
+        res = await polar.organizations.list_organizations_async(page=1, limit=10)
+
+        while res is not None:
+            # Handle items
+
+            res = res.next()
+
+asyncio.run(main())
+```
+<!-- End SDK Example Usage [usage] -->
+
+## Webhook support
+
+The SDK has built-in support to validate webhook events. Here is an example with Flask:
+
+```py
+from flask import Flask, request
+from polar_sdk.webhooks import (
+    validate_event,
+    WebhookUnknownTypeError,
+    WebhookVerificationError,
+)
+
+app = Flask(__name__)
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    try:
+        event = validate_event(
+            payload=request.data,
+            headers=request.headers,
+            secret='<YOUR_WEBHOOK_SECRET>',
+        )
+
+        # Process the event
+
+        return "", 202
+    except WebhookVerificationError:
+        return "", 403
+    except WebhookUnknownTypeError:
+        # The signature was valid, but the event `type` is not known to this
+        # SDK version (e.g. the API has shipped a new event type and you
+        # haven't upgraded yet). Safe to ignore for forward compatibility,
+        # or log and acknowledge so the webhook isn't retried.
+        return "", 202
+```
+
+`WebhookUnknownTypeError` is raised after signature verification but before
+payload parsing, so a stale SDK can still acknowledge unknown events instead
+of crashing on a `pydantic.ValidationError`.
+
+<!-- Start Available Resources and Operations [operations] -->
+## Available Resources and Operations
+
+<details open>
+<summary>Available methods</summary>
+
+### [benefit_grants](https://github.com/polarsource/polar-python/blob/master/docs/sdks/benefitgrants/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/benefitgrants/README.md#list) - List Benefit Grants
+
+### [benefits](https://github.com/polarsource/polar-python/blob/master/docs/sdks/benefits/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/benefits/README.md#list) - List Benefits
+* [create](https://github.com/polarsource/polar-python/blob/master/docs/sdks/benefits/README.md#create) - Create Benefit
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/benefits/README.md#get) - Get Benefit
+* [update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/benefits/README.md#update) - Update Benefit
+* [delete](https://github.com/polarsource/polar-python/blob/master/docs/sdks/benefits/README.md#delete) - Delete Benefit
+* [grants](https://github.com/polarsource/polar-python/blob/master/docs/sdks/benefits/README.md#grants) - List Benefit Grants
+
+### [checkout_links](https://github.com/polarsource/polar-python/blob/master/docs/sdks/checkoutlinks/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/checkoutlinks/README.md#list) - List Checkout Links
+* [create](https://github.com/polarsource/polar-python/blob/master/docs/sdks/checkoutlinks/README.md#create) - Create Checkout Link
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/checkoutlinks/README.md#get) - Get Checkout Link
+* [update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/checkoutlinks/README.md#update) - Update Checkout Link
+* [delete](https://github.com/polarsource/polar-python/blob/master/docs/sdks/checkoutlinks/README.md#delete) - Delete Checkout Link
+
+### [checkouts](https://github.com/polarsource/polar-python/blob/master/docs/sdks/checkouts/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/checkouts/README.md#list) - List Checkout Sessions
+* [create](https://github.com/polarsource/polar-python/blob/master/docs/sdks/checkouts/README.md#create) - Create Checkout Session
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/checkouts/README.md#get) - Get Checkout Session
+* [update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/checkouts/README.md#update) - Update Checkout Session
+* [client_get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/checkouts/README.md#client_get) - Get Checkout Session from Client
+* [client_update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/checkouts/README.md#client_update) - Update Checkout Session from Client
+* [client_confirm](https://github.com/polarsource/polar-python/blob/master/docs/sdks/checkouts/README.md#client_confirm) - Confirm Checkout Session from Client
+
+### [custom_fields](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customfields/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customfields/README.md#list) - List Custom Fields
+* [create](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customfields/README.md#create) - Create Custom Field
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customfields/README.md#get) - Get Custom Field
+* [update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customfields/README.md#update) - Update Custom Field
+* [delete](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customfields/README.md#delete) - Delete Custom Field
+
+### [customer_meters](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customermeters/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customermeters/README.md#list) - List Customer Meters
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customermeters/README.md#get) - Get Customer Meter
+
+#### [customer_portal.benefit_grants](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarbenefitgrants/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarbenefitgrants/README.md#list) - List Benefit Grants
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarbenefitgrants/README.md#get) - Get Benefit Grant
+* [update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarbenefitgrants/README.md#update) - Update Benefit Grant
+
+#### [customer_portal.customer_meters](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarcustomermeters/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarcustomermeters/README.md#list) - List Meters
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarcustomermeters/README.md#get) - Get Customer Meter
+
+#### [customer_portal.customer_session](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customersessionsdk/README.md)
+
+* [introspect](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customersessionsdk/README.md#introspect) - Introspect Customer Session
+* [get_authenticated_user](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customersessionsdk/README.md#get_authenticated_user) - Get Authenticated Portal User
+
+#### [customer_portal.customers](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarcustomers/README.md)
+
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarcustomers/README.md#get) - Get Customer
+* [update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarcustomers/README.md#update) - Update Customer
+* [list_payment_methods](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarcustomers/README.md#list_payment_methods) - List Customer Payment Methods
+* [add_payment_method](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarcustomers/README.md#add_payment_method) - Add Customer Payment Method
+* [confirm_payment_method](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarcustomers/README.md#confirm_payment_method) - Confirm Customer Payment Method
+* [delete_payment_method](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarcustomers/README.md#delete_payment_method) - Delete Customer Payment Method
+* [request_email_update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarcustomers/README.md#request_email_update) - Request Email Change
+* [check_email_update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarcustomers/README.md#check_email_update) - Check Email Change Token
+* [verify_email_update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarcustomers/README.md#verify_email_update) - Verify Email Change
+
+#### [customer_portal.downloadables](https://github.com/polarsource/polar-python/blob/master/docs/sdks/downloadables/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/downloadables/README.md#list) - List Downloadables
+
+#### [customer_portal.license_keys](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarlicensekeys/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarlicensekeys/README.md#list) - List License Keys
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarlicensekeys/README.md#get) - Get License Key
+* [validate](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarlicensekeys/README.md#validate) - Validate License Key
+* [activate](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarlicensekeys/README.md#activate) - Activate License Key
+* [deactivate](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarlicensekeys/README.md#deactivate) - Deactivate License Key
+
+#### [customer_portal.members](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarmembers/README.md)
+
+* [list_members](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarmembers/README.md#list_members) - List Members
+* [add_member](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarmembers/README.md#add_member) - Add Member
+* [update_member](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarmembers/README.md#update_member) - Update Member
+* [remove_member](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarmembers/README.md#remove_member) - Remove Member
+
+#### [customer_portal.orders](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarorders/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarorders/README.md#list) - List Orders
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarorders/README.md#get) - Get Order
+* [update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarorders/README.md#update) - Update Order
+* [generate_invoice](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarorders/README.md#generate_invoice) - Generate Order Invoice
+* [invoice](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarorders/README.md#invoice) - Get Order Invoice
+* [receipt](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarorders/README.md#receipt) - Get Order Receipt
+* [get_payment_status](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarorders/README.md#get_payment_status) - Get Order Payment Status
+* [confirm_retry_payment](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarorders/README.md#confirm_retry_payment) - Confirm Retry Payment
+
+#### [customer_portal.organizations](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarorganizations/README.md)
+
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarorganizations/README.md#get) - Get Organization
+
+#### [customer_portal.seats](https://github.com/polarsource/polar-python/blob/master/docs/sdks/seats/README.md)
+
+* [list_seats](https://github.com/polarsource/polar-python/blob/master/docs/sdks/seats/README.md#list_seats) - List Seats
+* [assign_seat](https://github.com/polarsource/polar-python/blob/master/docs/sdks/seats/README.md#assign_seat) - Assign Seat
+* [revoke_seat](https://github.com/polarsource/polar-python/blob/master/docs/sdks/seats/README.md#revoke_seat) - Revoke Seat
+* [resend_invitation](https://github.com/polarsource/polar-python/blob/master/docs/sdks/seats/README.md#resend_invitation) - Resend Invitation
+* [list_claimed_subscriptions](https://github.com/polarsource/polar-python/blob/master/docs/sdks/seats/README.md#list_claimed_subscriptions) - List Claimed Subscriptions
+
+#### [customer_portal.subscriptions](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarsubscriptions/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarsubscriptions/README.md#list) - List Subscriptions
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarsubscriptions/README.md#get) - Get Subscription
+* [update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarsubscriptions/README.md#update) - Update Subscription
+* [cancel](https://github.com/polarsource/polar-python/blob/master/docs/sdks/polarsubscriptions/README.md#cancel) - Cancel Subscription
+
+#### [customer_portal.wallets](https://github.com/polarsource/polar-python/blob/master/docs/sdks/wallets/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/wallets/README.md#list) - List Wallets
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/wallets/README.md#get) - Get Wallet
+
+### [customer_seats](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customerseats/README.md)
+
+* [assign_seat](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customerseats/README.md#assign_seat) - Assign Seat
+* [list_seats](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customerseats/README.md#list_seats) - List Seats
+* [revoke_seat](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customerseats/README.md#revoke_seat) - Revoke Seat
+* [resend_invitation](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customerseats/README.md#resend_invitation) - Resend Invitation
+* [get_claim_info](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customerseats/README.md#get_claim_info) - Get Claim Info
+* [claim_seat](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customerseats/README.md#claim_seat) - Claim Seat
+
+### [customer_sessions](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customersessions/README.md)
+
+* [create](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customersessions/README.md#create) - Create Customer Session
+
+### [customers](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customers/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customers/README.md#list) - List Customers
+* [create](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customers/README.md#create) - Create Customer
+* [export](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customers/README.md#export) - Export Customers
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customers/README.md#get) - Get Customer
+* [update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customers/README.md#update) - Update Customer
+* [delete](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customers/README.md#delete) - Delete Customer
+* [get_external](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customers/README.md#get_external) - Get Customer by External ID
+* [update_external](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customers/README.md#update_external) - Update Customer by External ID
+* [delete_external](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customers/README.md#delete_external) - Delete Customer by External ID
+* [get_state](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customers/README.md#get_state) - Get Customer State
+* [get_state_external](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customers/README.md#get_state_external) - Get Customer State by External ID
+* [list_payment_methods](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customers/README.md#list_payment_methods) - List Customer Payment Methods
+* [list_payment_methods_external](https://github.com/polarsource/polar-python/blob/master/docs/sdks/customers/README.md#list_payment_methods_external) - List Customer Payment Methods by External ID
+
+### [discounts](https://github.com/polarsource/polar-python/blob/master/docs/sdks/discounts/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/discounts/README.md#list) - List Discounts
+* [create](https://github.com/polarsource/polar-python/blob/master/docs/sdks/discounts/README.md#create) - Create Discount
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/discounts/README.md#get) - Get Discount
+* [update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/discounts/README.md#update) - Update Discount
+* [delete](https://github.com/polarsource/polar-python/blob/master/docs/sdks/discounts/README.md#delete) - Delete Discount
+
+### [disputes](https://github.com/polarsource/polar-python/blob/master/docs/sdks/disputes/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/disputes/README.md#list) - List Disputes
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/disputes/README.md#get) - Get Dispute
+
+### [event_types](https://github.com/polarsource/polar-python/blob/master/docs/sdks/eventtypes/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/eventtypes/README.md#list) - List Event Types
+* [update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/eventtypes/README.md#update) - Update Event Type
+
+### [events](https://github.com/polarsource/polar-python/blob/master/docs/sdks/events/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/events/README.md#list) - List Events
+* [list_names](https://github.com/polarsource/polar-python/blob/master/docs/sdks/events/README.md#list_names) - List Event Names
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/events/README.md#get) - Get Event
+* [ingest](https://github.com/polarsource/polar-python/blob/master/docs/sdks/events/README.md#ingest) - Ingest Events
+
+### [files](https://github.com/polarsource/polar-python/blob/master/docs/sdks/files/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/files/README.md#list) - List Files
+* [create](https://github.com/polarsource/polar-python/blob/master/docs/sdks/files/README.md#create) - Create File
+* [uploaded](https://github.com/polarsource/polar-python/blob/master/docs/sdks/files/README.md#uploaded) - Complete File Upload
+* [update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/files/README.md#update) - Update File
+* [delete](https://github.com/polarsource/polar-python/blob/master/docs/sdks/files/README.md#delete) - Delete File
+
+### [license_keys](https://github.com/polarsource/polar-python/blob/master/docs/sdks/licensekeys/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/licensekeys/README.md#list) - List License Keys
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/licensekeys/README.md#get) - Get License Key
+* [update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/licensekeys/README.md#update) - Update License Key
+* [get_activation](https://github.com/polarsource/polar-python/blob/master/docs/sdks/licensekeys/README.md#get_activation) - Get Activation
+* [validate](https://github.com/polarsource/polar-python/blob/master/docs/sdks/licensekeys/README.md#validate) - Validate License Key
+* [activate](https://github.com/polarsource/polar-python/blob/master/docs/sdks/licensekeys/README.md#activate) - Activate License Key
+* [deactivate](https://github.com/polarsource/polar-python/blob/master/docs/sdks/licensekeys/README.md#deactivate) - Deactivate License Key
+
+### [members](https://github.com/polarsource/polar-python/blob/master/docs/sdks/members/README.md)
+
+* [list_members](https://github.com/polarsource/polar-python/blob/master/docs/sdks/members/README.md#list_members) - List Members
+* [create_member](https://github.com/polarsource/polar-python/blob/master/docs/sdks/members/README.md#create_member) - Create Member
+* [get_member](https://github.com/polarsource/polar-python/blob/master/docs/sdks/members/README.md#get_member) - Get Member
+* [update_member](https://github.com/polarsource/polar-python/blob/master/docs/sdks/members/README.md#update_member) - Update Member
+* [delete_member](https://github.com/polarsource/polar-python/blob/master/docs/sdks/members/README.md#delete_member) - Delete Member
+* [get_member_by_external_id](https://github.com/polarsource/polar-python/blob/master/docs/sdks/members/README.md#get_member_by_external_id) - Get Member by External ID
+* [update_member_by_external_id](https://github.com/polarsource/polar-python/blob/master/docs/sdks/members/README.md#update_member_by_external_id) - Update Member by External ID
+* [delete_member_by_external_id](https://github.com/polarsource/polar-python/blob/master/docs/sdks/members/README.md#delete_member_by_external_id) - Delete Member by External ID
+
+### [meters](https://github.com/polarsource/polar-python/blob/master/docs/sdks/meters/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/meters/README.md#list) - List Meters
+* [create](https://github.com/polarsource/polar-python/blob/master/docs/sdks/meters/README.md#create) - Create Meter
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/meters/README.md#get) - Get Meter
+* [update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/meters/README.md#update) - Update Meter
+* [quantities](https://github.com/polarsource/polar-python/blob/master/docs/sdks/meters/README.md#quantities) - Get Meter Quantities
+
+### [metrics](https://github.com/polarsource/polar-python/blob/master/docs/sdks/metricssdk/README.md)
+
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/metricssdk/README.md#get) - Get Metrics
+* [export](https://github.com/polarsource/polar-python/blob/master/docs/sdks/metricssdk/README.md#export) - Export Metrics
+* [limits](https://github.com/polarsource/polar-python/blob/master/docs/sdks/metricssdk/README.md#limits) - Get Metrics Limits
+* [list_dashboards](https://github.com/polarsource/polar-python/blob/master/docs/sdks/metricssdk/README.md#list_dashboards) - List Metric Dashboards
+* [create_dashboard](https://github.com/polarsource/polar-python/blob/master/docs/sdks/metricssdk/README.md#create_dashboard) - Create Metric Dashboard
+* [get_dashboard](https://github.com/polarsource/polar-python/blob/master/docs/sdks/metricssdk/README.md#get_dashboard) - Get Metric Dashboard
+* [update_dashboard](https://github.com/polarsource/polar-python/blob/master/docs/sdks/metricssdk/README.md#update_dashboard) - Update Metric Dashboard
+* [delete_dashboard](https://github.com/polarsource/polar-python/blob/master/docs/sdks/metricssdk/README.md#delete_dashboard) - Delete Metric Dashboard
+
+### [oauth2](https://github.com/polarsource/polar-python/blob/master/docs/sdks/oauth2/README.md)
+
+* [authorize](https://github.com/polarsource/polar-python/blob/master/docs/sdks/oauth2/README.md#authorize) - Authorize
+* [token](https://github.com/polarsource/polar-python/blob/master/docs/sdks/oauth2/README.md#token) - Request Token
+* [revoke](https://github.com/polarsource/polar-python/blob/master/docs/sdks/oauth2/README.md#revoke) - Revoke Token
+* [introspect](https://github.com/polarsource/polar-python/blob/master/docs/sdks/oauth2/README.md#introspect) - Introspect Token
+* [userinfo](https://github.com/polarsource/polar-python/blob/master/docs/sdks/oauth2/README.md#userinfo) - Get User Info
+
+#### [oauth2.clients](https://github.com/polarsource/polar-python/blob/master/docs/sdks/clients/README.md)
+
+* [create](https://github.com/polarsource/polar-python/blob/master/docs/sdks/clients/README.md#create) - Create Client
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/clients/README.md#get) - Get Client
+* [update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/clients/README.md#update) - Update Client
+* [delete](https://github.com/polarsource/polar-python/blob/master/docs/sdks/clients/README.md#delete) - Delete Client
+
+### [orders](https://github.com/polarsource/polar-python/blob/master/docs/sdks/orders/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/orders/README.md#list) - List Orders
+* [create](https://github.com/polarsource/polar-python/blob/master/docs/sdks/orders/README.md#create) - Create Order
+* [export](https://github.com/polarsource/polar-python/blob/master/docs/sdks/orders/README.md#export) - Export Orders
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/orders/README.md#get) - Get Order
+* [update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/orders/README.md#update) - Update Order
+* [finalize](https://github.com/polarsource/polar-python/blob/master/docs/sdks/orders/README.md#finalize) - Finalize Order
+* [generate_invoice](https://github.com/polarsource/polar-python/blob/master/docs/sdks/orders/README.md#generate_invoice) - Generate Order Invoice
+* [invoice](https://github.com/polarsource/polar-python/blob/master/docs/sdks/orders/README.md#invoice) - Get Order Invoice
+* [receipt](https://github.com/polarsource/polar-python/blob/master/docs/sdks/orders/README.md#receipt) - Get Order Receipt
+
+### [organization_access_tokens](https://github.com/polarsource/polar-python/blob/master/docs/sdks/organizationaccesstokens/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/organizationaccesstokens/README.md#list) - List
+* [create](https://github.com/polarsource/polar-python/blob/master/docs/sdks/organizationaccesstokens/README.md#create) - Create
+* [update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/organizationaccesstokens/README.md#update) - Update
+* [delete](https://github.com/polarsource/polar-python/blob/master/docs/sdks/organizationaccesstokens/README.md#delete) - Delete
+
+### [organizations](https://github.com/polarsource/polar-python/blob/master/docs/sdks/organizations/README.md)
+
+* [list_organizations](https://github.com/polarsource/polar-python/blob/master/docs/sdks/organizations/README.md#list_organizations) - List Organizations
+* [create](https://github.com/polarsource/polar-python/blob/master/docs/sdks/organizations/README.md#create) - Create Organization
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/organizations/README.md#get) - Get Organization
+* [update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/organizations/README.md#update) - Update Organization
+
+### [payments](https://github.com/polarsource/polar-python/blob/master/docs/sdks/payments/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/payments/README.md#list) - List Payments
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/payments/README.md#get) - Get Payment
+
+### [products](https://github.com/polarsource/polar-python/blob/master/docs/sdks/products/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/products/README.md#list) - List Products
+* [create](https://github.com/polarsource/polar-python/blob/master/docs/sdks/products/README.md#create) - Create Product
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/products/README.md#get) - Get Product
+* [update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/products/README.md#update) - Update Product
+* [update_benefits](https://github.com/polarsource/polar-python/blob/master/docs/sdks/products/README.md#update_benefits) - Update Product Benefits
+
+### [refunds](https://github.com/polarsource/polar-python/blob/master/docs/sdks/refunds/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/refunds/README.md#list) - List Refunds
+* [create](https://github.com/polarsource/polar-python/blob/master/docs/sdks/refunds/README.md#create) - Create Refund
+
+### [subscriptions](https://github.com/polarsource/polar-python/blob/master/docs/sdks/subscriptions/README.md)
+
+* [list](https://github.com/polarsource/polar-python/blob/master/docs/sdks/subscriptions/README.md#list) - List Subscriptions
+* [create](https://github.com/polarsource/polar-python/blob/master/docs/sdks/subscriptions/README.md#create) - Create Subscription
+* [export](https://github.com/polarsource/polar-python/blob/master/docs/sdks/subscriptions/README.md#export) - Export Subscriptions
+* [get](https://github.com/polarsource/polar-python/blob/master/docs/sdks/subscriptions/README.md#get) - Get Subscription
+* [update](https://github.com/polarsource/polar-python/blob/master/docs/sdks/subscriptions/README.md#update) - Update Subscription
+* [revoke](https://github.com/polarsource/polar-python/blob/master/docs/sdks/subscriptions/README.md#revoke) - Revoke Subscription
+
+### [webhooks](https://github.com/polarsource/polar-python/blob/master/docs/sdks/webhooks/README.md)
+
+* [list_webhook_endpoints](https://github.com/polarsource/polar-python/blob/master/docs/sdks/webhooks/README.md#list_webhook_endpoints) - List Webhook Endpoints
+* [create_webhook_endpoint](https://github.com/polarsource/polar-python/blob/master/docs/sdks/webhooks/README.md#create_webhook_endpoint) - Create Webhook Endpoint
+* [get_webhook_endpoint](https://github.com/polarsource/polar-python/blob/master/docs/sdks/webhooks/README.md#get_webhook_endpoint) - Get Webhook Endpoint
+* [update_webhook_endpoint](https://github.com/polarsource/polar-python/blob/master/docs/sdks/webhooks/README.md#update_webhook_endpoint) - Update Webhook Endpoint
+* [delete_webhook_endpoint](https://github.com/polarsource/polar-python/blob/master/docs/sdks/webhooks/README.md#delete_webhook_endpoint) - Delete Webhook Endpoint
+* [reset_webhook_endpoint_secret](https://github.com/polarsource/polar-python/blob/master/docs/sdks/webhooks/README.md#reset_webhook_endpoint_secret) - Reset Webhook Endpoint Secret
+* [list_webhook_deliveries](https://github.com/polarsource/polar-python/blob/master/docs/sdks/webhooks/README.md#list_webhook_deliveries) - List Webhook Deliveries
+* [redeliver_webhook_event](https://github.com/polarsource/polar-python/blob/master/docs/sdks/webhooks/README.md#redeliver_webhook_event) - Redeliver Webhook Event
+
+</details>
+<!-- End Available Resources and Operations [operations] -->
+
+<!-- Start Retries [retries] -->
+## Retries
+
+Some of the endpoints in this SDK support retries. If you use the SDK without any configuration, it will fall back to the default retry strategy provided by the API. However, the default retry strategy can be overridden on a per-operation basis, or across the entire SDK.
+
+To change the default retry strategy for a single API call, simply provide a `RetryConfig` object to the call:
+```python
+from polar_sdk import Polar
+from polar_sdk.utils import BackoffStrategy, RetryConfig
+
+
+with Polar(
+    access_token="<YOUR_BEARER_TOKEN_HERE>",
+) as polar:
+
+    res = polar.organizations.list_organizations(page=1, limit=10,
+        RetryConfig("backoff", BackoffStrategy(1, 50, 1.1, 100), False))
+
+    while res is not None:
+        # Handle items
+
+        res = res.next()
+
+```
+
+If you'd like to override the default retry strategy for all operations that support retries, you can use the `retry_config` optional parameter when initializing the SDK:
+```python
+from polar_sdk import Polar
+from polar_sdk.utils import BackoffStrategy, RetryConfig
+
+
+with Polar(
+    retry_config=RetryConfig("backoff", BackoffStrategy(1, 50, 1.1, 100), False),
+    access_token="<YOUR_BEARER_TOKEN_HERE>",
+) as polar:
+
+    res = polar.organizations.list_organizations(page=1, limit=10)
+
+    while res is not None:
+        # Handle items
+
+        res = res.next()
+
+```
+<!-- End Retries [retries] -->
+
+<!-- Start Error Handling [errors] -->
+## Error Handling
+
+[`PolarError`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/polarerror.py) is the base class for all HTTP error responses. It has the following properties:
+
+| Property           | Type             | Description                                                                             |
+| ------------------ | ---------------- | --------------------------------------------------------------------------------------- |
+| `err.message`      | `str`            | Error message                                                                           |
+| `err.status_code`  | `int`            | HTTP response status code eg `404`                                                      |
+| `err.headers`      | `httpx.Headers`  | HTTP response headers                                                                   |
+| `err.body`         | `str`            | HTTP body. Can be empty string if no body is returned.                                  |
+| `err.raw_response` | `httpx.Response` | Raw HTTP response                                                                       |
+| `err.data`         |                  | Optional. Some errors may contain structured data. [See Error Classes](https://github.com/polarsource/polar-python/blob/master/#error-classes). |
+
+### Example
+```python
+import polar_sdk
+from polar_sdk import Polar, models
+
+
+with Polar(
+    access_token="<YOUR_BEARER_TOKEN_HERE>",
+) as polar:
+    res = None
+    try:
+
+        res = polar.organizations.list_organizations(page=1, limit=10)
+
+        while res is not None:
+            # Handle items
+
+            res = res.next()
+
+
+    except models.PolarError as e:
+        # The base class for HTTP error responses
+        print(e.message)
+        print(e.status_code)
+        print(e.body)
+        print(e.headers)
+        print(e.raw_response)
+
+        # Depending on the method different errors may be thrown
+        if isinstance(e, models.HTTPValidationError):
+            print(e.data.detail)  # Optional[List[polar_sdk.ValidationError]]
+```
+
+### Error Classes
+**Primary errors:**
+* [`PolarError`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/polarerror.py): The base class for HTTP error responses.
+  * [`HTTPValidationError`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/httpvalidationerror.py): Validation Error. Status code `422`. *
+
+<details><summary>Less common errors (30)</summary>
+
+<br />
+
+**Network errors:**
+* [`httpx.RequestError`](https://www.python-httpx.org/exceptions/#httpx.RequestError): Base class for request errors.
+    * [`httpx.ConnectError`](https://www.python-httpx.org/exceptions/#httpx.ConnectError): HTTP client was unable to make a request to a server.
+    * [`httpx.TimeoutException`](https://www.python-httpx.org/exceptions/#httpx.TimeoutException): HTTP request timed out.
+
+
+**Inherit from [`PolarError`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/polarerror.py)**:
+* [`ResourceNotFound`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/resourcenotfound.py): Status code `404`. Applicable to 90 of 187 methods.*
+* [`NotPermitted`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/notpermitted.py): Status code `403`. Applicable to 10 of 187 methods.*
+* [`Unauthorized`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/unauthorized.py): Not authorized to manage license key. Status code `401`. Applicable to 5 of 187 methods.*
+* [`AlreadyCanceledSubscription`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/alreadycanceledsubscription.py): Status code `403`. Applicable to 4 of 187 methods.*
+* [`PaymentFailed`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/paymentfailed.py): Status code `402`. Applicable to 3 of 187 methods.*
+* [`AlreadyActiveSubscriptionError`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/alreadyactivesubscriptionerror.py): The checkout is expired, the customer already has an active subscription, or the organization is not ready to accept payments. Status code `403`. Applicable to 3 of 187 methods.*
+* [`NotOpenCheckout`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/notopencheckout.py): The checkout is expired, the customer already has an active subscription, or the organization is not ready to accept payments. Status code `403`. Applicable to 3 of 187 methods.*
+* [`PaymentNotReady`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/paymentnotready.py): The checkout is expired, the customer already has an active subscription, or the organization is not ready to accept payments. Status code `403`. Applicable to 3 of 187 methods.*
+* [`TrialAlreadyRedeemed`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/trialalreadyredeemed.py): The checkout is expired, the customer already has an active subscription, or the organization is not ready to accept payments. Status code `403`. Applicable to 3 of 187 methods.*
+* [`ExpiredCheckoutError`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/expiredcheckouterror.py): The checkout session is expired. Status code `410`. Applicable to 3 of 187 methods.*
+* [`SubscriptionLocked`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/subscriptionlocked.py): Subscription is pending an update. Status code `409`. Applicable to 2 of 187 methods.*
+* [`MissingInvoiceBillingDetails`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/missinginvoicebillingdetails.py): Order is not paid or is missing billing name or address. Status code `422`. Applicable to 2 of 187 methods.*
+* [`NotPaidOrder`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/notpaidorder.py): Order is not paid or is missing billing name or address. Status code `422`. Applicable to 2 of 187 methods.*
+* [`PaymentError`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/paymenterror.py): The payment failed. Status code `400`. Applicable to 1 of 187 methods.*
+* [`PaymentMethodSetupFailed`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/paymentmethodsetupfailed.py): The card was declined while setting up the payment method. Status code `400`. Applicable to 1 of 187 methods.*
+* [`CustomerNotReady`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/customernotready.py): Customer is not ready to confirm a payment method. Status code `400`. Applicable to 1 of 187 methods.*
+* [`PaymentMethodInUseByActiveSubscription`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/paymentmethodinusebyactivesubscription.py): Payment method is used by active subscription(s). Status code `400`. Applicable to 1 of 187 methods.*
+* [`PaymentActionRequired`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/paymentactionrequired.py): The charge failed, or requires customer authentication (e.g. a 3DS challenge) that can't be completed off-session. Status code `402`. Applicable to 1 of 187 methods.*
+* [`OffSessionChargesNotEnabled`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/offsessionchargesnotenabled.py): Off-session charges are not enabled for this organization, or its account can't currently accept payments. Status code `403`. Applicable to 1 of 187 methods.*
+* [`OrganizationNotReadyForPayments`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/organizationnotreadyforpayments.py): Off-session charges are not enabled for this organization, or its account can't currently accept payments. Status code `403`. Applicable to 1 of 187 methods.*
+* [`RefundedAlready`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/refundedalready.py): Order is already fully refunded. Status code `403`. Applicable to 1 of 187 methods.*
+* [`PaymentAlreadyInProgress`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/paymentalreadyinprogress.py): Payment already in progress. Status code `409`. Applicable to 1 of 187 methods.*
+* [`OrderNotDraft`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/ordernotdraft.py): The order is not in `draft` status. Status code `412`. Applicable to 1 of 187 methods.*
+* [`OrderNotEligibleForRetry`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/ordernoteligibleforretry.py): Order not eligible for retry or payment confirmation failed. Status code `422`. Applicable to 1 of 187 methods.*
+* [`ManualRetryLimitExceeded`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/manualretrylimitexceeded.py): Manual retry limit exceeded. Status code `429`. Applicable to 1 of 187 methods.*
+* [`ResponseValidationError`](https://github.com/polarsource/polar-python/blob/master/./src/polar_sdk/models/responsevalidationerror.py): Type mismatch between the response data and the expected Pydantic model. Provides access to the Pydantic validation error via the `cause` attribute.
+
+</details>
+
+\* Check [the method documentation](https://github.com/polarsource/polar-python/blob/master/#available-resources-and-operations) to see if the error is applicable.
+<!-- End Error Handling [errors] -->
+
+<!-- Start Server Selection [server] -->
+## Server Selection
+
+### Select Server by Name
+
+You can override the default server globally by passing a server name to the `server: str` optional parameter when initializing the SDK client instance. The selected server will then be used as the default on the operations that use it. This table lists the names associated with the available servers:
+
+| Name         | Server                         | Description            |
+| ------------ | ------------------------------ | ---------------------- |
+| `production` | `https://api.polar.sh`         | Production environment |
+| `sandbox`    | `https://sandbox-api.polar.sh` | Sandbox environment    |
+
+#### Example
+
+```python
+from polar_sdk import Polar
+
+
+with Polar(
+    server="production",
+    access_token="<YOUR_BEARER_TOKEN_HERE>",
+) as polar:
+
+    res = polar.organizations.list_organizations(page=1, limit=10)
+
+    while res is not None:
+        # Handle items
+
+        res = res.next()
+
+```
+
+### Override Server URL Per-Client
+
+The default server can also be overridden globally by passing a URL to the `server_url: str` optional parameter when initializing the SDK client instance. For example:
+```python
+from polar_sdk import Polar
+
+
+with Polar(
+    server_url="https://api.polar.sh",
+    access_token="<YOUR_BEARER_TOKEN_HERE>",
+) as polar:
+
+    res = polar.organizations.list_organizations(page=1, limit=10)
+
+    while res is not None:
+        # Handle items
+
+        res = res.next()
+
+```
+<!-- End Server Selection [server] -->
+
+<!-- Start Custom HTTP Client [http-client] -->
+## Custom HTTP Client
+
+The Python SDK makes API calls using the [httpx](https://www.python-httpx.org/) HTTP library.  In order to provide a convenient way to configure timeouts, cookies, proxies, custom headers, and other low-level configuration, you can initialize the SDK client with your own HTTP client instance.
+Depending on whether you are using the sync or async version of the SDK, you can pass an instance of `HttpClient` or `AsyncHttpClient` respectively, which are Protocol's ensuring that the client has the necessary methods to make API calls.
+This allows you to wrap the client with your own custom logic, such as adding custom headers, logging, or error handling, or you can just pass an instance of `httpx.Client` or `httpx.AsyncClient` directly.
+
+For example, you could specify a header for every request that this sdk makes as follows:
+```python
+from polar_sdk import Polar
+import httpx
+
+http_client = httpx.Client(headers={"x-custom-header": "someValue"})
+s = Polar(client=http_client)
+```
+
+or you could wrap the client with your own custom logic:
+```python
+from polar_sdk import Polar
+from polar_sdk.httpclient import AsyncHttpClient
+import httpx
+
+class CustomClient(AsyncHttpClient):
+    client: AsyncHttpClient
+
+    def __init__(self, client: AsyncHttpClient):
+        self.client = client
+
+    async def send(
+        self,
+        request: httpx.Request,
+        *,
+        stream: bool = False,
+        auth: Union[
+            httpx._types.AuthTypes, httpx._client.UseClientDefault, None
+        ] = httpx.USE_CLIENT_DEFAULT,
+        follow_redirects: Union[
+            bool, httpx._client.UseClientDefault
+        ] = httpx.USE_CLIENT_DEFAULT,
+    ) -> httpx.Response:
+        request.headers["Client-Level-Header"] = "added by client"
+
+        return await self.client.send(
+            request, stream=stream, auth=auth, follow_redirects=follow_redirects
+        )
+
+    def build_request(
+        self,
+        method: str,
+        url: httpx._types.URLTypes,
+        *,
+        content: Optional[httpx._types.RequestContent] = None,
+        data: Optional[httpx._types.RequestData] = None,
+        files: Optional[httpx._types.RequestFiles] = None,
+        json: Optional[Any] = None,
+        params: Optional[httpx._types.QueryParamTypes] = None,
+        headers: Optional[httpx._types.HeaderTypes] = None,
+        cookies: Optional[httpx._types.CookieTypes] = None,
+        timeout: Union[
+            httpx._types.TimeoutTypes, httpx._client.UseClientDefault
+        ] = httpx.USE_CLIENT_DEFAULT,
+        extensions: Optional[httpx._types.RequestExtensions] = None,
+    ) -> httpx.Request:
+        return self.client.build_request(
+            method,
+            url,
+            content=content,
+            data=data,
+            files=files,
+            json=json,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+        )
+
+s = Polar(async_client=CustomClient(httpx.AsyncClient()))
+```
+<!-- End Custom HTTP Client [http-client] -->
+
+<!-- Start Authentication [security] -->
+## Authentication
+
+### Per-Client Security Schemes
+
+This SDK supports the following security scheme globally:
+
+| Name           | Type | Scheme      |
+| -------------- | ---- | ----------- |
+| `access_token` | http | HTTP Bearer |
+
+To authenticate with the API the `access_token` parameter must be set when initializing the SDK client instance. For example:
+```python
+from polar_sdk import Polar
+
+
+with Polar(
+    access_token="<YOUR_BEARER_TOKEN_HERE>",
+) as polar:
+
+    res = polar.organizations.list_organizations(page=1, limit=10)
+
+    while res is not None:
+        # Handle items
+
+        res = res.next()
+
+```
+
+### Per-Operation Security Schemes
+
+Some operations in this SDK require the security scheme to be specified at the request level. For example:
+```python
+import polar_sdk
+from polar_sdk import Polar
+
+
+with Polar() as polar:
+
+    res = polar.customer_portal.benefit_grants.list(security=polar_sdk.CustomerPortalBenefitGrantsListSecurity(
+
+    ), page=1, limit=10)
+
+    while res is not None:
+        # Handle items
+
+        res = res.next()
+
+```
+<!-- End Authentication [security] -->
+
+<!-- Start Resource Management [resource-management] -->
+## Resource Management
+
+The `Polar` class implements the context manager protocol and registers a finalizer function to close the underlying sync and async HTTPX clients it uses under the hood. This will close HTTP connections, release memory and free up other resources held by the SDK. In short-lived Python programs and notebooks that make a few SDK method calls, resource management may not be a concern. However, in longer-lived programs, it is beneficial to create a single SDK instance via a [context manager][context-manager] and reuse it across the application.
+
+[context-manager]: https://docs.python.org/3/reference/datamodel.html#context-managers
+
+```python
+from polar_sdk import Polar
+def main():
+
+    with Polar(
+        access_token="<YOUR_BEARER_TOKEN_HERE>",
+    ) as polar:
+        # Rest of application here...
+
+
+# Or when using async:
+async def amain():
+
+    async with Polar(
+        access_token="<YOUR_BEARER_TOKEN_HERE>",
+    ) as polar:
+        # Rest of application here...
+```
+<!-- End Resource Management [resource-management] -->
+
+<!-- Start Debugging [debug] -->
+## Debugging
+
+You can setup your SDK to emit debug logs for SDK requests and responses.
+
+You can pass your own logger class directly into your SDK.
+```python
+from polar_sdk import Polar
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
+s = Polar(debug_logger=logging.getLogger("polar_sdk"))
+```
+<!-- End Debugging [debug] -->
+
+<!-- Start Pagination [pagination] -->
+## Pagination
+
+Some of the endpoints in this SDK support pagination. To use pagination, you make your SDK calls as usual, but the
+returned response object will have a `Next` method that can be called to pull down the next group of results. If the
+return value of `Next` is `None`, then there are no more pages to be fetched.
+
+Here's an example of one such pagination call:
+```python
+from polar_sdk import Polar
+
+
+with Polar(
+    access_token="<YOUR_BEARER_TOKEN_HERE>",
+) as polar:
+
+    res = polar.organizations.list_organizations(page=1, limit=10)
+
+    while res is not None:
+        # Handle items
+
+        res = res.next()
+
+```
+<!-- End Pagination [pagination] -->
+
+<!-- Start Summary [summary] -->
+## Summary
+
+Polar API: Polar HTTP and Webhooks API
+
+Read the docs at https://polar.sh/docs/api-reference
+<!-- End Summary [summary] -->
+
+<!-- Placeholder for Future Speakeasy SDK Sections -->
+
+# Development
+
+## Maturity
+
+This SDK is in beta, and there may be breaking changes between versions without a major version update. Therefore, we recommend pinning usage
+to a specific package version. This way, you can install the same version each time without breaking changes unless you are intentionally
+looking for the latest version.
+
+## Contributions
+
+While we value open-source contributions to this SDK, this library is generated programmatically. Any manual changes added to internal files will be overwritten on the next generation. 
+We look forward to hearing your feedback. Feel free to open a PR or an issue with a proof of concept and we'll do our best to include it in a future release. 
+
+### SDK Created by [Speakeasy](https://www.speakeasy.com/?utm_source=polar-sdk&utm_campaign=python)
+

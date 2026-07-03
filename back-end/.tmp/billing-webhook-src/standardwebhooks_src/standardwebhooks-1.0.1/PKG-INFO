@@ -1,0 +1,81 @@
+Metadata-Version: 2.4
+Name: standardwebhooks
+Version: 1.0.1
+Summary: Standard Webhooks
+Author: Standard Webhooks
+License: MIT
+Keywords: webhooks
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Information Technology
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python
+Classifier: Topic :: Software Development :: Libraries :: Application Frameworks
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: Topic :: Software Development :: Libraries
+Classifier: Topic :: Software Development
+Classifier: Typing :: Typed
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: Programming Language :: Python :: 3.6
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Requires-Python: >=3.6
+Description-Content-Type: text/markdown
+Requires-Dist: httpx>=0.23.0
+Requires-Dist: attrs>=21.3.0
+Requires-Dist: python-dateutil
+Requires-Dist: Deprecated
+Requires-Dist: types-python-dateutil
+Requires-Dist: types-Deprecated
+Dynamic: author
+Dynamic: classifier
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: keywords
+Dynamic: license
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
+Python library for Standard Webhooks
+
+# Example
+
+Verifying a webhook payload:
+
+```python
+from standardwebhooks.webhooks import Webhook
+
+wh = Webhook(base64_secret)
+wh.verify(webhook_payload, webhook_headers)
+```
+
+# Development
+
+## Requirements
+
+ - python 3
+
+## Installing dependencies
+
+```sh
+python -m venv .venv
+pip install -r requirements.txt && pip install -r requirements-dev.txt
+```
+
+## Contributing
+
+Before opening a PR be sure to format your code!
+
+```sh
+./scripts/format.sh
+```
+
+## Running Tests
+
+Simply run:
+
+```sh
+pytest
+```
