@@ -36,8 +36,30 @@ def _build_s3_store(settings: Settings, *, endpoint_url: str | None = None) -> S
     )
 
 
+# Cached so the store's HTTP connection pool is reused across calls (mirrors
+# the LRU-cached LLM/embedding providers). Keyed on the S3 config fields so
+# tests with different settings get distinct stores.
+_store_cache: dict[tuple[str | None, ...], S3Store] = {}
+
+
 def get_s3_store(settings: Settings) -> S3Store:
-    return _build_s3_store(settings)
+    cache_key = (
+        settings.s3_bucket,
+        settings.s3_region,
+        settings.aws_access_key_id,
+        settings.aws_secret_access_key,
+        settings.s3_endpoint_url,
+    )
+    store = _store_cache.get(cache_key)
+    if store is None:
+        store = _store_cache[cache_key] = _build_s3_store(settings)
+    return store
+
+
+async def get_object_bytes(store: S3Store, key: str) -> bytes:
+    """Fetch an object's full body from S3/MinIO as bytes."""
+    result = await obstore.get_async(store, key)
+    return bytes(await result.bytes_async())
 
 
 def presign_endpoint_url(settings: Settings) -> str | None:

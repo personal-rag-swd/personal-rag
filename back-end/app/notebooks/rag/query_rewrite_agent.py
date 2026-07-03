@@ -3,7 +3,11 @@ import logging
 from pydantic_ai import Agent
 
 from app.core.config import Settings
-from app.core.llm_provider import chat_provider_is_configured, resolve_chat_provider
+from app.core.llm_provider import (
+    chat_provider_is_configured,
+    resolve_chat_provider,
+    run_agent_with_retry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +29,15 @@ async def rewrite_query_text(query: str, settings: Settings) -> str:
         return query
 
     try:
-        model = resolve_chat_provider()
-        result = await query_rewrite_agent.run(query, model=model)
+        # Short retry budget: this sits on the interactive chat path, so one
+        # quick retry on a rate-limit blip, then fall back to the raw query.
+        result = await run_agent_with_retry(
+            query_rewrite_agent,
+            query,
+            model=resolve_chat_provider(),
+            max_retries=2,
+            initial_delay=0.5,
+        )
         rewritten = result.output.strip()
         if rewritten:
             logger.info("Rewrote RAG query: %r -> %r", query, rewritten)

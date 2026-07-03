@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-import asyncio
 from contextvars import ContextVar
 
-import logfire
 from pydantic_ai import Agent
-from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.models import Model
 from pydantic_ai.run import AgentRunResult
 from pydantic_ai.usage import RunUsage
 
-from app.core.llm_provider import resolve_chat_provider
+from app.core.llm_provider import resolve_chat_provider, run_agent_with_retry
 from app.notebooks.prompt import (
     BLOG_SYSTEM,
     BRIEFING_SYSTEM,
@@ -95,29 +92,11 @@ async def _run_agent_with_retry[OutputT](
     agent: Agent[None, OutputT],
     user_msg: str,
     model: Model,
-    max_retries: int = 4,
-    initial_delay: float = 2.0,
 ) -> AgentRunResult[OutputT]:
-    delay = initial_delay
-    for attempt in range(max_retries):
-        try:
-            result = await agent.run(user_msg, model=model)
-        except ModelHTTPError as exc:
-            if exc.status_code in (429, 502, 503, 500) and attempt < max_retries - 1:
-                logfire.warning(
-                    "Model HTTP error status_code={status_code} on attempt {attempt_num}. Retrying in {delay}s...",
-                    status_code=exc.status_code,
-                    attempt_num=attempt + 1,
-                    delay=delay,
-                )
-                await asyncio.sleep(delay)
-                delay *= 2
-            else:
-                raise
-        else:
-            _last_report_usage.set(result.usage)
-            return result
-    raise RuntimeError("Model retry loop exited without a result")
+    """Run a report agent via the shared retry helper, capturing token usage."""
+    result = await run_agent_with_retry(agent, user_msg, model=model)
+    _last_report_usage.set(result.usage)
+    return result
 
 
 async def generate_briefing_doc(
