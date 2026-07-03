@@ -775,11 +775,6 @@ function getDocumentStatus(status: string) {
         label: "Indexed",
         variant: "secondary" as const,
       }
-    case "indexing":
-      return {
-        label: "Indexing",
-        variant: "outline" as const,
-      }
     case "failed":
       return {
         label: "Failed",

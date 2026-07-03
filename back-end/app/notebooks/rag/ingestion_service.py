@@ -20,6 +20,7 @@ from app.core.event_bus import domain_event_bus
 from app.core.llm_provider import chat_provider_is_configured, resolve_chat_provider
 from app.core.s3 import get_s3_store
 from app.notebooks.domain_events import (
+    DocumentEvent,
     DocumentFailed,
     DocumentIndexed,
     DocumentProcessing,
@@ -27,14 +28,13 @@ from app.notebooks.domain_events import (
     DocumentUploaded,
 )
 from app.notebooks.exceptions import TransientIngestionError
-from app.notebooks.models import Notebook, NotebookDocument, NotebookDocumentChunk
+from app.notebooks.models import NotebookDocument, NotebookDocumentChunk
 from app.notebooks.rag.document_chunker import (
     IMAGE_EXTENSIONS,
     IMAGE_MEDIA_TYPES,
     ChunkingRequest,
     chunk_document,
 )
-from app.users.models import User
 
 if TYPE_CHECKING:
     from obstore.store import S3Store
@@ -107,6 +107,21 @@ _PDF_IMAGE_VISION_CONCURRENCY = 5
 _pdf_image_vision_semaphore = asyncio.Semaphore(_PDF_IMAGE_VISION_CONCURRENCY)
 
 
+async def _transition_document(
+    document: NotebookDocument,
+    status: str,
+    *,
+    error_message: str | None = None,
+    event_cls: type[DocumentEvent],
+) -> None:
+    """Persist a status transition and emit its domain event."""
+    document.status = status
+    document.error_message = error_message
+    document.updated_at = datetime.now(UTC)
+    await document.save()
+    await domain_event_bus.emit(event_cls(document))
+
+
 def _extract_pdf_image_bytes(
     pdf_doc: pymupdf.Document, xref: int
 ) -> tuple[bytes, str, str]:
@@ -128,26 +143,19 @@ def _extract_pdf_image_bytes(
     return pix.tobytes("png"), "png", "image/png"
 
 
-async def _extract_pdf_images(
-    document: NotebookDocument,
+def _collect_pdf_images(
     pdf_bytes: bytes,
-    store: S3Store,
-) -> list[Document]:
-    """Extract embedded images from a PDF, upload them to S3, and describe them.
+    key_prefix: str,
+    filename: str,
+) -> list[tuple[str, bytes, str, str]]:
+    """Extract embedded PDF images, returning (s3_key, bytes, media_type, label).
 
     Uses the official ``page.get_images`` + ``Document.extract_image`` recipe so
     only images actually embedded in the document are processed — each xref once
-    — rather than rendering every page.
+    — rather than rendering every page. Pure CPU work; run via asyncio.to_thread.
     """
-    if not document.s3_key or not document.s3_bucket:
-        raise ValueError(
-            "Cannot extract embedded images from a PDF without S3 bucket/key"
-        )
-
-    key_prefix = document.s3_key.rsplit("/", 1)[0]
-
     seen_xrefs: set[int] = set()
-    images: list[tuple[str, bytes, str, str]] = []  # (s3_key, bytes, media_type, label)
+    images: list[tuple[str, bytes, str, str]] = []
     pdf_doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     try:
         for page_index in range(len(pdf_doc)):
@@ -167,20 +175,43 @@ async def _extract_pdf_images(
 
                 image_bytes, ext, media_type = _extract_pdf_image_bytes(pdf_doc, xref)
                 image_key = f"{key_prefix}/images/img_{xref}.{ext}"
-                await obstore.put_async(
-                    store,
-                    image_key,
-                    image_bytes,
-                    attributes={"Content-Type": media_type},
-                )
-                label = f"image on page {page_index + 1} of {document.filename}"
+                label = f"image on page {page_index + 1} of {filename}"
                 images.append((image_key, image_bytes, media_type, label))
     finally:
         pdf_doc.close()
+    return images
 
+
+async def _extract_pdf_images(
+    document: NotebookDocument,
+    pdf_bytes: bytes,
+    store: S3Store,
+) -> list[Document]:
+    """Extract embedded images from a PDF, upload them to S3, and describe them."""
+    if not document.s3_key or not document.s3_bucket:
+        raise ValueError(
+            "Cannot extract embedded images from a PDF without S3 bucket/key"
+        )
+
+    key_prefix = document.s3_key.rsplit("/", 1)[0]
+    images = await asyncio.to_thread(
+        _collect_pdf_images, pdf_bytes, key_prefix, document.filename
+    )
     if not images:
         logger.info("No embedded images found in PDF %s", document.filename)
         return []
+
+    await asyncio.gather(
+        *(
+            obstore.put_async(
+                store,
+                image_key,
+                image_bytes,
+                attributes={"Content-Type": media_type},
+            )
+            for image_key, image_bytes, media_type, _ in images
+        )
+    )
 
     # Describe images concurrently but bounded — sequential vision calls on an
     # image-heavy PDF can exceed the ingestion timeout, while an unbounded
@@ -222,11 +253,19 @@ async def _fail_stale_documents(
     if not stale_docs:
         return 0
     now = datetime.now(UTC)
+    await NotebookDocument.find(query).update_many(
+        {
+            "$set": {
+                "status": "failed",
+                "error_message": error_message,
+                "updated_at": now,
+            }
+        }
+    )
     for doc in stale_docs:
         doc.status = "failed"
         doc.error_message = error_message
         doc.updated_at = now
-        await doc.save()
         await domain_event_bus.emit(DocumentFailed(doc))
     logger.warning(warning_log_template, len(stale_docs))
     return len(stale_docs)
@@ -240,11 +279,11 @@ async def fail_stale_processing_documents(
     )
     return await _fail_stale_documents(
         query={
-            "status": {"$in": ["processing", "indexing"]},
+            "status": "processing",
             "updated_at": {"$lte": timeout_threshold},
         },
         error_message=INGESTION_FAILED_MESSAGE,
-        warning_log_template="Marked %s stale processing/indexing documents as failed",
+        warning_log_template="Marked %s stale processing documents as failed",
     )
 
 
@@ -263,16 +302,16 @@ async def fail_stale_pending_documents(
 
 async def register_pending_notebook_document(
     *,
-    notebook: Notebook,
-    current_user: User,
+    notebook_id: UUID,
+    user_id: UUID,
     bucket: str,
     key: str,
     filename: str,
     content_type: str | None,
 ) -> NotebookDocument:
     document = NotebookDocument(
-        notebook_id=notebook.id,
-        user_id=current_user.id,
+        notebook_id=notebook_id,
+        user_id=user_id,
         s3_bucket=bucket,
         s3_key=key,
         filename=filename,
@@ -304,12 +343,8 @@ async def mark_pending_document_uploaded_if_object_exists(
         logger.debug("Notebook document upload is not visible yet: %s", document.id)
         return False
 
-    document.status = "uploaded"
     document.size = metadata["size"]
-    document.error_message = None
-    document.updated_at = datetime.now(UTC)
-    await document.save()
-    await domain_event_bus.emit(DocumentUploaded(document))
+    await _transition_document(document, "uploaded", event_cls=DocumentUploaded)
     return True
 
 
@@ -406,13 +441,14 @@ async def mark_document_upload_failed(
         return False
     if document.status in {"indexed", "processing", "uploaded"}:
         return True
-    document.status = "failed"
-    document.error_message = (
-        error_message or "Upload failed before object storage accepted the file."
-    )[:4000]
-    document.updated_at = datetime.now(UTC)
-    await document.save()
-    await domain_event_bus.emit(DocumentFailed(document))
+    await _transition_document(
+        document,
+        "failed",
+        error_message=(
+            error_message or "Upload failed before object storage accepted the file."
+        )[:4000],
+        event_cls=DocumentFailed,
+    )
     return True
 
 
@@ -465,7 +501,10 @@ async def _run_document_ingestion(
             )
         ]
     else:
-        split_docs = chunk_document(
+        # chunk_document is pure CPU (pymupdf/docx parsing) — keep it off the
+        # event loop so ingestion doesn't stall the API server.
+        split_docs = await asyncio.to_thread(
+            chunk_document,
             ChunkingRequest(
                 content=body,
                 filename=document.filename,
@@ -524,11 +563,7 @@ async def _run_document_ingestion(
         ]
     )
 
-    document.status = "indexed"
-    document.error_message = None
-    document.updated_at = now
-    await document.save()
-    await domain_event_bus.emit(DocumentIndexed(document))
+    await _transition_document(document, "indexed", event_cls=DocumentIndexed)
     logger.info(
         "Successfully ingested and indexed document %s (%d chunks).",
         document.filename,
@@ -554,11 +589,9 @@ async def _record_ingestion_outcome(
     document = await NotebookDocument.find_one({"_id": document_id})
     if document is None or (only_if_processing and document.status != "processing"):
         return
-    document.status = status
-    document.error_message = error_message
-    document.updated_at = datetime.now(UTC)
-    await document.save()
-    await domain_event_bus.emit(event(document))
+    await _transition_document(
+        document, status, error_message=error_message, event_cls=event
+    )
 
 
 async def ingest_document_by_id(
@@ -566,42 +599,18 @@ async def ingest_document_by_id(
     settings: Settings,
     *,
     store: S3Store | None = None,
-    require_processing_status: bool = False,
+    size: int | None = None,
 ) -> None:
-    document = await NotebookDocument.find_one({"_id": document_id})
+    document = await claim_document_for_ingestion(document_id, size=size)
     if document is None:
-        logger.error("Failed to start ingestion: document_id=%s not found", document_id)
+        logger.info(
+            "Skipping ingestion for document %s: missing or not claimable",
+            document_id,
+        )
         return
     logger.info(
-        "Start ingestion request received for document_id=%s, filename=%s",
-        document_id,
-        document.filename,
+        "Claimed document %s (%s) for ingestion", document_id, document.filename
     )
-    if require_processing_status and document.status != "processing":
-        logger.info(
-            "Skipping document ingestion for %s because status is %s",
-            document_id,
-            document.status,
-        )
-        return
-    if document.status in CLAIMABLE_DOCUMENT_STATUSES:
-        logger.info(
-            "Claiming document %s for processing (current status: %s)",
-            document_id,
-            document.status,
-        )
-        document.status = "processing"
-        document.error_message = None
-        document.updated_at = datetime.now(UTC)
-        await document.save()
-        await domain_event_bus.emit(DocumentProcessing(document))
-    elif document.status != "processing":
-        logger.info(
-            "Skipping ingestion for document %s: status '%s' is not claimable",
-            document_id,
-            document.status,
-        )
-        return
 
     try:
         resolved_store = store or get_s3_store(settings)

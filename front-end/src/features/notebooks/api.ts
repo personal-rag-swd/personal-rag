@@ -255,7 +255,7 @@ export function useNotebookQuery(id: string | undefined) {
   })
 }
 
-const ACTIVE_DOCUMENT_STATUSES = new Set(["pending", "uploaded", "processing", "indexing"])
+const ACTIVE_DOCUMENT_STATUSES = new Set(["pending", "uploaded", "processing"])
 
 export type NotebookDocumentEventsHealth =
   | "idle"

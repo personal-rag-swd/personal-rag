@@ -161,12 +161,15 @@ async def test_process_message_claims_and_ingests_once_for_duplicate_deliveries(
     assert document.s3_key is not None
     body = make_message_body(bucket=document.s3_bucket, key=document.s3_key)
 
-    with patch("app.notebooks.consumer.ingest_document_by_id") as mock_ingest:
+    with patch(
+        "app.notebooks.rag.ingestion_service._run_document_ingestion"
+    ) as mock_run:
         await _process_message(body, settings)
         # Second delivery: the document is already claimed (status="processing"),
-        # so the atomic claim returns None and ingestion is not re-triggered.
+        # so the atomic claim inside ingest_document_by_id returns None and
+        # ingestion is not re-triggered.
         await _process_message(body, settings)
-        mock_ingest.assert_called_once()
+        mock_run.assert_called_once()
 
 
 async def test_process_message_propagates_transient_failures() -> None:
