@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 from uuid import UUID, uuid4
 
 from beanie import Document
@@ -77,6 +77,31 @@ class UsageAllowance(Document):
         use_state_management = True
         indexes: ClassVar[list[list[tuple[str, int]]]] = [
             [("user_id", 1), ("period_start", 1)],
+        ]
+
+
+class UsageWindowCounter(Document):
+    """Per-user, rolling-window usage counter ("session" 5h / "weekly" 7d).
+
+    Unlike ``UsageAllowance``, windows are not calendar-aligned: a new window
+    only starts the first time usage is recorded after the previous one's
+    ``window_end`` has passed.
+    """
+
+    id: UUID = Field(default_factory=uuid4)  # type: ignore
+    user_id: UUID
+    window_type: Literal["session", "weekly"]
+    window_start: datetime
+    window_end: datetime
+    llm_tokens_used: int = 0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    class Settings:
+        name = "billing_usage_window_counters"
+        use_state_management = True
+        indexes: ClassVar[list[list[tuple[str, int]]]] = [
+            [("user_id", 1), ("window_type", 1)],
         ]
 
 

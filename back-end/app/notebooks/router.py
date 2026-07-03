@@ -153,6 +153,7 @@ async def _persist_chat_history(
             user_id=current_user.id,
             quantity=usage.total_tokens,
             idempotency_key=f"chat:{notebook.id}:{uuid4()}",
+            settings=get_settings(),
             notebook_id=notebook.id,
             event_metadata={"source": "chat"},
         )

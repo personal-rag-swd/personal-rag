@@ -8,7 +8,7 @@ from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelRequest
 
 from app.billing.service import check_quota_and_raise, record_usage_event
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.core.event_bus import domain_event_bus
 from app.core.llm_provider import chat_provider_is_configured
 from app.core.s3 import generate_presigned_get_url
@@ -332,6 +332,7 @@ async def run_report_generation(
             user_id=report.user_id,
             quantity=usage.total_tokens,
             idempotency_key=f"report:{report_id}",
+            settings=get_settings(),
             notebook_id=report.notebook_id,
             event_metadata={"source": "report", "report_type": report_type},
         )

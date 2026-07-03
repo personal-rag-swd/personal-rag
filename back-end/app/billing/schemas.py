@@ -23,6 +23,12 @@ class UsageSummaryResponse(BaseModel):
     llm_tokens_allowance: int
     is_subscription_active: bool
     tier: str | None
+    session_tokens_used: int
+    session_tokens_allowance: int
+    session_reset_at: datetime
+    weekly_tokens_used: int
+    weekly_tokens_allowance: int
+    weekly_reset_at: datetime
 
 
 class SubscriptionStatusResponse(BaseModel):

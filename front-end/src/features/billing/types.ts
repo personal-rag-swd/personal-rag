@@ -7,6 +7,12 @@ export interface UsageSummary {
   llmTokensAllowance: number
   isSubscriptionActive: boolean
   tier: BillingTier | null
+  sessionTokensUsed: number
+  sessionTokensAllowance: number
+  sessionResetAt: string
+  weeklyTokensUsed: number
+  weeklyTokensAllowance: number
+  weeklyResetAt: string
 }
 
 export interface UsageSummaryApiPayload {
@@ -16,6 +22,18 @@ export interface UsageSummaryApiPayload {
   llm_tokens_allowance: number
   is_subscription_active: boolean
   tier: BillingTier | null
+  session_tokens_used: number
+  session_tokens_allowance: number
+  session_reset_at: string
+  weekly_tokens_used: number
+  weekly_tokens_allowance: number
+  weekly_reset_at: string
+}
+
+export interface QuotaExceededDetail {
+  message: string
+  window: "session" | "weekly" | "monthly"
+  reset_at: string | null
 }
 
 export interface SubscriptionStatus {

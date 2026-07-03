@@ -43,6 +43,7 @@ from app.billing.models import (
     ProcessedWebhookEvent,
     UsageAllowance,
     UsageEventLog,
+    UsageWindowCounter,
 )
 from app.billing.router import router as billing_router
 from app.billing.tasks import run_usage_emission_task
@@ -146,6 +147,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         BillingCustomer,
         UsageEventLog,
         UsageAllowance,
+        UsageWindowCounter,
         ProcessedWebhookEvent,
     ]
 

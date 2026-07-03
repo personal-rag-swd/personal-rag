@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import Any, Literal
 from uuid import UUID
 
 from polar_sdk.webhooks import (
@@ -21,6 +21,7 @@ from app.billing.models import (
     ProcessedWebhookEvent,
     UsageAllowance,
     UsageEventLog,
+    UsageWindowCounter,
 )
 from app.billing.polar_client import (
     PolarAPIError,
@@ -55,6 +56,32 @@ def _allowance_for_tier(tier: str, settings: Settings) -> int:
         _TIER_PRO: settings.pro_tier_llm_tokens_allowance,
         _TIER_MAX: settings.max_tier_llm_tokens_allowance,
     }[tier]
+
+
+WindowType = Literal["session", "weekly"]
+
+_WINDOW_DURATIONS: dict[WindowType, Any] = {
+    "session": lambda settings: timedelta(hours=settings.session_window_hours),
+    "weekly": lambda settings: timedelta(days=settings.weekly_window_days),
+}
+
+
+def _window_allowance_for_tier(
+    window_type: WindowType, tier: str | None, settings: Settings
+) -> int:
+    limits: dict[WindowType, dict[str | None, int]] = {
+        "session": {
+            None: settings.free_tier_session_tokens_allowance,
+            _TIER_PRO: settings.pro_tier_session_tokens_allowance,
+            _TIER_MAX: settings.max_tier_session_tokens_allowance,
+        },
+        "weekly": {
+            None: settings.free_tier_weekly_tokens_allowance,
+            _TIER_PRO: settings.pro_tier_weekly_tokens_allowance,
+            _TIER_MAX: settings.max_tier_weekly_tokens_allowance,
+        },
+    }
+    return limits[window_type][tier]
 
 
 def _tier_for_product_id(product_id: str | None, settings: Settings) -> str | None:
@@ -126,6 +153,34 @@ async def get_or_create_usage_allowance(user_id: UUID) -> UsageAllowance:
     return allowance
 
 
+async def get_or_create_window_counter(
+    user_id: UUID, window_type: WindowType, settings: Settings
+) -> UsageWindowCounter:
+    """Return the user's current rolling window counter, rolling it over if
+    the previous window's ``window_end`` has passed.
+
+    Windows are not calendar-aligned: a new window starts the first time
+    usage is checked/recorded after the previous one expired.
+    """
+    now = datetime.now(UTC)
+    existing = await UsageWindowCounter.find_one(
+        {"user_id": user_id, "window_type": window_type},
+        sort=[("window_start", -1)],
+    )
+    if existing is not None and existing.window_end > now:
+        return existing
+
+    duration = _WINDOW_DURATIONS[window_type](settings)
+    counter = UsageWindowCounter(
+        user_id=user_id,
+        window_type=window_type,
+        window_start=now,
+        window_end=now + duration,
+    )
+    await counter.insert()
+    return counter
+
+
 async def get_or_create_polar_customer(
     user: User, settings: Settings, *, client: PolarClientProtocol | None = None
 ) -> BillingCustomer:
@@ -191,14 +246,25 @@ async def check_quota_and_raise(
     problem can never block chat or report generation for users who are
     still within their allowance.
     """
+    exceeded_window: str | None = None
+    exceeded_reset_at: datetime | None = None
     try:
         billing_customer = await BillingCustomer.find_one({"user_id": user_id})
-        _tier, allowance_limit = _resolve_effective_allowance(
-            billing_customer, settings
-        )
+        tier, allowance_limit = _resolve_effective_allowance(billing_customer, settings)
 
-        allowance = await get_or_create_usage_allowance(user_id)
-        exceeded = allowance.llm_tokens_used + quantity > allowance_limit
+        for window_type in ("session", "weekly"):
+            counter = await get_or_create_window_counter(user_id, window_type, settings)
+            window_limit = _window_allowance_for_tier(window_type, tier, settings)
+            if counter.llm_tokens_used + quantity > window_limit:
+                exceeded_window = window_type
+                exceeded_reset_at = counter.window_end
+                break
+
+        if exceeded_window is None:
+            allowance = await get_or_create_usage_allowance(user_id)
+            if allowance.llm_tokens_used + quantity > allowance_limit:
+                exceeded_window = "monthly"
+                exceeded_reset_at = allowance.period_end
     except Exception:
         logger.exception(
             "Failed to check usage quota for user_id=%s; allowing request through",
@@ -206,8 +272,10 @@ async def check_quota_and_raise(
         )
         return
 
-    if exceeded:
-        raise UsageQuotaExceededError()
+    if exceeded_window is not None:
+        raise UsageQuotaExceededError(
+            window=exceeded_window, reset_at=exceeded_reset_at
+        )
 
 
 async def record_usage_event(
@@ -215,6 +283,7 @@ async def record_usage_event(
     user_id: UUID,
     quantity: int,
     idempotency_key: str,
+    settings: Settings,
     notebook_id: UUID | None = None,
     event_metadata: dict[str, Any] | None = None,
 ) -> UsageEventLog | None:
@@ -241,6 +310,12 @@ async def record_usage_event(
         allowance.llm_tokens_used += quantity
         allowance.updated_at = datetime.now(UTC)
         await allowance.save()
+
+        for window_type in ("session", "weekly"):
+            counter = await get_or_create_window_counter(user_id, window_type, settings)
+            counter.llm_tokens_used += quantity
+            counter.updated_at = datetime.now(UTC)
+            await counter.save()
     except Exception:
         logger.exception(
             "Failed to record usage event (user_id=%s)",
@@ -307,6 +382,8 @@ async def emit_pending_usage_events_to_polar(
 async def get_usage_summary(user_id: UUID, settings: Settings) -> UsageSummaryResponse:
     billing_customer = await BillingCustomer.find_one({"user_id": user_id})
     allowance = await get_or_create_usage_allowance(user_id)
+    session_counter = await get_or_create_window_counter(user_id, "session", settings)
+    weekly_counter = await get_or_create_window_counter(user_id, "weekly", settings)
     is_active = (
         billing_customer is not None
         and billing_customer.subscription_status in _ACTIVE_SUBSCRIPTION_STATUSES
@@ -319,6 +396,12 @@ async def get_usage_summary(user_id: UUID, settings: Settings) -> UsageSummaryRe
         llm_tokens_allowance=allowance_limit,
         is_subscription_active=is_active,
         tier=tier,
+        session_tokens_used=session_counter.llm_tokens_used,
+        session_tokens_allowance=_window_allowance_for_tier("session", tier, settings),
+        session_reset_at=session_counter.window_end,
+        weekly_tokens_used=weekly_counter.llm_tokens_used,
+        weekly_tokens_allowance=_window_allowance_for_tier("weekly", tier, settings),
+        weekly_reset_at=weekly_counter.window_end,
     )
 
 
