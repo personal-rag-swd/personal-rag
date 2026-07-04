@@ -103,6 +103,60 @@ async def test_chat_history_endpoint(
     assert response.json() == []
 
 
+async def test_clear_chat_history_endpoint(
+    client: AsyncClient,
+    settings: Any,
+) -> None:
+    user = await create_user(role="user")
+    headers = auth_headers(user, settings)
+    notebook = await create_notebook(user)
+
+    await NotebookMessage(
+        notebook_id=notebook.id,
+        seq=1,
+        message={"role": "user", "content": "Hello"},
+    ).insert()
+    await NotebookMessage(
+        notebook_id=notebook.id,
+        seq=2,
+        message={"role": "assistant", "content": "Hi there"},
+    ).insert()
+
+    response = await client.delete(
+        f"/api/v1/notebooks/{notebook.id}/chat/history",
+        headers=headers,
+    )
+    assert response.status_code == 204
+
+    remaining = await NotebookMessage.find({"notebook_id": notebook.id}).to_list()
+    assert remaining == []
+
+
+async def test_clear_chat_history_is_scoped_to_owner(
+    client: AsyncClient,
+    settings: Any,
+) -> None:
+    owner = await create_user(role="user")
+    notebook = await create_notebook(owner)
+    await NotebookMessage(
+        notebook_id=notebook.id,
+        seq=1,
+        message={"role": "user", "content": "Hello"},
+    ).insert()
+
+    other = await create_user(role="user", email="intruder@example.com")
+    other_headers = auth_headers(other, settings)
+
+    response = await client.delete(
+        f"/api/v1/notebooks/{notebook.id}/chat/history",
+        headers=other_headers,
+    )
+    assert response.status_code == 404
+
+    remaining = await NotebookMessage.find({"notebook_id": notebook.id}).to_list()
+    assert len(remaining) == 1
+
+
 async def test_chunks_endpoints(
     client: AsyncClient,
     settings: Any,

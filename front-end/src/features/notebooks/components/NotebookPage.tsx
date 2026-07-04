@@ -12,6 +12,7 @@ import {
 import type { NotebookReport } from "@/features/notebooks/types"
 
 import { ChatPanel } from "./notebook-page/ChatPanel"
+import { ClearChatButton } from "./notebook-page/ClearChatButton"
 import { NotebookHeader } from "./notebook-page/NotebookHeader"
 import { NotebookError, NotebookSkeleton } from "./notebook-page/NotebookStates"
 import { SourcesPanel } from "./notebook-page/SourcesPanel"
@@ -43,6 +44,9 @@ export function NotebookPage() {
   const navigate = useNavigate()
   const { data: notebook, isLoading, isError, error } = useNotebookQuery(id)
   const [activeTab, setActiveTab] = useState<TabType>("chat")
+  // Bumped after clearing chat history to remount ChatPanel, forcing its
+  // assistant-ui runtime to reload the (now empty) history from the backend.
+  const [chatResetKey, setChatResetKey] = useState(0)
 
   // Modal dialog states
   const [isEditOpen, setIsEditOpen] = useState(false)
@@ -113,7 +117,9 @@ export function NotebookPage() {
       setSelectedMindMap(data)
       toast.success("Mind map generated successfully!")
     } catch (err) {
-      toast.error(`Failed to generate mind map: ${getErrorMessage(err, "Unknown error")}`)
+      toast.error(
+        `Failed to generate mind map: ${getErrorMessage(err, "Unknown error")}`
+      )
     }
   }
 
@@ -134,7 +140,9 @@ export function NotebookPage() {
       })
       toast.success("Quiz is generating — it'll appear in Studio shortly.")
     } catch (err) {
-      toast.error(`Failed to start quiz: ${getErrorMessage(err, "Unknown error")}`)
+      toast.error(
+        `Failed to start quiz: ${getErrorMessage(err, "Unknown error")}`
+      )
     }
   }
 
@@ -153,9 +161,13 @@ export function NotebookPage() {
         detailLevel: difficulty,
         additionalInstructions: instructions.trim() || undefined,
       })
-      toast.success("Flashcards are generating — they'll appear in Studio shortly.")
+      toast.success(
+        "Flashcards are generating — they'll appear in Studio shortly."
+      )
     } catch (err) {
-      toast.error(`Failed to start flashcards: ${getErrorMessage(err, "Unknown error")}`)
+      toast.error(
+        `Failed to start flashcards: ${getErrorMessage(err, "Unknown error")}`
+      )
     }
   }
 
@@ -208,8 +220,17 @@ export function NotebookPage() {
             </PanelCard>
           </TabsContent>
           <TabsContent value="chat" className="flex min-h-0 flex-1 flex-col">
-            <PanelCard title="Chat" hideHeaderBorder>
-              <ChatPanel notebookId={id} />
+            <PanelCard
+              title="Chat"
+              hideHeaderBorder
+              actions={
+                <ClearChatButton
+                  notebookId={id}
+                  onCleared={() => setChatResetKey((key) => key + 1)}
+                />
+              }
+            >
+              <ChatPanel key={chatResetKey} notebookId={id} />
             </PanelCard>
           </TabsContent>
           <TabsContent value="studio" className="flex min-h-0 flex-1 flex-col">
@@ -229,8 +250,16 @@ export function NotebookPage() {
           <PanelCard title="Sources" hideHeaderBorder>
             <SourcesPanel notebookId={id} />
           </PanelCard>
-          <PanelCard title="Chat">
-            <ChatPanel notebookId={id} />
+          <PanelCard
+            title="Chat"
+            actions={
+              <ClearChatButton
+                notebookId={id}
+                onCleared={() => setChatResetKey((key) => key + 1)}
+              />
+            }
+          >
+            <ChatPanel key={chatResetKey} notebookId={id} />
           </PanelCard>
           <PanelCard title="Studio" hideHeaderBorder>
             <StudioPanel
@@ -292,7 +321,9 @@ export function NotebookPage() {
 
       <QuizDialog
         key={
-          isQuizViewerOpen ? `quiz-${selectedQuiz?.id ?? "none"}` : "quiz-closed"
+          isQuizViewerOpen
+            ? `quiz-${selectedQuiz?.id ?? "none"}`
+            : "quiz-closed"
         }
         open={isQuizViewerOpen}
         onOpenChange={(open) => {
@@ -366,20 +397,23 @@ function PanelCard({
   title,
   children,
   hideHeaderBorder,
+  actions,
 }: {
   title: string
   children: React.ReactNode
   hideHeaderBorder?: boolean
+  actions?: React.ReactNode
 }) {
   return (
     <Card className="h-full min-h-0 gap-0 py-0">
       <CardHeader
         className={cn(
-          "flex min-h-12 items-center py-0 pb-0!",
+          "flex min-h-12 flex-row items-center justify-between gap-2 py-0 pb-0!",
           !hideHeaderBorder && "border-b"
         )}
       >
         <CardTitle className="text-sm leading-none">{title}</CardTitle>
+        {actions}
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col px-0">
         {children}

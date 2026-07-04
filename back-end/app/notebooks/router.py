@@ -53,6 +53,7 @@ from app.notebooks.schemas import (
 from app.notebooks.service import (
     build_chunk_image_url,
     cancel_report,
+    clear_notebook_chat_history,
     create_note,
     create_notebook,
     create_pending_report,
@@ -362,6 +363,15 @@ async def read_notebook_chat_history(
     return await extract_notebook_chat_transcript(
         notebook, include_reasoning=include_reasoning
     )
+
+
+@router.delete("/{notebook_id}/chat/history", status_code=status.HTTP_204_NO_CONTENT)
+async def clear_notebook_chat_history_route(
+    notebook_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> Response:
+    await clear_notebook_chat_history(notebook_id, current_user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{notebook_id}/documents/chunks", response_model=list[dict[str, object]])

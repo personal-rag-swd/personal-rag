@@ -114,6 +114,12 @@ async def delete_notebook(notebook_id: UUID, current_user: User) -> None:
     await notebook.delete()
 
 
+async def clear_notebook_chat_history(notebook_id: UUID, current_user: User) -> None:
+    """Delete all persisted chat messages for a notebook, leaving it intact."""
+    notebook = await get_notebook(notebook_id, current_user)
+    await NotebookMessage.find({"notebook_id": notebook.id}).delete()
+
+
 async def get_user_event_snapshot(
     user_id: UUID,
 ) -> tuple[list[NotebookDocument], list[NotebookReport]]:

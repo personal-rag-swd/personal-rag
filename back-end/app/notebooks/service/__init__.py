@@ -25,6 +25,7 @@ from app.notebooks.service.documents import (
     resolve_scoped_document_ids,
 )
 from app.notebooks.service.notebooks import (
+    clear_notebook_chat_history,
     create_notebook,
     delete_notebook,
     get_notebook,
@@ -54,6 +55,7 @@ __all__ = [
     "build_chunk_image_url",
     "build_report_context",
     "cancel_report",
+    "clear_notebook_chat_history",
     "create_note",
     "create_notebook",
     "create_pending_report",

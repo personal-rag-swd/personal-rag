@@ -744,3 +744,17 @@ export async function fetchNotebookChatHistory(
     }
   })
 }
+
+export function useClearNotebookChatMutation(notebookId: string) {
+  const queryClient = useQueryClient()
+  return useMutation<void, Error>({
+    mutationFn: async () => {
+      await apiFetch(`/api/v1/notebooks/${notebookId}/chat/history`, {
+        method: "DELETE",
+      })
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["notebooks"] })
+    },
+  })
+}
