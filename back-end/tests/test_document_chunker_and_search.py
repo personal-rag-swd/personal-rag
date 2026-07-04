@@ -90,6 +90,42 @@ def test_pdf_chunking_extracts_simple_text(
     assert any("PDF text" in chunk.page_content for chunk in chunks)
 
 
+def test_pdf_chunking_strips_image_placeholders(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    # pymupdf4llm leaves a placeholder wherever it drops an image; we describe
+    # images via the vision pipeline instead, so these must not leak into the
+    # embedded text (or the model reads them back as "picture omitted").
+    markdown = (
+        "Intro paragraph.\n\n"
+        "**==> picture [246 x 81] intentionally omitted <==**\n\n"
+        "Body paragraph.\n\n"
+        "==> picture [100.5 x 42.0] <==\n\n"
+        "Conclusion."
+    )
+    monkeypatch.setattr(chunking_module.pymupdf, "open", lambda **kwargs: "fake_doc")
+    monkeypatch.setattr(
+        chunking_module.pymupdf4llm, "to_markdown", lambda doc: markdown
+    )
+
+    chunks = chunk_document(
+        ChunkingRequest(
+            content=b"%PDF-1.7",
+            filename="sample.pdf",
+            source="pdf-source",
+            document_id="doc-img",
+        ),
+        settings,
+    )
+
+    combined = "\n".join(chunk.page_content for chunk in chunks)
+    assert "picture" not in combined
+    assert "omitted" not in combined
+    assert "Intro paragraph." in combined
+    assert "Body paragraph." in combined
+    assert "Conclusion." in combined
+
+
 def test_chunk_document_uses_settings_for_docx(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, int] = {}
 

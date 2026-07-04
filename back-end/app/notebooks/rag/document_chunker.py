@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -65,6 +66,21 @@ def split_text(
     return docs
 
 
+# pymupdf4llm drops every image from its markdown output (we describe images
+# separately via the vision pipeline) and leaves a placeholder in the text,
+# e.g. "**==> picture [246 x 81] intentionally omitted <==**". Left in, it gets
+# embedded as a text chunk and read back to the user as "the picture was
+# omitted", so strip it out. Covers both emitted variants (with and without the
+# "intentionally omitted" wording), with or without the surrounding bold markers.
+_IMAGE_PLACEHOLDER_RE = re.compile(
+    r"[ \t]*\*{0,2}==>\s*picture\s*\[[\d.]+\s*x\s*[\d.]+\]"
+    r"(?:\s*intentionally omitted)?\s*<==\*{0,2}[ \t]*\n?",
+    re.IGNORECASE,
+)
+# Collapse the runs of blank lines left behind after removing the placeholders.
+_EXCESS_BLANK_LINES_RE = re.compile(r"\n{3,}")
+
+
 def _extract_pdf_text(request: ChunkingRequest) -> str:
     doc = pymupdf.open(stream=request.content, filetype="pdf")
     extracted_text = pymupdf4llm.to_markdown(doc)
@@ -72,7 +88,8 @@ def _extract_pdf_text(request: ChunkingRequest) -> str:
         raise TypeError(
             f"pymupdf4llm.to_markdown returned unexpected type: {type(extracted_text)}"
         )
-    return extracted_text
+    extracted_text = _IMAGE_PLACEHOLDER_RE.sub("", extracted_text)
+    return _EXCESS_BLANK_LINES_RE.sub("\n\n", extracted_text)
 
 
 def _docx_table_rows(table: DocxTable) -> list[str]:
