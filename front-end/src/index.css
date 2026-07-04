@@ -3033,3 +3033,9 @@
     opacity: 0;
   }
 }
+
+/* Hide the UDoc viewer's "Skip to document" accessibility link.
+   The dialog focus trap focuses it on open, making it flash visible. */
+.udoc-viewer-root .udoc-skip-link {
+  display: none !important;
+}
