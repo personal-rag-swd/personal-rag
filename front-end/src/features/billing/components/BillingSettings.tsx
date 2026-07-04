@@ -31,7 +31,7 @@ import {
 } from "../api"
 import type { BillingTier } from "../types"
 
-const FREE_TIER_TOKENS = "3,000,000 tokens/mo"
+const FREE_TIER_TOKENS = "6,000,000 tokens/mo"
 
 const PLANS: {
   tier: BillingTier
@@ -44,14 +44,14 @@ const PLANS: {
     tier: "pro",
     name: "Pro",
     price: "$20/mo",
-    tokens: "10,000,000 tokens/mo",
+    tokens: "20,000,000 tokens/mo",
     perks: ["Priority ingestion", "Longer chat context", "Email support"],
   },
   {
     tier: "max",
     name: "Max",
     price: "$100/mo",
-    tokens: "70,000,000 tokens/mo",
+    tokens: "140,000,000 tokens/mo",
     perks: ["Priority ingestion", "Longest chat context", "Priority support"],
   },
 ]
