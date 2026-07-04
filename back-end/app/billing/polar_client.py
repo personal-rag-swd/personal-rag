@@ -64,9 +64,14 @@ class PolarClient:
         await self._client.aclose()
 
     async def _request(
-        self, method: str, path: str, *, json: dict[str, Any] | None = None
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        response = await self._client.request(method, path, json=json)
+        response = await self._client.request(method, path, json=json, params=params)
         if response.is_error:
             logger.warning(
                 "Polar API error: %s %s -> %s %s",
@@ -132,6 +137,20 @@ class PolarClient:
             "/v1/events/ingest",
             json={"events": events},
         )
+
+    async def list_orders(
+        self, *, page: int = 1, limit: int = 20, organization_id: str | None = None
+    ) -> dict[str, Any]:
+        """List orders (payments) for the org's products.
+
+        Used by the admin dashboard to surface real billing transactions. Not
+        part of ``PolarClientProtocol`` because ``billing/service`` never needs
+        it — the admin service calls the concrete client directly.
+        """
+        params: dict[str, Any] = {"page": page, "limit": limit}
+        if organization_id:
+            params["organization_id"] = organization_id
+        return await self._request("GET", "/v1/orders/", params=params)
 
 
 _client_cache: dict[str, PolarClient] = {}

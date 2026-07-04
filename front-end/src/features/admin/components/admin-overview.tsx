@@ -48,7 +48,7 @@ export function AdminOverview() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-3">
         <StatCard title="Total users" value={stats.totalUsers} />
         <StatCard title="Active users" value={stats.activeUsers} />

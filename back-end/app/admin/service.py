@@ -1,14 +1,26 @@
+import logging
 import re
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from beanie import Document
 
-from app.admin.exceptions import SelfModificationError, UserNotFoundError
+from app.admin.exceptions import (
+    DocumentContentUnavailableError,
+    DocumentNotFoundError,
+    SelfModificationError,
+    UserNotFoundError,
+)
 from app.admin.schemas import (
     AdminDocumentListResponse,
+    AdminDocumentPreview,
     AdminDocumentRead,
+    AdminDocumentUpdate,
+    AdminOrderListResponse,
+    AdminOrderRead,
     AdminStatsResponse,
+    AdminTransactionListResponse,
+    AdminTransactionRead,
     AdminUserListResponse,
     AdminUserRead,
     AdminUserUpdate,
@@ -16,8 +28,19 @@ from app.admin.schemas import (
     DailyUsagePoint,
 )
 from app.billing.models import BillingCustomer, UsageAllowance, UsageEventLog
-from app.notebooks.models import Notebook, NotebookDocument, NotebookReport
+from app.billing.polar_client import PolarAPIError, get_polar_client
+from app.core.config import Settings
+from app.core.s3 import generate_presigned_get_url
+from app.notebooks.models import (
+    Notebook,
+    NotebookDocument,
+    NotebookDocumentChunk,
+    NotebookReport,
+)
+from app.notebooks.service.documents import load_document_bytes
 from app.users.models import User
+
+logger = logging.getLogger(__name__)
 
 
 def _current_period_start(now: datetime) -> datetime:
@@ -163,12 +186,29 @@ async def get_user_or_404(user_id: UUID) -> User:
     return user
 
 
+def _to_admin_document_read(document: NotebookDocument) -> AdminDocumentRead:
+    return AdminDocumentRead(
+        id=document.id,
+        filename=document.filename,
+        content_type=document.content_type,
+        size=document.size,
+        status=document.status,
+        error_message=document.error_message,
+        notebook_id=document.notebook_id,
+        user_id=document.user_id,
+        created_at=document.created_at,
+        updated_at=document.updated_at,
+    )
+
+
 async def list_documents(
-    page: int, page_size: int, status: str | None
+    page: int, page_size: int, status: str | None, search: str | None = None
 ) -> AdminDocumentListResponse:
     query: dict[str, object] = {}
     if status:
         query["status"] = status
+    if search:
+        query["filename"] = {"$regex": re.escape(search), "$options": "i"}
 
     total = await NotebookDocument.find(query).count()
     documents = (
@@ -178,23 +218,190 @@ async def list_documents(
         .limit(page_size)
         .to_list()
     )
-    items = [
-        AdminDocumentRead(
-            id=document.id,
+    items = [_to_admin_document_read(document) for document in documents]
+    return AdminDocumentListResponse(
+        items=items, total=total, page=page, page_size=page_size
+    )
+
+
+async def get_document_or_404(document_id: UUID) -> NotebookDocument:
+    document = await NotebookDocument.find_one({"_id": document_id})
+    if document is None:
+        raise DocumentNotFoundError()
+    return document
+
+
+async def update_document(
+    document_id: UUID, update: AdminDocumentUpdate
+) -> AdminDocumentRead:
+    document = await get_document_or_404(document_id)
+    if update.filename is not None:
+        document.filename = update.filename
+    if update.status is not None:
+        document.status = update.status
+    document.updated_at = datetime.now(UTC)
+    await document.save()
+    return _to_admin_document_read(document)
+
+
+async def delete_document(document_id: UUID) -> None:
+    document = await get_document_or_404(document_id)
+    await NotebookDocumentChunk.find({"document_id": document.id}).delete()
+
+    note_reports = await NotebookReport.find(
+        {"notebook_id": document.notebook_id, "report_type": "note"},
+    ).to_list()
+    for report in note_reports:
+        if isinstance(report.content, dict) and report.content.get(
+            "document_id"
+        ) == str(document.id):
+            await report.delete()
+
+    await document.delete()
+
+
+# Content types the ingestion pipeline accepts that the udoc-viewer cannot
+# render (it has no plain-text/markdown engine). These are previewed as text
+# instead; every other accepted type (pdf, docx, images) goes to the viewer.
+_TEXT_PREVIEW_CONTENT_TYPES = {
+    "text/plain",
+    "text/markdown",
+    "text/x-markdown",
+}
+
+
+def _is_text_preview(content_type: str | None) -> bool:
+    if content_type is None:
+        return False
+    normalized = content_type.split(";", maxsplit=1)[0].strip().lower()
+    return normalized in _TEXT_PREVIEW_CONTENT_TYPES
+
+
+async def get_document_preview(
+    document_id: UUID, settings: Settings
+) -> AdminDocumentPreview:
+    document = await get_document_or_404(document_id)
+
+    # In-app notes and text/markdown uploads render as text: the udoc-viewer
+    # only handles binary document formats (pdf, docx, images), so text-based
+    # sources must be inlined rather than pointed at via a presigned URL.
+    if document.content is not None:
+        return AdminDocumentPreview(
             filename=document.filename,
             content_type=document.content_type,
             size=document.size,
-            status=document.status,
-            error_message=document.error_message,
-            notebook_id=document.notebook_id,
-            user_id=document.user_id,
-            created_at=document.created_at,
-            updated_at=document.updated_at,
+            content=document.content,
+            preview_type="text",
         )
-        for document in documents
+    if not document.s3_key:
+        raise DocumentContentUnavailableError()
+    if _is_text_preview(document.content_type):
+        raw = await load_document_bytes(document, settings)
+        return AdminDocumentPreview(
+            filename=document.filename,
+            content_type=document.content_type,
+            size=document.size,
+            content=raw.decode("utf-8", errors="replace"),
+            preview_type="text",
+        )
+    url = generate_presigned_get_url(settings, key=document.s3_key, expires_in=3600)
+    return AdminDocumentPreview(
+        filename=document.filename,
+        content_type=document.content_type,
+        size=document.size,
+        url=url,
+        preview_type="url",
+    )
+
+
+async def list_transactions(
+    page: int, page_size: int, user_id: UUID | None
+) -> AdminTransactionListResponse:
+    query: dict[str, object] = {}
+    if user_id is not None:
+        query["user_id"] = user_id
+
+    total = await UsageEventLog.find(query).count()
+    events = (
+        await UsageEventLog.find(query)
+        .sort("-created_at")
+        .skip((page - 1) * page_size)
+        .limit(page_size)
+        .to_list()
+    )
+    items = [
+        AdminTransactionRead(
+            id=event.id,
+            user_id=event.user_id,
+            notebook_id=event.notebook_id,
+            quantity=event.quantity,
+            polar_ingested=event.polar_ingested,
+            polar_ingested_at=event.polar_ingested_at,
+            polar_ingest_error=event.polar_ingest_error,
+            retry_count=event.retry_count,
+            created_at=event.created_at,
+        )
+        for event in events
     ]
-    return AdminDocumentListResponse(
+    return AdminTransactionListResponse(
         items=items, total=total, page=page, page_size=page_size
+    )
+
+
+def _as_str(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _to_admin_order_read(order: dict[str, object]) -> AdminOrderRead:
+    customer = order.get("customer")
+    customer_email = (
+        _as_str(customer.get("email")) if isinstance(customer, dict) else None
+    )
+    amount = order.get("net_amount")
+    if amount is None:
+        amount = order.get("total_amount")
+    if amount is None:
+        amount = order.get("amount")
+    return AdminOrderRead(
+        id=str(order.get("id", "")),
+        amount=amount if isinstance(amount, int) else None,
+        currency=_as_str(order.get("currency")),
+        status=_as_str(order.get("status")),
+        customer_email=customer_email,
+        product_id=_as_str(order.get("product_id")),
+        created_at=_as_str(order.get("created_at")),
+    )
+
+
+async def list_orders(
+    page: int, page_size: int, settings: Settings
+) -> AdminOrderListResponse:
+    if not settings.polar_api_key:
+        return AdminOrderListResponse(configured=False)
+    try:
+        payload = await get_polar_client(settings).list_orders(
+            page=page,
+            limit=page_size,
+            organization_id=settings.polar_organization_id or None,
+        )
+    except PolarAPIError:
+        logger.warning("Failed to fetch Polar orders for admin dashboard")
+        return AdminOrderListResponse(configured=True)
+
+    raw_items = payload.get("items", [])
+    items = [
+        _to_admin_order_read(order) for order in raw_items if isinstance(order, dict)
+    ]
+    pagination = payload.get("pagination", {})
+    total = (
+        pagination.get("total_count", len(items))
+        if isinstance(pagination, dict)
+        else len(items)
+    )
+    return AdminOrderListResponse(
+        items=items,
+        total=total if isinstance(total, int) else len(items),
+        configured=True,
     )
 
 

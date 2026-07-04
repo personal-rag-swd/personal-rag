@@ -1,6 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAdminBillingSummaryQuery } from "../api"
+import { AdminOrdersTable } from "./admin-orders-table"
+import { AdminTransactionsTable } from "./admin-transactions-table"
 
 function BreakdownCard({
   title,
@@ -36,28 +38,33 @@ function BreakdownCard({
 export function AdminBillingSummary() {
   const { data, isLoading } = useAdminBillingSummaryQuery()
 
-  if (isLoading || !data) {
-    return (
-      <div className="grid gap-4 md:grid-cols-3">
-        {Array.from({ length: 3 }, (_, index) => (
-          <Skeleton key={index} className="h-40" />
-        ))}
-      </div>
-    )
-  }
-
   return (
-    <div className="grid gap-4 md:grid-cols-3">
-      <Card>
-        <CardHeader>
-          <CardTitle>Total customers</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold">{data.totalCustomers}</div>
-        </CardContent>
-      </Card>
-      <BreakdownCard title="By subscription status" entries={data.byStatus} />
-      <BreakdownCard title="By product" entries={data.byProduct} />
+    <div className="space-y-6">
+      {isLoading || !data ? (
+        <div className="grid gap-4 md:grid-cols-3">
+          {Array.from({ length: 3 }, (_, index) => (
+            <Skeleton key={index} className="h-40" />
+          ))}
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-3">
+          <Card>
+            <CardHeader>
+              <CardTitle>Total customers</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{data.totalCustomers}</div>
+            </CardContent>
+          </Card>
+          <BreakdownCard
+            title="By subscription status"
+            entries={data.byStatus}
+          />
+          <BreakdownCard title="By product" entries={data.byProduct} />
+        </div>
+      )}
+      <AdminTransactionsTable />
+      <AdminOrdersTable />
     </div>
   )
 }

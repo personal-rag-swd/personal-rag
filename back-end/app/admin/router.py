@@ -1,12 +1,17 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from app.admin import service
 from app.admin.schemas import (
     AdminDocumentListResponse,
+    AdminDocumentPreview,
+    AdminDocumentRead,
+    AdminDocumentUpdate,
+    AdminOrderListResponse,
     AdminStatsResponse,
+    AdminTransactionListResponse,
     AdminUserListResponse,
     AdminUserRead,
     AdminUserUpdate,
@@ -75,8 +80,49 @@ async def read_documents(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     status: str | None = None,
+    search: str | None = None,
 ) -> AdminDocumentListResponse:
-    return await service.list_documents(page, page_size, status)
+    return await service.list_documents(page, page_size, status, search)
+
+
+@router.get("/documents/{document_id}/preview", response_model=AdminDocumentPreview)
+async def read_document_preview(
+    document_id: UUID,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AdminDocumentPreview:
+    return await service.get_document_preview(document_id, settings)
+
+
+@router.patch("/documents/{document_id}", response_model=AdminDocumentRead)
+async def update_document(
+    document_id: UUID,
+    body: AdminDocumentUpdate,
+) -> AdminDocumentRead:
+    return await service.update_document(document_id, body)
+
+
+@router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_document(document_id: UUID) -> Response:
+    await service.delete_document(document_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/transactions", response_model=AdminTransactionListResponse)
+async def read_transactions(
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    user_id: UUID | None = None,
+) -> AdminTransactionListResponse:
+    return await service.list_transactions(page, page_size, user_id)
+
+
+@router.get("/orders", response_model=AdminOrderListResponse)
+async def read_orders(
+    settings: Annotated[Settings, Depends(get_settings)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> AdminOrderListResponse:
+    return await service.list_orders(page, page_size, settings)
 
 
 @router.get("/billing/summary", response_model=BillingSummaryResponse)

@@ -66,6 +66,50 @@ export interface AdminDocumentPage {
   pageSize: number
 }
 
+export interface AdminDocumentPreview {
+  filename: string
+  contentType: string | null
+  size: number | null
+  url: string | null
+  content: string | null
+  previewType: "text" | "url"
+}
+
+export interface AdminTransaction {
+  id: string
+  userId: string
+  notebookId: string | null
+  quantity: number
+  polarIngested: boolean
+  polarIngestedAt: string | null
+  polarIngestError: string | null
+  retryCount: number
+  createdAt: string
+}
+
+export interface AdminTransactionPage {
+  items: AdminTransaction[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+export interface AdminOrder {
+  id: string
+  amount: number | null
+  currency: string | null
+  status: string | null
+  customerEmail: string | null
+  productId: string | null
+  createdAt: string | null
+}
+
+export interface AdminOrderPage {
+  items: AdminOrder[]
+  total: number
+  configured: boolean
+}
+
 export interface BillingSummary {
   byStatus: Record<string, number>
   byProduct: Record<string, number>

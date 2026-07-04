@@ -63,6 +63,57 @@ class AdminDocumentListResponse(BaseModel):
     page_size: int
 
 
+class AdminDocumentUpdate(BaseModel):
+    filename: str | None = Field(default=None, min_length=1, max_length=512)
+    status: Literal["pending", "uploaded", "processing", "indexed", "failed"] | None = (
+        None
+    )
+
+
+class AdminDocumentPreview(BaseModel):
+    filename: str
+    content_type: str | None
+    size: int | None
+    url: str | None = None
+    content: str | None = None
+    preview_type: Literal["text", "url"]
+
+
+class AdminTransactionRead(BaseModel):
+    id: UUID
+    user_id: UUID
+    notebook_id: UUID | None
+    quantity: int
+    polar_ingested: bool
+    polar_ingested_at: datetime | None
+    polar_ingest_error: str | None
+    retry_count: int
+    created_at: datetime
+
+
+class AdminTransactionListResponse(BaseModel):
+    items: list[AdminTransactionRead]
+    total: int
+    page: int
+    page_size: int
+
+
+class AdminOrderRead(BaseModel):
+    id: str
+    amount: int | None = None
+    currency: str | None = None
+    status: str | None = None
+    customer_email: str | None = None
+    product_id: str | None = None
+    created_at: str | None = None
+
+
+class AdminOrderListResponse(BaseModel):
+    items: list[AdminOrderRead] = Field(default_factory=list)
+    total: int = 0
+    configured: bool = True
+
+
 class BillingSummaryResponse(BaseModel):
     by_status: dict[str, int] = Field(default_factory=dict)
     by_product: dict[str, int] = Field(default_factory=dict)

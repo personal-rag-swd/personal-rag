@@ -8,7 +8,11 @@ import pytest
 from httpx import AsyncClient
 
 from app.billing.models import BillingCustomer, UsageAllowance, UsageEventLog
-from app.notebooks.models import NotebookDocument, NotebookReport
+from app.notebooks.models import (
+    NotebookDocument,
+    NotebookDocumentChunk,
+    NotebookReport,
+)
 from app.users.models import User
 from tests.conftest import auth_headers, create_notebook, create_user
 
@@ -362,6 +366,298 @@ class TestAdminDocuments:
         )
         items = response.json()["items"]
         assert [item["id"] for item in items] == [str(second.id), str(first.id)]
+
+    async def test_filename_search(self, client: AsyncClient, settings: Any) -> None:
+        admin = await create_user(role="admin")
+        user = await create_user(role="user")
+        target = await create_document(user)
+        target.filename = "annual-report.pdf"
+        await target.save()
+        other = await create_document(user)
+        other.filename = "notes.txt"
+        await other.save()
+
+        response = await client.get(
+            "/api/v1/admin/documents?search=annual",
+            headers=auth_headers(admin, settings),
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 1
+        assert data["items"][0]["id"] == str(target.id)
+
+
+class TestAdminDocumentPreview:
+    async def test_text_preview(self, client: AsyncClient, settings: Any) -> None:
+        admin = await create_user(role="admin")
+        user = await create_user(role="user")
+        document = await create_document(user)
+
+        response = await client.get(
+            f"/api/v1/admin/documents/{document.id}/preview",
+            headers=auth_headers(admin, settings),
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["preview_type"] == "text"
+        assert data["content"] == "secret document body"
+
+    async def test_s3_text_file_rendered_as_text(
+        self, client: AsyncClient, settings: Any, monkeypatch: Any
+    ) -> None:
+        # Markdown/plain-text uploads live in S3 (no inline `content`) and the
+        # udoc-viewer cannot render them, so they must come back as text.
+        from app.admin import service as admin_service
+
+        async def fake_load_document_bytes(_document: Any, _settings: Any) -> bytes:
+            return b"# Heading\n\nbody"
+
+        monkeypatch.setattr(
+            admin_service, "load_document_bytes", fake_load_document_bytes
+        )
+        admin = await create_user(role="admin")
+        user = await create_user(role="user")
+        notebook = await create_notebook(user)
+        document = NotebookDocument(
+            notebook_id=notebook.id,
+            user_id=user.id,
+            s3_bucket="bucket",
+            s3_key="users/notes.md",
+            filename="notes.md",
+            content_type="text/markdown",
+            size=15,
+            status="indexed",
+        )
+        await document.insert()
+
+        response = await client.get(
+            f"/api/v1/admin/documents/{document.id}/preview",
+            headers=auth_headers(admin, settings),
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["preview_type"] == "text"
+        assert data["content"] == "# Heading\n\nbody"
+        assert data["url"] is None
+
+    async def test_binary_file_rendered_as_url(
+        self, client: AsyncClient, settings: Any, monkeypatch: Any
+    ) -> None:
+        # PDFs/docx/images go to the udoc-viewer via a presigned URL.
+        from app.admin import service as admin_service
+
+        monkeypatch.setattr(
+            admin_service,
+            "generate_presigned_get_url",
+            lambda _settings, *, key, expires_in: "http://minio/presigned.pdf",
+        )
+        admin = await create_user(role="admin")
+        user = await create_user(role="user")
+        notebook = await create_notebook(user)
+        document = NotebookDocument(
+            notebook_id=notebook.id,
+            user_id=user.id,
+            s3_bucket="bucket",
+            s3_key="users/report.pdf",
+            filename="report.pdf",
+            content_type="application/pdf",
+            size=123,
+            status="indexed",
+        )
+        await document.insert()
+
+        response = await client.get(
+            f"/api/v1/admin/documents/{document.id}/preview",
+            headers=auth_headers(admin, settings),
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["preview_type"] == "url"
+        assert data["url"] == "http://minio/presigned.pdf"
+
+    async def test_unknown_document_404(
+        self, client: AsyncClient, settings: Any
+    ) -> None:
+        admin = await create_user(role="admin")
+        response = await client.get(
+            f"/api/v1/admin/documents/{uuid4()}/preview",
+            headers=auth_headers(admin, settings),
+        )
+        assert response.status_code == 404
+
+
+class TestAdminDocumentUpdate:
+    async def test_update_persists(self, client: AsyncClient, settings: Any) -> None:
+        admin = await create_user(role="admin")
+        user = await create_user(role="user")
+        document = await create_document(user, status="failed")
+
+        response = await client.patch(
+            f"/api/v1/admin/documents/{document.id}",
+            json={"filename": "renamed.txt", "status": "indexed"},
+            headers=auth_headers(admin, settings),
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["filename"] == "renamed.txt"
+        assert data["status"] == "indexed"
+
+        refreshed = await NotebookDocument.find_one({"_id": document.id})
+        assert refreshed is not None
+        assert refreshed.filename == "renamed.txt"
+        assert refreshed.status == "indexed"
+
+    async def test_bad_status_422(self, client: AsyncClient, settings: Any) -> None:
+        admin = await create_user(role="admin")
+        user = await create_user(role="user")
+        document = await create_document(user)
+        response = await client.patch(
+            f"/api/v1/admin/documents/{document.id}",
+            json={"status": "bogus"},
+            headers=auth_headers(admin, settings),
+        )
+        assert response.status_code == 422
+
+    async def test_unknown_document_404(
+        self, client: AsyncClient, settings: Any
+    ) -> None:
+        admin = await create_user(role="admin")
+        response = await client.patch(
+            f"/api/v1/admin/documents/{uuid4()}",
+            json={"filename": "x.txt"},
+            headers=auth_headers(admin, settings),
+        )
+        assert response.status_code == 404
+
+
+class TestAdminDocumentDelete:
+    async def test_delete_removes_document_and_chunks(
+        self, client: AsyncClient, settings: Any
+    ) -> None:
+        admin = await create_user(role="admin")
+        user = await create_user(role="user")
+        document = await create_document(user)
+        chunk = NotebookDocumentChunk(
+            notebook_id=document.notebook_id,
+            document_id=document.id,
+            user_id=user.id,
+            content="chunk text",
+            chunk_index=0,
+            embedding=[0.0] * 1536,
+        )
+        await chunk.insert()
+
+        response = await client.delete(
+            f"/api/v1/admin/documents/{document.id}",
+            headers=auth_headers(admin, settings),
+        )
+        assert response.status_code == 204
+        assert await NotebookDocument.find_one({"_id": document.id}) is None
+        assert (
+            await NotebookDocumentChunk.find({"document_id": document.id}).count() == 0
+        )
+
+    async def test_unknown_document_404(
+        self, client: AsyncClient, settings: Any
+    ) -> None:
+        admin = await create_user(role="admin")
+        response = await client.delete(
+            f"/api/v1/admin/documents/{uuid4()}",
+            headers=auth_headers(admin, settings),
+        )
+        assert response.status_code == 404
+
+
+class TestAdminTransactions:
+    async def test_lists_events_desc(self, client: AsyncClient, settings: Any) -> None:
+        admin = await create_user(role="admin")
+        user = await create_user(role="user")
+        now = datetime.now(UTC)
+        older = await create_usage_event(user, 100, now - timedelta(hours=1))
+        newer = await create_usage_event(user, 250, now)
+
+        response = await client.get(
+            "/api/v1/admin/transactions",
+            headers=auth_headers(admin, settings),
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 2
+        assert [item["id"] for item in data["items"]] == [
+            str(newer.id),
+            str(older.id),
+        ]
+        assert data["items"][0]["quantity"] == 250
+
+    async def test_filter_by_user(self, client: AsyncClient, settings: Any) -> None:
+        admin = await create_user(role="admin")
+        user = await create_user(role="user")
+        other = await create_user(role="user")
+        await create_usage_event(user, 10)
+        await create_usage_event(other, 20)
+
+        response = await client.get(
+            f"/api/v1/admin/transactions?user_id={user.id}",
+            headers=auth_headers(admin, settings),
+        )
+        data = response.json()
+        assert data["total"] == 1
+        assert data["items"][0]["user_id"] == str(user.id)
+
+
+class TestAdminOrders:
+    async def test_not_configured(
+        self, client: AsyncClient, settings: Any, monkeypatch: Any
+    ) -> None:
+        monkeypatch.setattr(settings, "polar_api_key", "")
+        admin = await create_user(role="admin")
+        response = await client.get(
+            "/api/v1/admin/orders", headers=auth_headers(admin, settings)
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["configured"] is False
+        assert data["items"] == []
+
+    async def test_maps_polar_orders(
+        self, client: AsyncClient, settings: Any, monkeypatch: Any
+    ) -> None:
+        monkeypatch.setattr(settings, "polar_api_key", "test-key")
+
+        class FakePolarClient:
+            async def list_orders(
+                self, *, page: int, limit: int, organization_id: str | None
+            ) -> dict[str, Any]:
+                return {
+                    "items": [
+                        {
+                            "id": "ord_123",
+                            "net_amount": 1999,
+                            "currency": "usd",
+                            "status": "paid",
+                            "product_id": "prod_1",
+                            "created_at": "2026-07-01T00:00:00Z",
+                            "customer": {"email": "buyer@example.com"},
+                        }
+                    ],
+                    "pagination": {"total_count": 1},
+                }
+
+        monkeypatch.setattr(
+            "app.admin.service.get_polar_client", lambda _settings: FakePolarClient()
+        )
+        admin = await create_user(role="admin")
+        response = await client.get(
+            "/api/v1/admin/orders", headers=auth_headers(admin, settings)
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["configured"] is True
+        assert data["total"] == 1
+        order = data["items"][0]
+        assert order["id"] == "ord_123"
+        assert order["amount"] == 1999
+        assert order["customer_email"] == "buyer@example.com"
 
 
 class TestAdminBillingSummary:

@@ -9,7 +9,12 @@ import { apiFetch } from "@/lib/api-client"
 import type {
   AdminDocument,
   AdminDocumentPage,
+  AdminDocumentPreview,
+  AdminOrder,
+  AdminOrderPage,
   AdminStats,
+  AdminTransaction,
+  AdminTransactionPage,
   AdminUser,
   AdminUserPage,
   AdminUserUsage,
@@ -80,6 +85,50 @@ type AdminDocumentPageApiPayload = {
   page_size: number
 }
 
+type AdminDocumentPreviewApiPayload = {
+  filename: string
+  content_type: string | null
+  size: number | null
+  url: string | null
+  content: string | null
+  preview_type: "text" | "url"
+}
+
+type AdminTransactionApiPayload = {
+  id: string
+  user_id: string
+  notebook_id: string | null
+  quantity: number
+  polar_ingested: boolean
+  polar_ingested_at: string | null
+  polar_ingest_error: string | null
+  retry_count: number
+  created_at: string
+}
+
+type AdminTransactionPageApiPayload = {
+  items: AdminTransactionApiPayload[]
+  total: number
+  page: number
+  page_size: number
+}
+
+type AdminOrderApiPayload = {
+  id: string
+  amount: number | null
+  currency: string | null
+  status: string | null
+  customer_email: string | null
+  product_id: string | null
+  created_at: string | null
+}
+
+type AdminOrderPageApiPayload = {
+  items: AdminOrderApiPayload[]
+  total: number
+  configured: boolean
+}
+
 type BillingSummaryApiPayload = {
   by_status: Record<string, number>
   by_product: Record<string, number>
@@ -140,6 +189,47 @@ function mapAdminDocument(payload: AdminDocumentApiPayload): AdminDocument {
     userId: payload.user_id,
     createdAt: payload.created_at,
     updatedAt: payload.updated_at,
+  }
+}
+
+function mapAdminDocumentPreview(
+  payload: AdminDocumentPreviewApiPayload
+): AdminDocumentPreview {
+  return {
+    filename: payload.filename,
+    contentType: payload.content_type,
+    size: payload.size,
+    url: payload.url,
+    content: payload.content,
+    previewType: payload.preview_type,
+  }
+}
+
+function mapAdminTransaction(
+  payload: AdminTransactionApiPayload
+): AdminTransaction {
+  return {
+    id: payload.id,
+    userId: payload.user_id,
+    notebookId: payload.notebook_id,
+    quantity: payload.quantity,
+    polarIngested: payload.polar_ingested,
+    polarIngestedAt: payload.polar_ingested_at,
+    polarIngestError: payload.polar_ingest_error,
+    retryCount: payload.retry_count,
+    createdAt: payload.created_at,
+  }
+}
+
+function mapAdminOrder(payload: AdminOrderApiPayload): AdminOrder {
+  return {
+    id: payload.id,
+    amount: payload.amount,
+    currency: payload.currency,
+    status: payload.status,
+    customerEmail: payload.customer_email,
+    productId: payload.product_id,
+    createdAt: payload.created_at,
   }
 }
 
@@ -237,15 +327,17 @@ export function useAdminUserUsageQuery(userId: string | null) {
 
 export function useAdminDocumentsQuery({
   status,
+  search,
   page,
   pageSize,
 }: {
   status: string
+  search: string
   page: number
   pageSize: number
 }) {
   return useQuery({
-    queryKey: ["admin", "documents", { status, page, pageSize }],
+    queryKey: ["admin", "documents", { status, search, page, pageSize }],
     queryFn: async (): Promise<AdminDocumentPage> => {
       const payload = await apiFetch<AdminDocumentPageApiPayload>(
         "/api/v1/admin/documents",
@@ -254,6 +346,7 @@ export function useAdminDocumentsQuery({
             page,
             page_size: pageSize,
             ...(status ? { status } : {}),
+            ...(search ? { search } : {}),
           },
         }
       )
@@ -262,6 +355,113 @@ export function useAdminDocumentsQuery({
         total: payload.total,
         page: payload.page,
         pageSize: payload.page_size,
+      }
+    },
+    placeholderData: keepPreviousData,
+  })
+}
+
+export function useAdminDocumentPreviewQuery(documentId: string | null) {
+  return useQuery({
+    queryKey: ["admin", "document-preview", documentId],
+    queryFn: async () =>
+      mapAdminDocumentPreview(
+        await apiFetch<AdminDocumentPreviewApiPayload>(
+          `/api/v1/admin/documents/${documentId}/preview`
+        )
+      ),
+    enabled: documentId !== null,
+  })
+}
+
+export function useUpdateDocumentMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      documentId,
+      filename,
+      status,
+    }: {
+      documentId: string
+      filename?: string
+      status?: string
+    }) =>
+      mapAdminDocument(
+        await apiFetch<AdminDocumentApiPayload>(
+          `/api/v1/admin/documents/${documentId}`,
+          {
+            method: "PATCH",
+            data: {
+              ...(filename !== undefined ? { filename } : {}),
+              ...(status !== undefined ? { status } : {}),
+            },
+          }
+        )
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin", "documents"] })
+      void queryClient.invalidateQueries({ queryKey: ["admin", "stats"] })
+    },
+  })
+}
+
+export function useDeleteDocumentMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (documentId: string) =>
+      apiFetch<void>(`/api/v1/admin/documents/${documentId}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin", "documents"] })
+      void queryClient.invalidateQueries({ queryKey: ["admin", "stats"] })
+    },
+  })
+}
+
+export function useAdminTransactionsQuery({
+  page,
+  pageSize,
+}: {
+  page: number
+  pageSize: number
+}) {
+  return useQuery({
+    queryKey: ["admin", "transactions", { page, pageSize }],
+    queryFn: async (): Promise<AdminTransactionPage> => {
+      const payload = await apiFetch<AdminTransactionPageApiPayload>(
+        "/api/v1/admin/transactions",
+        { params: { page, page_size: pageSize } }
+      )
+      return {
+        items: payload.items.map(mapAdminTransaction),
+        total: payload.total,
+        page: payload.page,
+        pageSize: payload.page_size,
+      }
+    },
+    placeholderData: keepPreviousData,
+  })
+}
+
+export function useAdminOrdersQuery({
+  page,
+  pageSize,
+}: {
+  page: number
+  pageSize: number
+}) {
+  return useQuery({
+    queryKey: ["admin", "orders", { page, pageSize }],
+    queryFn: async (): Promise<AdminOrderPage> => {
+      const payload = await apiFetch<AdminOrderPageApiPayload>(
+        "/api/v1/admin/orders",
+        { params: { page, page_size: pageSize } }
+      )
+      return {
+        items: payload.items.map(mapAdminOrder),
+        total: payload.total,
+        configured: payload.configured,
       }
     },
     placeholderData: keepPreviousData,
