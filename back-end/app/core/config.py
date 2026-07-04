@@ -108,18 +108,18 @@ class Settings(BaseSettings):
     polar_usage_emit_interval_seconds: int = 60
     polar_usage_emit_batch_size: int = 100
     polar_usage_emit_max_retries: int = 5
-    free_tier_llm_tokens_allowance: int = 100_000
-    pro_tier_llm_tokens_allowance: int = 10_000_000
-    max_tier_llm_tokens_allowance: int = 70_000_000
+    free_tier_llm_tokens_allowance: int = 200_000
+    pro_tier_llm_tokens_allowance: int = 20_000_000
+    max_tier_llm_tokens_allowance: int = 140_000_000
 
     session_window_hours: int = 5
     weekly_window_days: int = 7
-    free_tier_session_tokens_allowance: int = 5_000
-    pro_tier_session_tokens_allowance: int = 500_000
-    max_tier_session_tokens_allowance: int = 3_500_000
-    free_tier_weekly_tokens_allowance: int = 24_000
-    pro_tier_weekly_tokens_allowance: int = 2_400_000
-    max_tier_weekly_tokens_allowance: int = 16_000_000
+    free_tier_session_tokens_allowance: int = 10_000
+    pro_tier_session_tokens_allowance: int = 1_000_000
+    max_tier_session_tokens_allowance: int = 7_000_000
+    free_tier_weekly_tokens_allowance: int = 48_000
+    pro_tier_weekly_tokens_allowance: int = 4_800_000
+    max_tier_weekly_tokens_allowance: int = 32_000_000
 
     model_config = SettingsConfigDict(
         env_file=".env",
