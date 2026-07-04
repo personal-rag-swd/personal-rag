@@ -75,25 +75,6 @@ export interface AdminDocumentPreview {
   previewType: "text" | "url"
 }
 
-export interface AdminTransaction {
-  id: string
-  userId: string
-  notebookId: string | null
-  quantity: number
-  polarIngested: boolean
-  polarIngestedAt: string | null
-  polarIngestError: string | null
-  retryCount: number
-  createdAt: string
-}
-
-export interface AdminTransactionPage {
-  items: AdminTransaction[]
-  total: number
-  page: number
-  pageSize: number
-}
-
 export interface AdminOrder {
   id: string
   amount: number | null

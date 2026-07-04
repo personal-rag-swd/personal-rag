@@ -2,7 +2,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAdminBillingSummaryQuery } from "../api"
 import { AdminOrdersTable } from "./admin-orders-table"
-import { AdminTransactionsTable } from "./admin-transactions-table"
 
 function BreakdownCard({
   title,
@@ -63,7 +62,6 @@ export function AdminBillingSummary() {
           <BreakdownCard title="By product" entries={data.byProduct} />
         </div>
       )}
-      <AdminTransactionsTable />
       <AdminOrdersTable />
     </div>
   )

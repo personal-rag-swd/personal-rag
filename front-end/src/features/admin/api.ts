@@ -13,8 +13,6 @@ import type {
   AdminOrder,
   AdminOrderPage,
   AdminStats,
-  AdminTransaction,
-  AdminTransactionPage,
   AdminUser,
   AdminUserPage,
   AdminUserUsage,
@@ -92,25 +90,6 @@ type AdminDocumentPreviewApiPayload = {
   url: string | null
   content: string | null
   preview_type: "text" | "url"
-}
-
-type AdminTransactionApiPayload = {
-  id: string
-  user_id: string
-  notebook_id: string | null
-  quantity: number
-  polar_ingested: boolean
-  polar_ingested_at: string | null
-  polar_ingest_error: string | null
-  retry_count: number
-  created_at: string
-}
-
-type AdminTransactionPageApiPayload = {
-  items: AdminTransactionApiPayload[]
-  total: number
-  page: number
-  page_size: number
 }
 
 type AdminOrderApiPayload = {
@@ -202,22 +181,6 @@ function mapAdminDocumentPreview(
     url: payload.url,
     content: payload.content,
     previewType: payload.preview_type,
-  }
-}
-
-function mapAdminTransaction(
-  payload: AdminTransactionApiPayload
-): AdminTransaction {
-  return {
-    id: payload.id,
-    userId: payload.user_id,
-    notebookId: payload.notebook_id,
-    quantity: payload.quantity,
-    polarIngested: payload.polar_ingested,
-    polarIngestedAt: payload.polar_ingested_at,
-    polarIngestError: payload.polar_ingest_error,
-    retryCount: payload.retry_count,
-    createdAt: payload.created_at,
   }
 }
 
@@ -416,31 +379,6 @@ export function useDeleteDocumentMutation() {
       void queryClient.invalidateQueries({ queryKey: ["admin", "documents"] })
       void queryClient.invalidateQueries({ queryKey: ["admin", "stats"] })
     },
-  })
-}
-
-export function useAdminTransactionsQuery({
-  page,
-  pageSize,
-}: {
-  page: number
-  pageSize: number
-}) {
-  return useQuery({
-    queryKey: ["admin", "transactions", { page, pageSize }],
-    queryFn: async (): Promise<AdminTransactionPage> => {
-      const payload = await apiFetch<AdminTransactionPageApiPayload>(
-        "/api/v1/admin/transactions",
-        { params: { page, page_size: pageSize } }
-      )
-      return {
-        items: payload.items.map(mapAdminTransaction),
-        total: payload.total,
-        page: payload.page,
-        pageSize: payload.page_size,
-      }
-    },
-    placeholderData: keepPreviousData,
   })
 }
 
