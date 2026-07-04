@@ -17,9 +17,10 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { Dialog } from "@/components/ui/dialog"
+import { useAuth } from "@/features/auth/store/auth-store"
 import { useNotebooks } from "@/features/notebooks/store/notebook-store"
 import { CreateNotebookDialogContent } from "./dashboard-client"
-import { LayoutDashboardIcon, SearchIcon } from "lucide-react"
+import { LayoutDashboardIcon, SearchIcon, ShieldIcon } from "lucide-react"
 
 const data = {
   user: {
@@ -47,6 +48,15 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const [isCreateOpen, setIsCreateOpen] = React.useState(false)
   const navigate = useNavigate()
   const { addNotebook } = useNotebooks()
+  const { user } = useAuth()
+
+  const navMain =
+    user?.role === "admin"
+      ? [
+          ...data.navMain,
+          { title: "Admin", url: "/admin", icon: <ShieldIcon /> },
+        ]
+      : data.navMain
 
   return (
     <Sidebar collapsible="offcanvas" {...props}>
@@ -64,7 +74,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        <NavMain items={data.navMain} onQuickCreateClick={() => setIsCreateOpen(true)} />
+        <NavMain items={navMain} onQuickCreateClick={() => setIsCreateOpen(true)} />
         <NavNotebooks />
         <NavSecondary items={data.navSecondary} className="mt-auto" />
       </SidebarContent>

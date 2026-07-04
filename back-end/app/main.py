@@ -36,6 +36,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from scalar_fastapi import get_scalar_api_reference
 
+from app.admin.router import router as admin_router
 from app.auth.models import PasswordResetRequest, PendingRegistration, RefreshToken
 from app.auth.router import router as auth_router
 from app.billing.models import (
@@ -163,3 +164,4 @@ app.include_router(users_router, prefix=API_V1_PREFIX)
 app.include_router(file_router, prefix=API_V1_PREFIX)
 app.include_router(notebooks_router, prefix=API_V1_PREFIX)
 app.include_router(billing_router, prefix=API_V1_PREFIX)
+app.include_router(admin_router, prefix=API_V1_PREFIX)

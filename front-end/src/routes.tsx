@@ -29,6 +29,11 @@ const NotebookPage = React.lazy(() =>
     default: module.NotebookPage,
   }))
 )
+const AdminPage = React.lazy(() =>
+  import("@/features/admin/components/admin-page").then((module) => ({
+    default: module.AdminPage,
+  }))
+)
 const BillingSettings = React.lazy(() =>
   import("@/features/billing/components/BillingSettings").then((module) => ({
     default: module.BillingSettings,
@@ -60,6 +65,25 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />
+  }
+
+  return <>{children}</>
+}
+
+// Admin Route Guard (also redirects authenticated non-admins)
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { user, isAuthenticated, isLoading } = useAuth()
+
+  if (isLoading) {
+    return <FullPageSpinner />
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />
+  }
+
+  if (user?.role !== "admin") {
+    return <Navigate to="/dashboard" replace />
   }
 
   return <>{children}</>
@@ -129,6 +153,29 @@ function BillingLayout() {
         <SidebarInset>
           <SiteHeader />
           <BillingSettings />
+        </SidebarInset>
+      </SidebarProvider>
+    </React.Suspense>
+  )
+}
+
+// Admin page, inside the same dashboard sidebar shell
+function AdminLayout() {
+  return (
+    <React.Suspense fallback={<FullPageSpinner />}>
+      <SidebarProvider
+        defaultOpen={true}
+        style={
+          {
+            "--sidebar-width": "calc(var(--spacing) * 72)",
+            "--header-height": "calc(var(--spacing) * 12)",
+          } as React.CSSProperties
+        }
+      >
+        <AppSidebar variant="inset" />
+        <SidebarInset>
+          <SiteHeader />
+          <AdminPage />
         </SidebarInset>
       </SidebarProvider>
     </React.Suspense>
@@ -205,6 +252,15 @@ export function AppRoutes() {
           <ProtectedRoute>
             <BillingLayout />
           </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/admin"
+        element={
+          <AdminRoute>
+            <AdminLayout />
+          </AdminRoute>
         }
       />
 

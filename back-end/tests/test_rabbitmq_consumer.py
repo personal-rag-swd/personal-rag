@@ -4,10 +4,13 @@ import json
 from unittest.mock import patch
 
 import pytest
+from faststream.exceptions import SubscriberNotFound
+from faststream.rabbit import TestRabbitBroker
 
 from app.core.config import Settings
 from app.notebooks.consumer import (
     _process_message,
+    build_notebook_document_router,
     parse_minio_object_created_events,
 )
 from app.notebooks.exceptions import TransientIngestionError
@@ -179,7 +182,7 @@ async def test_process_message_propagates_transient_failures() -> None:
     assert document.s3_key is not None
     body = make_message_body(bucket=document.s3_bucket, key=document.s3_key)
 
-    # Propagating the error lets message.process(requeue=True) nack + requeue.
+    # Propagating the error lets the NACK_ON_ERROR policy nack + requeue.
     with (
         patch(
             "app.notebooks.consumer.ingest_document_by_id",
@@ -188,3 +191,66 @@ async def test_process_message_propagates_transient_failures() -> None:
         pytest.raises(TransientIngestionError),
     ):
         await _process_message(body, settings)
+
+
+async def test_router_delivers_matching_event_to_subscriber() -> None:
+    """End-to-end wiring: a MinIO event published to the configured exchange +
+    routing key routes through the subscriber, parses, and dispatches ingestion.
+    """
+    settings = make_settings()
+    document = await make_document(status="pending")
+    assert document.s3_bucket is not None
+    assert document.s3_key is not None
+    body = make_message_body(bucket=document.s3_bucket, key=document.s3_key)
+
+    router = build_notebook_document_router(settings)
+    with patch("app.notebooks.consumer.ingest_document_by_id") as mock_ingest:
+        async with TestRabbitBroker(router.broker) as br:
+            await br.publish(
+                body,
+                exchange=settings.rabbitmq_exchange_name,
+                routing_key=settings.rabbitmq_routing_key,
+            )
+
+    assert mock_ingest.await_count == 1
+    assert mock_ingest.await_args is not None
+    assert mock_ingest.await_args.args[0] == document.id
+    assert mock_ingest.await_args.kwargs.get("size") == 123
+
+
+async def test_router_ignores_event_for_unknown_object() -> None:
+    settings = make_settings()
+    body = make_message_body(bucket="test-bucket", key="users/nobody/ghost.pdf")
+
+    router = build_notebook_document_router(settings)
+    with patch("app.notebooks.consumer.ingest_document_by_id") as mock_ingest:
+        async with TestRabbitBroker(router.broker) as br:
+            await br.publish(
+                body,
+                exchange=settings.rabbitmq_exchange_name,
+                routing_key=settings.rabbitmq_routing_key,
+            )
+
+    mock_ingest.assert_not_called()
+
+
+async def test_router_binds_subscriber_to_exact_routing_key() -> None:
+    """A message published with a non-matching routing key must not reach the
+    subscriber. TestRabbitBroker raises SubscriberNotFound when nothing matches.
+    """
+    settings = make_settings()
+    document = await make_document(status="pending")
+    assert document.s3_key is not None
+    body = make_message_body(bucket="test-bucket", key=document.s3_key)
+
+    router = build_notebook_document_router(settings)
+    with patch("app.notebooks.consumer.ingest_document_by_id") as mock_ingest:
+        async with TestRabbitBroker(router.broker) as br:
+            with pytest.raises(SubscriberNotFound):
+                await br.publish(
+                    body,
+                    exchange=settings.rabbitmq_exchange_name,
+                    routing_key="some.other.key",
+                )
+
+    mock_ingest.assert_not_called()

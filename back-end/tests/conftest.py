@@ -16,6 +16,7 @@ from pymongo import AsyncMongoClient
 from scalar_fastapi import get_scalar_api_reference
 
 import app.auth.service as _auth_service
+from app.admin.router import router as admin_router
 from app.auth.models import PasswordResetRequest, PendingRegistration, RefreshToken
 from app.auth.router import router as auth_router
 from app.billing.models import (
@@ -107,6 +108,7 @@ def make_test_app() -> FastAPI:
     app.include_router(file_router, prefix="/api/v1")
     app.include_router(notebooks_router, prefix="/api/v1")
     app.include_router(billing_router, prefix="/api/v1")
+    app.include_router(admin_router, prefix="/api/v1")
 
     return app
 
