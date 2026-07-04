@@ -55,6 +55,21 @@ def source_block(chunk: RetrievedChunk) -> str:
     return f"{header}\n{content}"
 
 
+def image_part_label(chunk: RetrievedChunk) -> str:
+    """Text marker that binds an attached image to its citable SOURCE block.
+
+    The raw image bytes are sent to the model as their own content part with no
+    source header of their own, so the model can see the picture but has no
+    handle tying it to a citation. This label — emitted immediately before the
+    image part — carries the same identifiers as the chunk's SOURCE header so
+    the model can cite the image exactly like any other source.
+    """
+    return (
+        f"Image for SOURCE [filename={chunk.filename} "
+        f"doc_id={chunk.document_id} chunk={chunk.chunk_index} chunk_type=image]:"
+    )
+
+
 def chunk_to_source(chunk: RetrievedChunk) -> dict[str, object]:
     """The structured transcript/frontend shape of a retrieved chunk.
 

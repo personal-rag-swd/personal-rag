@@ -13,7 +13,7 @@ from app.core.config import Settings
 from app.core.s3 import get_object_bytes, get_s3_store
 from app.notebooks.models import Notebook
 from app.notebooks.prompt import CHAT_SYSTEM_INSTRUCTIONS, build_context_block
-from app.notebooks.prompt.context_prompts import chunk_to_source
+from app.notebooks.prompt.context_prompts import chunk_to_source, image_part_label
 from app.notebooks.rag.search_service import RetrievedChunk, search_notebook_chunks
 from app.users.models import User
 
@@ -79,8 +79,15 @@ async def search_notebook_context(
     fetched = await asyncio.gather(
         *(_fetch_image_content(store, chunk) for chunk in image_chunks)
     )
+    # Prefix each image with a label carrying its SOURCE identifiers so the model
+    # can bind the picture it sees to a citable chunk (the bytes alone have no
+    # source header). Skip chunks whose bytes failed to download.
     parts: list[str | BinaryContent] = [context_block]
-    parts.extend(part for part in fetched if part is not None)
+    for chunk, content in zip(image_chunks, fetched, strict=True):
+        if content is None:
+            continue
+        parts.append(image_part_label(chunk))
+        parts.append(content)
     return ToolReturn(return_value=parts, metadata=metadata)
 
 

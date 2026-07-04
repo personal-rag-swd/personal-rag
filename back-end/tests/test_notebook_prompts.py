@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from app.notebooks.prompt.context_prompts import build_context_block
+from app.notebooks.prompt.context_prompts import build_context_block, image_part_label
 from app.notebooks.prompt.system_prompts import CHAT_SYSTEM_INSTRUCTIONS
 from app.notebooks.rag.search_service import RetrievedChunk
 
@@ -13,6 +13,29 @@ def test_notebook_core_instructions_require_source_grounding() -> None:
     )
     assert "[filename, chunk N]" in CHAT_SYSTEM_INSTRUCTIONS
     assert "Do not fabricate filenames" in CHAT_SYSTEM_INSTRUCTIONS
+    # Images must be citable, otherwise they never appear in the references.
+    assert "Image sources are citable" in CHAT_SYSTEM_INSTRUCTIONS
+
+
+def test_image_part_label_carries_source_identifiers() -> None:
+    document_id = uuid4()
+    label = image_part_label(
+        RetrievedChunk(
+            document_id=document_id,
+            filename="figure.pdf",
+            chunk_index=7,
+            content="A bar chart of quarterly revenue.",
+            metadata={"chunk_type": "image"},
+            chunk_type="image",
+        )
+    )
+
+    # The label prefixes the raw image bytes so the model can bind the picture it
+    # sees to the same identifiers the SOURCE header carries, and cite it.
+    assert "filename=figure.pdf" in label
+    assert f"doc_id={document_id}" in label
+    assert "chunk=7" in label
+    assert "chunk_type=image" in label
 
 
 def test_context_block_labels_sources_for_citation() -> None:
