@@ -100,6 +100,9 @@ export function BillingSettings() {
   const isActive = usageQuery.data?.isSubscriptionActive ?? false
   const currentTier = subscriptionQuery.data?.tier ?? null
   const currentPlan = PLANS.find((plan) => plan.tier === currentTier) ?? null
+  const freeTierTokens = usageQuery.data
+    ? `${usageQuery.data.llmTokensAllowance.toLocaleString()} tokens/mo`
+    : null
 
   const handleUpgrade = async (tier: BillingTier) => {
     try {
@@ -153,7 +156,7 @@ export function BillingSettings() {
             <CardDescription>
               {currentPlan
                 ? `${currentPlan.name} · ${currentPlan.price} · ${currentPlan.tokens}`
-                : `Free tier · ${FREE_TIER_TOKENS}`}
+                : `Free tier${freeTierTokens ? ` · ${freeTierTokens}` : ""}`}
             </CardDescription>
             <CardAction>
               {isActive ? (

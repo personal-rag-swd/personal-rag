@@ -58,7 +58,7 @@ Go to the **Environment** tab of the Compose service and add the following requi
 | `POLAR_MAX_PRODUCT_ID` | *Product ID for the $100/mo Max plan (fixed recurring price)* | Used by checkout session creation for the "max" tier |
 | `POLAR_LLM_TOKENS_METER_ID` | *Production meter ID* | Tracking/audit only ($0/unit) — not the billing mechanism |
 | `POLAR_SUCCESS_URL` | `https://rag.quanphungg.me/settings/billing?checkout=success` | Where Polar redirects after a successful checkout |
-| `FREE_TIER_LLM_TOKENS_ALLOWANCE` | `50000` (or desired monthly token limit) | Free-tier LLM token cap before checkout is required |
+| `FREE_TIER_LLM_TOKENS_ALLOWANCE` | `6000000` (or desired monthly token limit) | Free-tier LLM token cap before checkout is required |
 | `PRO_TIER_LLM_TOKENS_ALLOWANCE` | `5000000` | Hard token cap for Pro subscribers (blocked once exceeded) |
 | `MAX_TIER_LLM_TOKENS_ALLOWANCE` | `35000000` | Hard token cap for Max subscribers (blocked once exceeded) |
 
