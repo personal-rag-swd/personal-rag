@@ -349,3 +349,46 @@ class TestNotebookDocumentChunks:
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 1
+
+
+class TestNotebookTimestamps:
+    async def test_report_created_at_read_back_is_timezone_aware(
+        self,
+        client: AsyncClient,
+        settings: Any,
+    ) -> None:
+        """Timestamps must survive the Mongo round-trip as UTC-aware.
+
+        MongoDB stores datetimes as naive UTC. Without ``tz_aware=True`` on the
+        client, they come back naive and serialize to an offset-less ISO string
+        that clients misread as local time (the "created 7 hours ago" bug). The
+        listing endpoint reads the report back from Mongo, so its serialized
+        ``created_at`` must carry a UTC offset.
+        """
+        from datetime import datetime
+
+        user = await create_user(role="user")
+        headers = auth_headers(user, settings)
+        notebook = await create_notebook(user)
+
+        create_response = await client.post(
+            f"/api/v1/notebooks/{notebook.id}/notes",
+            json={"title": "My Note", "content": "hello world"},
+            headers=headers,
+        )
+        assert create_response.status_code == 201
+
+        response = await client.get(
+            f"/api/v1/notebooks/{notebook.id}/reports",
+            headers=headers,
+        )
+        assert response.status_code == 200
+        reports = response.json()
+        note = next(r for r in reports if r["report_type"] == "note")
+
+        created_at = note["created_at"]
+        # Must be parseable as an aware datetime (has offset / trailing Z).
+        parsed = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        assert parsed.tzinfo is not None, (
+            f"created_at lost its timezone on read-back: {created_at!r}"
+        )

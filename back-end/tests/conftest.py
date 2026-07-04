@@ -157,6 +157,7 @@ async def fixture_app(settings: Settings) -> AsyncGenerator[FastAPI]:
     client = AsyncMongoClient(
         settings.database_url,
         serverSelectionTimeoutMS=5000,
+        tz_aware=True,
     )
     db = client.get_default_database()
     await init_beanie(database=db, document_models=DOCUMENT_MODELS)
