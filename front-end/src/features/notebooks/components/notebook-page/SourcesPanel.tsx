@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { UDocViewer } from "@/components/document-preview/udoc-viewer"
 import {
   InputGroup,
   InputGroupAddon,
@@ -69,7 +70,6 @@ import {
 } from "@/components/ui/tooltip"
 import { getPresignedUploadUrl, reportUploadFailed } from "@/features/files/api"
 import {
-  buildApiUrl,
   getNotebookDocumentDownloadBlob,
   getNotebookDocumentPreview,
   type NotebookDocumentPreview,
@@ -580,18 +580,9 @@ function SourcePreviewDialog({
 
   const canRenderInline = preview ? canRenderPreviewInline(preview) : false
   const sourceUrl = preview?.url ?? null
-  const isPdfPreview = preview ? isPdfDocument(preview) : false
   const isImagePreview = preview ? isImageDocument(preview) : false
   const isMarkdownPreview = preview ? isMarkdownDocument(preview) : false
   const isImageDialog = Boolean(sourceUrl && isImagePreview)
-  // Production blocked embedded cross-origin MinIO presigned PDFs, so PDF iframe
-  // preview uses a same-origin backend proxy while Open/Download keep the URL.
-  const iframeUrl =
-    isPdfPreview && preview
-      ? buildApiUrl(
-          `/api/v1/notebooks/${document.notebookId}/documents/${document.id}/pdf-inline`
-        )
-      : sourceUrl
   const [isDownloading, setIsDownloading] = React.useState(false)
   const errorMessage =
     error instanceof Error ? error.message : "The document could not be opened."
@@ -713,11 +704,24 @@ function SourcePreviewDialog({
               alt={preview?.filename ?? document.filename}
               className="block max-h-full max-w-full object-contain"
             />
-          ) : iframeUrl && canRenderInline ? (
-            <iframe
-              title={preview?.filename ?? "Document"}
-              src={iframeUrl}
-              className="h-full w-full bg-background"
+          ) : sourceUrl && canRenderInline ? (
+            <UDocViewer
+              src={sourceUrl}
+              fallback={
+                <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
+                  <AlertCircleIcon className="size-5 text-destructive" />
+                  <p>Unable to render this document in the viewer.</p>
+                  <Button
+                    variant="outline"
+                    render={
+                      <a href={sourceUrl} target="_blank" rel="noreferrer" />
+                    }
+                  >
+                    <ExternalLinkIcon data-icon="inline-start" />
+                    Open
+                  </Button>
+                </div>
+              }
             />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
@@ -864,16 +868,10 @@ function canRenderPreviewInline(preview: NotebookDocumentPreview) {
 
   return (
     filename.endsWith(".pdf") ||
+    filename.endsWith(".docx") ||
     filename.endsWith(".txt") ||
     filename.endsWith(".md") ||
     IMAGE_EXTENSIONS.some((ext) => filename.endsWith(ext))
-  )
-}
-
-function isPdfDocument(preview: NotebookDocumentPreview) {
-  return (
-    normalizeContentType(preview.contentType) === "application/pdf" ||
-    preview.filename.toLowerCase().endsWith(".pdf")
   )
 }
 

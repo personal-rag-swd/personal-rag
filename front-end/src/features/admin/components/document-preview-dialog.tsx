@@ -1,7 +1,7 @@
 import * as React from "react"
-import { UDocClient } from "@docmentis/udoc-viewer"
 import { ExternalLink } from "lucide-react"
 
+import { UDocViewer } from "@/components/document-preview/udoc-viewer"
 import { buttonVariants } from "@/components/ui/button"
 import {
   Dialog,
@@ -14,59 +14,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { useAdminDocumentPreviewQuery } from "../api"
 import type { AdminDocument } from "../types"
-
-type UDocClientInstance = Awaited<ReturnType<typeof UDocClient.create>>
-type UDocViewerInstance = Awaited<
-  ReturnType<UDocClientInstance["createViewer"]>
->
-
-function UDocViewer({ src }: { src: string }) {
-  const containerRef = React.useRef<HTMLDivElement>(null)
-  const [error, setError] = React.useState<string | null>(null)
-
-  React.useEffect(() => {
-    let disposed = false
-    let client: UDocClientInstance | undefined
-    let viewer: UDocViewerInstance | undefined
-    const container = containerRef.current
-
-    void (async () => {
-      try {
-        client = await UDocClient.create()
-        if (disposed || !container) return
-        viewer = await client.createViewer({ container })
-        if (disposed) return
-        await viewer.load(src)
-      } catch {
-        if (!disposed) setError("Unable to render this document in the viewer.")
-      }
-    })()
-
-    return () => {
-      disposed = true
-      viewer?.destroy()
-      client?.destroy()
-    }
-  }, [src])
-
-  if (error) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
-        <p>{error}</p>
-        <a
-          href={src}
-          target="_blank"
-          rel="noreferrer"
-          className="text-primary underline"
-        >
-          Open in a new tab
-        </a>
-      </div>
-    )
-  }
-
-  return <div ref={containerRef} className="h-full w-full" />
-}
 
 export function DocumentPreviewDialog({
   document,
@@ -123,7 +70,22 @@ export function DocumentPreviewDialog({
               {preview.content}
             </pre>
           ) : preview.url ? (
-            <UDocViewer src={preview.url} />
+            <UDocViewer
+              src={preview.url}
+              fallback={
+                <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+                  <p>Unable to render this document in the viewer.</p>
+                  <a
+                    href={preview.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-primary underline"
+                  >
+                    Open in a new tab
+                  </a>
+                </div>
+              }
+            />
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               No preview available.
