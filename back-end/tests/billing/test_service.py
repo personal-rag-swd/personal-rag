@@ -109,10 +109,21 @@ class TestQuotaGating:
         ).insert()
         await record_usage_event(
             user_id=user.id,
-            quantity=settings.free_tier_llm_tokens_allowance + 5,
+            # Exceed the free session cap while remaining below Pro's session
+            # cap. Usage recording updates every window counter.
+            quantity=settings.free_tier_session_tokens_allowance + 5,
             idempotency_key=f"test:{uuid4()}",
             settings=settings,
         )
+
+        # Exercise the monthly Pro allowance separately. A single recorded
+        # usage event cannot exceed the free monthly allowance here because it
+        # would also correctly exceed Pro's tighter session allowance first.
+        allowance = await UsageAllowance.find_one({"user_id": user.id})
+        assert allowance is not None
+        allowance.llm_tokens_used = settings.free_tier_llm_tokens_allowance + 5
+        await allowance.save()
+
         await check_quota_and_raise(user.id, 1, settings)
 
     async def test_pro_tier_blocks_once_its_own_cap_is_exceeded(
