@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from pymongo import AsyncMongoClient
@@ -20,7 +21,21 @@ async def init_db() -> AsyncMongoClient:
         # every datetime read back from Mongo UTC-aware end to end.
         tz_aware=True,
     )
-    # Ping to verify connection
-    await client.admin.command("ping")
-    logger.info("MongoDB connection established")
-    return client
+
+    # Compose can mark MongoDB healthy slightly before the backend starts.
+    # Retry the initial ping so startup is resilient to that timing gap.
+    last_error: Exception | None = None
+    for attempt in range(1, 31):
+        try:
+            await client.admin.command("ping")
+        except Exception as exc:  # pragma: no cover - startup only
+            last_error = exc
+            logger.warning(
+                "MongoDB ping failed on attempt %d/30: %s", attempt, exc
+            )
+            if attempt < 30:
+                await asyncio.sleep(2)
+        else:
+            logger.info("MongoDB connection established")
+            return client
+    raise RuntimeError("Unable to connect to MongoDB during startup") from last_error

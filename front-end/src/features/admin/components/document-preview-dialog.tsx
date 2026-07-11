@@ -1,4 +1,3 @@
-import * as React from "react"
 import { ExternalLink } from "lucide-react"
 
 import { UDocViewer } from "@/components/document-preview/udoc-viewer"

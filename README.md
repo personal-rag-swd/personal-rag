@@ -513,3 +513,69 @@ MAX_TIER_LLM_TOKENS_ALLOWANCE=140000000
 ```
 
 > Lưu ý: giá trị allowance ở trên chỉ là **giá trị mặc định** trong `Settings`/`.env.example` — thay đổi được tại runtime qua biến môi trường cùng tên mà không cần sửa code, và áp dụng ngay cho toàn bộ người dùng đang ở tier tương ứng (xem FR-BILL-07).
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+* **Docker & Docker Compose** installed.
+* **Node.js** (v18+) & **npm** (if running frontend on host).
+* **Python 3.11+** & **uv** (if running backend on host).
+
+### Run with Docker Compose (Recommended)
+
+1. Clone the repository and navigate to the project root.
+2. Copy the Docker env template:
+   ```bash
+   cp .env.docker.example .env
+   ```
+3. Boot up the full stack:
+   ```bash
+   docker compose up --build
+   ```
+4. Access the applications:
+   * **Frontend Application**: `http://localhost:5173`
+   * **Backend API Docs (Scalar)**: `http://localhost:8000/docs`
+   * **MinIO Console**: `http://localhost:9001` (Credentials: `minioadmin` / `minioadmin`)
+
+### Run Manually (Hybrid Mode)
+
+If you prefer to run services locally on your host for rapid coding cycles:
+
+1. Spin up only the infrastructure dependencies:
+   ```bash
+   docker compose up -d mongodb minio rabbitmq minio-mc
+   ```
+2. **Start Backend**:
+   ```bash
+   cd back-end
+   ln -sf ../.env .env
+   uv sync
+   uv run fastapi dev app/main.py
+   ```
+3. **Start Frontend**:
+   ```bash
+   cd front-end
+   npm install
+   npm run dev
+   ```
+
+---
+
+## 🧪 Development Commands
+
+Run quality and test checks before committing code:
+
+### Backend Checks
+From the `back-end/` folder:
+* **Run Tests**: `uv run pytest` (uses `mongomock-motor` for virtual database mocks)
+* **Linting Check**: `uv run ruff check`
+* **Auto-format Code**: `uv run ruff format`
+
+### Frontend Checks
+From the `front-end/` folder:
+* **Linting Check**: `npm run lint`
+* **Prettier formatting**: `npm run format`
+* **Static Typecheck**: `npm run typecheck`
+* **Production Build Verification**: `npm run build`

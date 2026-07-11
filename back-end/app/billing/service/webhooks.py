@@ -4,12 +4,16 @@ reconciliation onto ``BillingCustomer`` rows.
 
 from __future__ import annotations
 
-import base64
 import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from standardwebhooks.webhooks import Webhook, WebhookVerificationError
+from polar_sdk.webhooks import (
+    WebhookUnknownTypeError,
+    WebhookVerificationError,
+    validate_event,
+)
+from pydantic import ValidationError
 
 from app.billing.exceptions import WebhookSignatureInvalidError
 from app.billing.models import BillingCustomer, ProcessedWebhookEvent
@@ -32,28 +36,31 @@ def _parse_polar_datetime(value: Any) -> datetime | None:
 def verify_webhook_signature(
     payload_bytes: bytes, headers: dict[str, str], secret: str
 ) -> None:
-    """Verify a Polar webhook signature using the Standard Webhooks signer.
+    """Verify a Polar webhook signature using the official Polar SDK.
 
-    Polar's Python SDK base64-encodes the full webhook secret string
-    (including the ``whsec_`` prefix) before constructing the
-    ``standardwebhooks.Webhook`` verifier. We mirror that exact behavior here
-    while intentionally avoiding the SDK's event-schema parsing step, because
-    this app handles the raw JSON payload itself.
+    Delegates to ``polar_sdk.webhooks.validate_event``, which implements the
+    Standard Webhooks scheme exactly as Polar signs its deliveries (including
+    the non-obvious secret key derivation and the timestamp-tolerance check).
 
     Raises ``WebhookSignatureInvalidError`` on a missing/malformed header, a
     stale timestamp, or a signature mismatch.
     """
     try:
-        base64_secret = base64.b64encode(secret.encode()).decode()
-        webhook = Webhook(base64_secret)
-        webhook.verify(payload_bytes, headers)
+        validate_event(payload_bytes, headers, secret)
     except WebhookVerificationError as exc:
         logger.warning("Polar webhook rejected: %s", exc)
         raise WebhookSignatureInvalidError() from exc
+    except WebhookUnknownTypeError, ValidationError:
+        # The signature is verified before the payload is parsed, so an unknown
+        # event type or a schema the pinned SDK does not model is NOT a
+        # signature failure. Downstream handling works off the raw JSON dict,
+        # so let these through as successfully verified.
+        return
     except ValueError as exc:
         # A malformed signature header (non-base64, or missing the "v1," version
-        # prefix) makes the verifier raise a raw decode/parse error before it
-        # can report a mismatch.
+        # prefix) makes the SDK raise a raw decode/parse error before it can
+        # report a mismatch. Pydantic's ValidationError is also a ValueError but
+        # is handled above, so anything reaching here is a bad signature header.
         logger.warning("Polar webhook rejected: malformed signature header (%s)", exc)
         raise WebhookSignatureInvalidError() from exc
 

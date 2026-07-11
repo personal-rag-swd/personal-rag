@@ -159,3 +159,8 @@ volumes:
   rabbitmq_data:
   frontend_node_modules:
   mongodb_data:
+
+networks:
+  default:
+    enable_ipv4: true
+    enable_ipv6: false
