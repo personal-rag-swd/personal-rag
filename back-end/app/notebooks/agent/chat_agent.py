@@ -84,4 +84,12 @@ async def search_notebook_context(
 
     store = get_s3_store(ctx.deps.settings)
     image_parts = await build_image_parts(image_chunks, numbers, store)
-    return ToolReturn(return_value=[context_block, *image_parts], metadata=metadata)
+    # Image bytes ride on `content` (a separate UserPromptPart for the model),
+    # not in `return_value`: a non-string return_value is JSON-serialized into
+    # the AG-UI tool-result event, which escapes the newlines the frontend's
+    # SOURCE-block parser depends on during live streaming.
+    return ToolReturn(
+        return_value=context_block,
+        content=image_parts or None,
+        metadata=metadata,
+    )
