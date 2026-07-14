@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 from bson import Binary
 from docx import Document as DocxDocument
+from langchain_core.documents import Document
 
 import app.notebooks.rag.document_chunker as chunking_module
 import app.notebooks.rag.search_service as search_service_module
@@ -15,6 +16,7 @@ from app.notebooks.rag.document_chunker import (
     ChunkingRequest,
     chunk_document,
 )
+from app.notebooks.rag.ingestion_service import _order_pdf_chunks
 from app.notebooks.rag.query_rewrite_agent import (
     rewrite_query_text,
 )
@@ -74,7 +76,7 @@ def test_pdf_chunking_extracts_simple_text(
     monkeypatch.setattr(
         chunking_module.pymupdf4llm,
         "to_markdown",
-        lambda doc: "PDF text",
+        lambda doc, **kwargs: [{"text": "PDF text"}],
     )
 
     chunks = chunk_document(
@@ -105,7 +107,9 @@ def test_pdf_chunking_strips_image_placeholders(
     )
     monkeypatch.setattr(chunking_module.pymupdf, "open", lambda **kwargs: "fake_doc")
     monkeypatch.setattr(
-        chunking_module.pymupdf4llm, "to_markdown", lambda doc: markdown
+        chunking_module.pymupdf4llm,
+        "to_markdown",
+        lambda doc, **kwargs: [{"text": markdown}],
     )
 
     chunks = chunk_document(
@@ -126,6 +130,72 @@ def test_pdf_chunking_strips_image_placeholders(
     assert "Conclusion." in combined
 
 
+def test_pdf_chunking_assigns_page_numbers(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    # Long enough per-page text that each page lands in its own chunk given
+    # the fixture's chunk_size=100 (short pages would merge into one chunk).
+    monkeypatch.setattr(chunking_module.pymupdf, "open", lambda **kwargs: "fake_doc")
+    monkeypatch.setattr(
+        chunking_module.pymupdf4llm,
+        "to_markdown",
+        lambda doc, **kwargs: [
+            {"text": "Page one content. " * 10},
+            {"text": "Page two content. " * 10},
+            {"text": "Page three content. " * 10},
+        ],
+    )
+
+    chunks = chunk_document(
+        ChunkingRequest(
+            content=b"%PDF-1.7",
+            filename="sample.pdf",
+            source="pdf-source",
+            document_id="doc-pages",
+        ),
+        settings,
+    )
+
+    page_numbers_by_content_prefix = {
+        chunk.page_content[:8]: chunk.metadata["page_number"] for chunk in chunks
+    }
+    assert page_numbers_by_content_prefix["Page one"] == 1
+    assert page_numbers_by_content_prefix["Page two"] == 2
+    assert page_numbers_by_content_prefix["Page thr"] == 3
+
+
+def test_order_pdf_chunks_interleaves_images_by_page() -> None:
+    text_docs = [
+        Document(page_content="page 1 text", metadata={"page_number": 1}),
+        Document(page_content="page 2 text", metadata={"page_number": 2}),
+    ]
+    image_docs = [
+        Document(
+            page_content="figure on page 1",
+            metadata={"chunk_type": "image", "page_number": 1},
+        ),
+    ]
+
+    ordered = _order_pdf_chunks(text_docs, image_docs)
+
+    assert [doc.page_content for doc in ordered] == [
+        "page 1 text",
+        "figure on page 1",
+        "page 2 text",
+    ]
+
+
+def test_order_pdf_chunks_sorts_missing_page_number_last() -> None:
+    text_docs = [Document(page_content="has page", metadata={"page_number": 1})]
+    image_docs = [
+        Document(page_content="no page", metadata={"chunk_type": "image"}),
+    ]
+
+    ordered = _order_pdf_chunks(text_docs, image_docs)
+
+    assert [doc.page_content for doc in ordered] == ["has page", "no page"]
+
+
 def test_chunk_document_uses_settings_for_docx(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, int] = {}
 
@@ -136,6 +206,7 @@ def test_chunk_document_uses_settings_for_docx(monkeypatch: pytest.MonkeyPatch) 
         document_id: str,
         chunk_size: int,
         chunk_overlap: int,
+        page_offsets: list[int] | None = None,
     ) -> list:
         captured["chunk_size"] = chunk_size
         captured["chunk_overlap"] = chunk_overlap

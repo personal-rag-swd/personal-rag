@@ -110,6 +110,28 @@ async def _load_source_bytes(
     return body, source_key
 
 
+def _order_pdf_chunks(
+    text_docs: list[Document], image_docs: list[Document]
+) -> list[Document]:
+    """Interleave text and image chunks into reading order for a PDF.
+
+    ``chunk_index`` (and so the order the "View source" viewer renders chunks
+    in) is assigned by position in the returned list, so a stable sort by
+    ``(page_number, is_image)`` puts each figure near the page it appears on
+    instead of after every text chunk. Chunks with no page number (e.g. a
+    mapping edge case) sort last rather than raising; text-before-image on a
+    tied page keeps the narrative read first. Purely a display-order change —
+    chunk content is untouched, so embeddings and search are unaffected.
+    """
+
+    def sort_key(doc: Document) -> tuple[float, bool]:
+        page_number = doc.metadata.get("page_number")
+        is_image = doc.metadata.get("chunk_type") == "image"
+        return (page_number if page_number is not None else float("inf"), is_image)
+
+    return sorted(text_docs + image_docs, key=sort_key)
+
+
 async def _build_split_documents(
     document: NotebookDocument,
     body: bytes,
@@ -154,10 +176,10 @@ async def _build_split_documents(
         if suffix == ".pdf" and document.s3_bucket and document.s3_key and store:
             # Text chunking and embedded-image extraction are independent
             # passes over the same bytes — run them concurrently.
-            split_docs, image_docs = await asyncio.gather(
+            text_docs, image_docs = await asyncio.gather(
                 chunking, extract_pdf_images(document, body, store)
             )
-            split_docs = split_docs + image_docs
+            split_docs = _order_pdf_chunks(text_docs, image_docs)
         else:
             split_docs = await chunking
 

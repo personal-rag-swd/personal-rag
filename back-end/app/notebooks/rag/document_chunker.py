@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import bisect
 import io
 import logging
 import re
@@ -52,6 +53,7 @@ def split_text(
     document_id: str,
     chunk_size: int,
     chunk_overlap: int,
+    page_offsets: list[int] | None = None,
 ) -> list[Document]:
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
@@ -62,6 +64,13 @@ def split_text(
         [text],
         metadatas=[{"source": source, "document_id": document_id}],
     )
+    if page_offsets:
+        for doc in docs:
+            # bisect_right gives the count of page offsets at or before
+            # start_index, which is exactly the 1-based page number.
+            doc.metadata["page_number"] = bisect.bisect_right(
+                page_offsets, doc.metadata["start_index"]
+            )
     logger.info("Split %s into %d chunk(s)", source, len(docs))
     return docs
 
@@ -81,15 +90,34 @@ _IMAGE_PLACEHOLDER_RE = re.compile(
 _EXCESS_BLANK_LINES_RE = re.compile(r"\n{3,}")
 
 
-def _extract_pdf_text(request: ChunkingRequest) -> str:
+def _extract_pdf_text(request: ChunkingRequest) -> tuple[str, list[int]]:
+    """Extract PDF text and the character offset each page starts at.
+
+    Uses ``page_chunks=True`` so pages are joined ourselves (rather than
+    pymupdf4llm's single blob) — the offsets let ``split_text`` map each
+    chunk's ``start_index`` back to the page it came from, so text chunks
+    carry ``page_number`` the same way image chunks do.
+    """
     doc = pymupdf.open(stream=request.content, filetype="pdf")
-    extracted_text = pymupdf4llm.to_markdown(doc)
-    if not isinstance(extracted_text, str):
+    pages = pymupdf4llm.to_markdown(doc, page_chunks=True)
+    if not isinstance(pages, list):
         raise TypeError(
-            f"pymupdf4llm.to_markdown returned unexpected type: {type(extracted_text)}"
+            f"pymupdf4llm.to_markdown(page_chunks=True) returned unexpected "
+            f"type: {type(pages)}"
         )
-    extracted_text = _IMAGE_PLACEHOLDER_RE.sub("", extracted_text)
-    return _EXCESS_BLANK_LINES_RE.sub("\n\n", extracted_text)
+
+    page_texts: list[str] = []
+    for page in pages:
+        text = page["text"] if isinstance(page, dict) else str(page)
+        text = _IMAGE_PLACEHOLDER_RE.sub("", text)
+        page_texts.append(_EXCESS_BLANK_LINES_RE.sub("\n\n", text))
+
+    page_offsets: list[int] = []
+    cursor = 0
+    for text in page_texts:
+        page_offsets.append(cursor)
+        cursor += len(text) + 2  # +2 accounts for the "\n\n" join separator
+    return "\n\n".join(page_texts), page_offsets
 
 
 def _docx_table_rows(table: DocxTable) -> list[str]:
@@ -125,8 +153,9 @@ def _extract_plain_text(request: ChunkingRequest) -> str:
     return request.content.decode("utf-8", errors="ignore")
 
 
+# PDFs are dispatched separately (chunk_document below) since _extract_pdf_text
+# also returns page offsets; the others are plain str extractors.
 EXTRACTOR_BY_EXTENSION = {
-    ".pdf": _extract_pdf_text,
     ".docx": _extract_docx_text,
     ".txt": _extract_plain_text,
     ".md": _extract_plain_text,
@@ -146,11 +175,16 @@ def chunk_document(request: ChunkingRequest, settings: Settings) -> list[Documen
         suffix,
         settings.notebook_chunk_size,
     )
-    extracted_text = EXTRACTOR_BY_EXTENSION[suffix](request)
+    page_offsets: list[int] | None = None
+    if suffix == ".pdf":
+        extracted_text, page_offsets = _extract_pdf_text(request)
+    else:
+        extracted_text = EXTRACTOR_BY_EXTENSION[suffix](request)
     return split_text(
         extracted_text,
         source=request.source,
         document_id=request.document_id,
         chunk_size=settings.notebook_chunk_size,
         chunk_overlap=settings.notebook_chunk_overlap,
+        page_offsets=page_offsets,
     )
