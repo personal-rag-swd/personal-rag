@@ -8,6 +8,7 @@ Invoked once from the application lifespan.
 import asyncio
 import logging
 
+from app.core.config import get_settings
 from app.notebooks.models import Notebook, NotebookReport
 from app.notebooks.service.reports import build_report_context, run_report_generation
 from app.users.models import User
@@ -52,8 +53,8 @@ async def recover_pending_reports() -> None:
                 await report.save()
                 continue
 
-            context = await build_report_context(notebook, user)
-            if not context:
+            context = await build_report_context(notebook, user, get_settings())
+            if not context.text:
                 logger.warning(
                     "Skipping report %s: no indexed documents available for context",
                     report.id,

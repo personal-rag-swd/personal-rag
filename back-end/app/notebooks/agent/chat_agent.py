@@ -1,24 +1,20 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.messages import BinaryContent, ToolReturn
+from pydantic_ai.messages import ToolReturn
 
 from app.core.config import Settings
-from app.core.s3 import get_object_bytes, get_s3_store
+from app.core.s3 import get_s3_store
 from app.notebooks.models import Notebook
 from app.notebooks.prompt import CHAT_SYSTEM_INSTRUCTIONS, build_context_block
-from app.notebooks.prompt.context_prompts import chunk_to_source, image_part_label
-from app.notebooks.rag.search_service import RetrievedChunk, search_notebook_chunks
+from app.notebooks.prompt.context_prompts import chunk_to_source
+from app.notebooks.rag.image_context import build_image_parts
+from app.notebooks.rag.search_service import search_notebook_chunks
 from app.users.models import User
-
-if TYPE_CHECKING:
-    from obstore.store import S3Store
 
 logger = logging.getLogger(__name__)
 
@@ -87,35 +83,5 @@ async def search_notebook_context(
         return ToolReturn(return_value=context_block, metadata=metadata)
 
     store = get_s3_store(ctx.deps.settings)
-    fetched = await asyncio.gather(
-        *(_fetch_image_content(store, chunk) for chunk in image_chunks)
-    )
-    # Prefix each image with a label carrying its SOURCE identifiers so the model
-    # can bind the picture it sees to a citable chunk (the bytes alone have no
-    # source header). Skip chunks whose bytes failed to download.
-    parts: list[str | BinaryContent] = [context_block]
-    for chunk, content in zip(image_chunks, fetched, strict=True):
-        if content is None:
-            continue
-        parts.append(image_part_label(chunk, number=numbers[id(chunk)]))
-        parts.append(content)
-    return ToolReturn(return_value=parts, metadata=metadata)
-
-
-async def _fetch_image_content(
-    store: S3Store, chunk: RetrievedChunk
-) -> BinaryContent | None:
-    """Download an image chunk's bytes from S3 as BinaryContent (None on failure)."""
-    s3_key = str(chunk.metadata.get("s3_key", ""))
-    media_type = str(chunk.metadata.get("media_type", "image/jpeg"))
-    if not s3_key:
-        return None
-
-    try:
-        data = await get_object_bytes(store, s3_key)
-        return BinaryContent(data=data, media_type=media_type)
-    except Exception:
-        logger.warning(
-            "Failed to fetch image bytes for chunk %s; skipping", chunk.chunk_index
-        )
-        return None
+    image_parts = await build_image_parts(image_chunks, numbers, store)
+    return ToolReturn(return_value=[context_block, *image_parts], metadata=metadata)

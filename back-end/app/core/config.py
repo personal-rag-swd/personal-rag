@@ -24,6 +24,9 @@ class Settings(BaseSettings):
 
     notebook_retrieval_top_k: int = 6
     enable_query_rewrite: bool = True
+    # Cap on image chunks attached (as actual bytes) to a report's generation
+    # prompt — bounds token/cost blowup for image-heavy notebooks.
+    notebook_report_max_images: int = 10
     notebook_chunk_size: int = 1000
     notebook_chunk_overlap: int = 200
     # Ingestion ceilings: bound embedding spend, vector rows, and processing

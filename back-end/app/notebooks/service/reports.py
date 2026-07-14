@@ -13,17 +13,19 @@ Generation is intentionally decomposed:
 
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID
 
 from beanie import SortDirection
 from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.messages import BinaryContent
 
 from app.billing.service import check_quota_and_raise, record_usage_event
 from app.core.config import Settings, get_settings
 from app.core.event_bus import domain_event_bus
 from app.core.llm_provider import chat_provider_is_configured
+from app.core.s3 import get_s3_store
 from app.notebooks.agent.report_agents import (
     generate_blog_post,
     generate_briefing_doc,
@@ -54,6 +56,7 @@ from app.notebooks.models import (
     NotebookReport,
 )
 from app.notebooks.prompt.context_prompts import source_block
+from app.notebooks.rag.image_context import build_image_parts
 from app.notebooks.rag.search_service import RetrievedChunk
 from app.notebooks.schemas import (
     BlogPostReport,
@@ -86,8 +89,19 @@ ReportContent = (
 # A generator receives the normalized (context, instructions, detail_level,
 # question_count) tuple; each adapter forwards only what its agent needs.
 ReportGenerator = Callable[
-    [str, str | None, str | None, int | None], Awaitable[ReportContent]
+    ["ReportContext", str | None, str | None, int | None], Awaitable[ReportContent]
 ]
+
+
+@dataclass(frozen=True)
+class ReportContext:
+    """Report source material: the text source blocks plus, for PDFs with
+    embedded figures, a capped set of image chunks' actual bytes so reports
+    are grounded in what a chart shows, not just its stored description.
+    """
+
+    text: str
+    image_parts: list[str | BinaryContent] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -95,7 +109,7 @@ class PendingReportPlan:
     """Everything the background task needs to generate a freshly-created report."""
 
     report: NotebookReport
-    context: str
+    context: ReportContext
     instructions: str | None
     detail_level: str | None
     question_count: int | None
@@ -112,7 +126,9 @@ async def get_notebook_report(
     return report
 
 
-async def build_report_context(notebook: Notebook, current_user: User) -> str:
+async def build_report_context(
+    notebook: Notebook, current_user: User, settings: Settings
+) -> ReportContext:
     documents = (
         await NotebookDocument.find(
             {
@@ -126,7 +142,7 @@ async def build_report_context(notebook: Notebook, current_user: User) -> str:
     )
 
     if not documents:
-        return ""
+        return ReportContext(text="")
 
     doc_map = {str(d.id): d.filename for d in documents}
     doc_ids = [d.id for d in documents]
@@ -139,60 +155,90 @@ async def build_report_context(notebook: Notebook, current_user: User) -> str:
 
     parts: list[str] = []
     total = 0
+    retrieved_image_chunks: list[RetrievedChunk] = []
     for chunk in chunks:
         metadata = chunk.chunk_metadata or {}
+        is_image = metadata.get("chunk_type") == "image"
+        retrieved_chunk = RetrievedChunk(
+            document_id=chunk.document_id,
+            filename=doc_map.get(str(chunk.document_id), "unknown"),
+            chunk_index=chunk.chunk_index,
+            content=chunk.content,
+            metadata=metadata,
+            chunk_type="image" if is_image else "text",
+        )
         # Same SOURCE grammar as chat context blocks, so models see one
         # labeling convention and any citations they emit resolve the same way.
-        block = source_block(
-            RetrievedChunk(
-                document_id=chunk.document_id,
-                filename=doc_map.get(str(chunk.document_id), "unknown"),
-                chunk_index=chunk.chunk_index,
-                content=chunk.content,
-                metadata=metadata,
-                chunk_type="image" if metadata.get("chunk_type") == "image" else "text",
-            )
-        )
+        block = source_block(retrieved_chunk)
         if total + len(block) > _REPORT_CONTEXT_CHAR_LIMIT:
             break
         parts.append(block)
         total += len(block)
+        if (
+            is_image
+            and len(retrieved_image_chunks) < settings.notebook_report_max_images
+        ):
+            retrieved_image_chunks.append(retrieved_chunk)
 
-    return "\n\n".join(parts)
+    text = "\n\n".join(parts)
+    if not retrieved_image_chunks:
+        return ReportContext(text=text)
+
+    store = get_s3_store(settings)
+    image_parts = await build_image_parts(retrieved_image_chunks, None, store)
+    return ReportContext(text=text, image_parts=image_parts)
 
 
 async def _generate_briefing(
-    context: str, instructions: str | None, _detail: str | None, _count: int | None
+    context: ReportContext,
+    instructions: str | None,
+    _detail: str | None,
+    _count: int | None,
 ) -> ReportContent:
     return await generate_briefing_doc(context, instructions)
 
 
 async def _generate_study_guide(
-    context: str, instructions: str | None, _detail: str | None, _count: int | None
+    context: ReportContext,
+    instructions: str | None,
+    _detail: str | None,
+    _count: int | None,
 ) -> ReportContent:
     return await generate_study_guide(context, instructions)
 
 
 async def _generate_blog(
-    context: str, instructions: str | None, _detail: str | None, _count: int | None
+    context: ReportContext,
+    instructions: str | None,
+    _detail: str | None,
+    _count: int | None,
 ) -> ReportContent:
     return await generate_blog_post(context, instructions)
 
 
 async def _generate_custom(
-    context: str, instructions: str | None, _detail: str | None, _count: int | None
+    context: ReportContext,
+    instructions: str | None,
+    _detail: str | None,
+    _count: int | None,
 ) -> ReportContent:
     return await generate_custom_report(context, instructions or "")
 
 
 async def _generate_mindmap(
-    context: str, instructions: str | None, detail: str | None, _count: int | None
+    context: ReportContext,
+    instructions: str | None,
+    detail: str | None,
+    _count: int | None,
 ) -> ReportContent:
     return await generate_mindmap(context, detail, instructions)
 
 
 async def _generate_quiz(
-    context: str, instructions: str | None, detail: str | None, count: int | None
+    context: ReportContext,
+    instructions: str | None,
+    detail: str | None,
+    count: int | None,
 ) -> ReportContent:
     return await generate_quiz(
         context,
@@ -203,7 +249,10 @@ async def _generate_quiz(
 
 
 async def _generate_flashcards(
-    context: str, instructions: str | None, detail: str | None, count: int | None
+    context: ReportContext,
+    instructions: str | None,
+    detail: str | None,
+    count: int | None,
 ) -> ReportContent:
     return await generate_flashcards(
         context,
@@ -256,7 +305,7 @@ def _model_http_error_message(exc: ModelHTTPError) -> str:
 async def run_report_generation(
     report_id: UUID,
     report_type: str,
-    context: str,
+    context: ReportContext,
     instructions: str | None,
     detail_level: str | None,
     question_count: int | None = None,
@@ -339,8 +388,8 @@ async def create_pending_report(
 
     await check_quota_and_raise(current_user.id, 0, settings)
 
-    context = await build_report_context(notebook, current_user)
-    if not context:
+    context = await build_report_context(notebook, current_user, settings)
+    if not context.text:
         raise NoIndexedDocumentsError()
 
     instructions = (payload.additional_instructions or "").strip() or None

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from contextvars import ContextVar
+from typing import TYPE_CHECKING
 
 from pydantic_ai import Agent
+from pydantic_ai.messages import BinaryContent
 from pydantic_ai.models import Model
 from pydantic_ai.run import AgentRunResult
 from pydantic_ai.usage import RunUsage
@@ -33,6 +35,11 @@ from app.notebooks.schemas import (
     QuizReport,
     StudyGuideReport,
 )
+
+if TYPE_CHECKING:
+    # Deferred to avoid a cycle: service/reports.py imports the generate_*
+    # functions below.
+    from app.notebooks.service.reports import ReportContext
 
 # Statically defined report agents
 briefing_agent = Agent(
@@ -90,7 +97,7 @@ def get_last_report_usage() -> RunUsage | None:
 
 async def _run_agent_with_retry[OutputT](
     agent: Agent[None, OutputT],
-    user_msg: str,
+    user_msg: str | list[str | BinaryContent],
     model: Model,
 ) -> AgentRunResult[OutputT]:
     """Run a report agent via the shared retry helper, capturing token usage."""
@@ -99,80 +106,92 @@ async def _run_agent_with_retry[OutputT](
     return result
 
 
+def _with_images(
+    text_msg: str, context: ReportContext
+) -> str | list[str | BinaryContent]:
+    """Append a report context's capped image parts after its framed text."""
+    if not context.image_parts:
+        return text_msg
+    return [text_msg, *context.image_parts]
+
+
 async def generate_briefing_doc(
-    context: str,
+    context: ReportContext,
     additional_instructions: str | None = None,
 ) -> BriefingDocReport:
     model = resolve_chat_provider()
+    text_msg = build_report_user_message(context.text, additional_instructions)
     result = await _run_agent_with_retry(
-        briefing_agent,
-        build_report_user_message(context, additional_instructions),
-        model=model,
+        briefing_agent, _with_images(text_msg, context), model=model
     )
     return result.output
 
 
 async def generate_study_guide(
-    context: str,
+    context: ReportContext,
     additional_instructions: str | None = None,
 ) -> StudyGuideReport:
     model = resolve_chat_provider()
+    text_msg = build_report_user_message(context.text, additional_instructions)
     result = await _run_agent_with_retry(
-        study_guide_agent,
-        build_report_user_message(context, additional_instructions),
-        model=model,
+        study_guide_agent, _with_images(text_msg, context), model=model
     )
     return result.output
 
 
 async def generate_blog_post(
-    context: str,
+    context: ReportContext,
     additional_instructions: str | None = None,
 ) -> BlogPostReport:
     model = resolve_chat_provider()
+    text_msg = build_report_user_message(context.text, additional_instructions)
     result = await _run_agent_with_retry(
-        blog_agent,
-        build_report_user_message(context, additional_instructions),
-        model=model,
+        blog_agent, _with_images(text_msg, context), model=model
     )
     return result.output
 
 
 async def generate_custom_report(
-    context: str,
+    context: ReportContext,
     additional_instructions: str,
 ) -> CustomReport:
     """Custom reports treat additional_instructions as the entire core directive."""
     model = resolve_chat_provider()
-    user_message = build_custom_report_user_message(context, additional_instructions)
-    result = await _run_agent_with_retry(custom_agent, user_message, model=model)
+    text_msg = build_custom_report_user_message(context.text, additional_instructions)
+    result = await _run_agent_with_retry(
+        custom_agent, _with_images(text_msg, context), model=model
+    )
     return result.output
 
 
 async def generate_mindmap(
-    context: str,
+    context: ReportContext,
     detail_level: str | None = None,
     additional_instructions: str | None = None,
 ) -> MindMapReport:
     model = resolve_chat_provider()
-    user_message = build_mindmap_user_message(
-        context, detail_level, additional_instructions
+    text_msg = build_mindmap_user_message(
+        context.text, detail_level, additional_instructions
     )
-    result = await _run_agent_with_retry(mindmap_agent, user_message, model=model)
+    result = await _run_agent_with_retry(
+        mindmap_agent, _with_images(text_msg, context), model=model
+    )
     return result.output
 
 
 async def generate_quiz(
-    context: str,
+    context: ReportContext,
     count: int = 20,
     difficulty: str | None = None,
     additional_instructions: str | None = None,
 ) -> QuizReport:
     model = resolve_chat_provider()
-    user_message = build_quiz_user_message(
-        context, count, difficulty, additional_instructions
+    text_msg = build_quiz_user_message(
+        context.text, count, difficulty, additional_instructions
     )
-    result = await _run_agent_with_retry(quiz_agent, user_message, model=model)
+    result = await _run_agent_with_retry(
+        quiz_agent, _with_images(text_msg, context), model=model
+    )
     return _sanitize_quiz(result.output)
 
 
@@ -208,16 +227,18 @@ def _sanitize_quiz(quiz: QuizReport) -> QuizReport:
 
 
 async def generate_flashcards(
-    context: str,
+    context: ReportContext,
     count: int = 20,
     difficulty: str | None = None,
     additional_instructions: str | None = None,
 ) -> FlashcardReport:
     model = resolve_chat_provider()
-    user_message = build_flashcards_user_message(
-        context, count, difficulty, additional_instructions
+    text_msg = build_flashcards_user_message(
+        context.text, count, difficulty, additional_instructions
     )
-    result = await _run_agent_with_retry(flashcards_agent, user_message, model=model)
+    result = await _run_agent_with_retry(
+        flashcards_agent, _with_images(text_msg, context), model=model
+    )
     return _sanitize_flashcards(result.output)
 
 
