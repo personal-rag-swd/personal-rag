@@ -44,6 +44,10 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { useParams } from "react-router-dom"
 import { apiFetch } from "@/lib/api-client"
 
+// The `\[([^\]]*\bchunk\b...)\]` branch below only matches the verbose,
+// pre-S-label citation form (`[filename=..., chunk=N]`) persisted by old chat
+// history before S-label citations shipped. New messages always emit `[S3]`.
+// Legacy-only: safe to delete once old transcripts using it have aged out.
 const preprocessCitations = (text: string) => {
   const citationMap = new Map<string, number>()
   let currentNum = 1
@@ -221,9 +225,15 @@ function useChunkImageUrl(
 ) {
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
+  // Bumped to force a fresh presigned-URL fetch when the current one's <img>
+  // fails to load (e.g. a long-open tab outlasting the URL's expiry) — a
+  // stale URL shouldn't hide the image forever if a re-fetch would fix it.
+  const [attempt, setAttempt] = useState(0)
+  const retriedRef = useRef(false)
 
   useEffect(() => {
     if (!enabled || !notebookId || !documentId || chunkIndex < 0) return
+    retriedRef.current = false
     setImageUrl(null)
     setFailed(false)
     let cancelled = false
@@ -239,9 +249,19 @@ function useChunkImageUrl(
     return () => {
       cancelled = true
     }
-  }, [enabled, notebookId, documentId, chunkIndex])
+  }, [enabled, notebookId, documentId, chunkIndex, attempt])
 
-  return { imageUrl, failed, markFailed: () => setFailed(true) }
+  const handleImageError = () => {
+    if (retriedRef.current) {
+      setFailed(true)
+      return
+    }
+    retriedRef.current = true
+    setImageUrl(null)
+    setAttempt((prev) => prev + 1)
+  }
+
+  return { imageUrl, failed, markFailed: handleImageError }
 }
 
 function ImageChunkDisplay({
