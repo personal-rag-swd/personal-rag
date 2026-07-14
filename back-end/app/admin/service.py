@@ -3,6 +3,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+import obstore
 from beanie import Document
 
 from app.admin.exceptions import (
@@ -30,7 +31,7 @@ from app.admin.schemas import (
 from app.billing.models import BillingCustomer, UsageAllowance, UsageEventLog
 from app.billing.polar_client import PolarAPIError, get_polar_client
 from app.core.config import Settings
-from app.core.s3 import generate_presigned_get_url
+from app.core.s3 import generate_presigned_get_url, get_s3_store
 from app.notebooks.models import (
     Notebook,
     NotebookDocument,
@@ -304,6 +305,15 @@ async def get_document_preview(
             content=raw.decode("utf-8", errors="replace"),
             preview_type="text",
         )
+    # Confirm the object still exists before handing back a presigned URL: the
+    # DB row can outlive its S3 object (upload never completed, object removed
+    # out-of-band), and a URL to a missing object 404s inside the viewer rather
+    # than surfacing as a clean error. Head-check here so the client gets a 404
+    # it can render as "content unavailable" instead of a broken preview.
+    try:
+        await obstore.head_async(get_s3_store(settings), document.s3_key)
+    except FileNotFoundError as exc:
+        raise DocumentContentUnavailableError() from exc
     url = generate_presigned_get_url(settings, key=document.s3_key, expires_in=3600)
     return AdminDocumentPreview(
         filename=document.filename,

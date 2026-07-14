@@ -446,6 +446,10 @@ class TestAdminDocumentPreview:
         # PDFs/docx/images go to the udoc-viewer via a presigned URL.
         from app.admin import service as admin_service
 
+        async def fake_head_async(_store: Any, _key: str) -> dict[str, Any]:
+            return {"size": 123}
+
+        monkeypatch.setattr(admin_service.obstore, "head_async", fake_head_async)
         monkeypatch.setattr(
             admin_service,
             "generate_presigned_get_url",
@@ -474,6 +478,39 @@ class TestAdminDocumentPreview:
         data = response.json()
         assert data["preview_type"] == "url"
         assert data["url"] == "http://minio/presigned.pdf"
+
+    async def test_missing_object_returns_404(
+        self, client: AsyncClient, settings: Any, monkeypatch: Any
+    ) -> None:
+        # A DB row can outlive its S3 object (upload never finished, object
+        # removed out-of-band). The preview must 404 rather than sign a URL to
+        # a missing object that would 404 inside the viewer instead.
+        from app.admin import service as admin_service
+
+        async def fake_head_async(_store: Any, _key: str) -> dict[str, Any]:
+            raise FileNotFoundError
+
+        monkeypatch.setattr(admin_service.obstore, "head_async", fake_head_async)
+        admin = await create_user(role="admin")
+        user = await create_user(role="user")
+        notebook = await create_notebook(user)
+        document = NotebookDocument(
+            notebook_id=notebook.id,
+            user_id=user.id,
+            s3_bucket="bucket",
+            s3_key="users/missing.pdf",
+            filename="missing.pdf",
+            content_type="application/pdf",
+            size=123,
+            status="uploaded",
+        )
+        await document.insert()
+
+        response = await client.get(
+            f"/api/v1/admin/documents/{document.id}/preview",
+            headers=auth_headers(admin, settings),
+        )
+        assert response.status_code == 404
 
     async def test_unknown_document_404(
         self, client: AsyncClient, settings: Any
