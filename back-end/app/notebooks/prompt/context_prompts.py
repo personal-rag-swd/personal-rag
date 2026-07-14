@@ -56,6 +56,9 @@ def source_block(chunk: RetrievedChunk, *, number: int | None = None) -> str:
     # the persisted tool message and citations can render the chunk correctly.
     if chunk.chunk_type and chunk.chunk_type != "text":
         header += f" chunk_type={chunk.chunk_type}"
+    page_number = chunk.metadata.get("page_number")
+    if page_number is not None:
+        header += f" page={page_number}"
     header += "]"
     content = chunk.content
     if len(content) > _MAX_SOURCE_CONTENT_CHARS:
@@ -73,10 +76,14 @@ def image_part_label(chunk: RetrievedChunk, *, number: int | None = None) -> str
     SOURCE header so the model can cite the image exactly like any other source.
     """
     label = f"S{number} " if number is not None else ""
-    return (
+    header = (
         f"Image for SOURCE {label}[filename={chunk.filename} "
-        f"doc_id={chunk.document_id} chunk={chunk.chunk_index} chunk_type=image]:"
+        f"doc_id={chunk.document_id} chunk={chunk.chunk_index} chunk_type=image"
     )
+    page_number = chunk.metadata.get("page_number")
+    if page_number is not None:
+        header += f" page={page_number}"
+    return header + "]:"
 
 
 def chunk_to_source(
@@ -89,12 +96,16 @@ def chunk_to_source(
     ``source_number`` mirrors the S-label in the chunk's SOURCE header, so an
     ``[S3]`` citation resolves by number lookup instead of UUID matching.
     """
+    metadata: dict[str, object] = {"chunk_type": chunk.chunk_type}
+    page_number = chunk.metadata.get("page_number")
+    if page_number is not None:
+        metadata["page_number"] = page_number
     source: dict[str, object] = {
         "filename": chunk.filename,
         "document_id": str(chunk.document_id),
         "chunk_index": chunk.chunk_index,
         "content": chunk.content,
-        "metadata": {"chunk_type": chunk.chunk_type},
+        "metadata": metadata,
     }
     if number is not None:
         source["source_number"] = number
@@ -104,7 +115,8 @@ def chunk_to_source(
 _SOURCE_BLOCK_PATTERN = re.compile(
     r"SOURCE (?:S(?P<source_number>\d+) )?"
     r"\[filename=(?P<filename>.*?) doc_id=(?P<doc_id>[a-f0-9\-]+) "
-    r"chunk=(?P<chunk>\d+)(?: chunk_type=(?P<chunk_type>\w+))?\]\n"
+    r"chunk=(?P<chunk>\d+)(?: chunk_type=(?P<chunk_type>\w+))?"
+    r"(?: page=(?P<page>\d+))?\]\n"
     r"(?P<content>.*?)(?=\n+SOURCE (?:S\d+ )?\[filename=|\Z)",
     re.DOTALL,
 )
@@ -119,12 +131,17 @@ def parse_chunks_from_context_block(block: str) -> list[dict[str, object]]:
     """
     sources: list[dict[str, object]] = []
     for match in _SOURCE_BLOCK_PATTERN.finditer(block):
+        metadata: dict[str, object] = {
+            "chunk_type": match.group("chunk_type") or "text"
+        }
+        if match.group("page") is not None:
+            metadata["page_number"] = int(match.group("page"))
         source: dict[str, object] = {
             "filename": match.group("filename"),
             "document_id": match.group("doc_id"),
             "chunk_index": int(match.group("chunk")),
             "content": match.group("content").strip(),
-            "metadata": {"chunk_type": match.group("chunk_type") or "text"},
+            "metadata": metadata,
         }
         if match.group("source_number") is not None:
             source["source_number"] = int(match.group("source_number"))

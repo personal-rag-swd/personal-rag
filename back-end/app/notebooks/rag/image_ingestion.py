@@ -54,21 +54,25 @@ def build_image_chunk_document(
     source: str,
     s3_key: str | None,
     media_type: str,
+    page_number: int | None = None,
 ) -> Document:
     """Build the ``image`` chunk Document shared by the direct-image upload and
     embedded-PDF-image paths (same metadata shape, only ``source``/``s3_key`` vary).
+
+    ``page_number`` is the 1-based PDF page the image was embedded on; it stays
+    ``None`` for standalone image uploads, which have no page concept.
     """
-    return Document(
-        page_content=description,
-        metadata={
-            "source": source,
-            "document_id": str(document.id),
-            "chunk_type": "image",
-            "s3_key": s3_key,
-            "s3_bucket": document.s3_bucket,
-            "media_type": media_type,
-        },
-    )
+    metadata: dict[str, object] = {
+        "source": source,
+        "document_id": str(document.id),
+        "chunk_type": "image",
+        "s3_key": s3_key,
+        "s3_bucket": document.s3_bucket,
+        "media_type": media_type,
+    }
+    if page_number is not None:
+        metadata["page_number"] = page_number
+    return Document(page_content=description, metadata=metadata)
 
 
 async def describe_image(image_bytes: bytes, label: str, media_type: str) -> str:
@@ -117,15 +121,17 @@ def _collect_pdf_images(
     pdf_bytes: bytes,
     key_prefix: str,
     filename: str,
-) -> list[tuple[str, bytes, str, str]]:
-    """Extract embedded PDF images, returning (s3_key, bytes, media_type, label).
+) -> list[tuple[str, bytes, str, str, int]]:
+    """Extract embedded PDF images, returning (s3_key, bytes, media_type, label, page_number).
 
     Uses the official ``page.get_images`` + ``Document.extract_image`` recipe so
     only images actually embedded in the document are processed — each xref once
     — rather than rendering every page. Pure CPU work; run via asyncio.to_thread.
+    ``page_number`` is 1-based and reflects the first page an image appears on
+    (a reused image, deduped by xref, is labeled with that page only).
     """
     seen_xrefs: set[int] = set()
-    images: list[tuple[str, bytes, str, str]] = []
+    images: list[tuple[str, bytes, str, str, int]] = []
     pdf_doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     try:
         for page_index in range(len(pdf_doc)):
@@ -145,8 +151,9 @@ def _collect_pdf_images(
 
                 image_bytes, ext, media_type = _extract_pdf_image_bytes(pdf_doc, xref)
                 image_key = f"{key_prefix}/images/img_{xref}.{ext}"
-                label = f"image on page {page_index + 1} of {filename}"
-                images.append((image_key, image_bytes, media_type, label))
+                page_number = page_index + 1
+                label = f"image on page {page_number} of {filename}"
+                images.append((image_key, image_bytes, media_type, label, page_number))
     finally:
         pdf_doc.close()
     return images
@@ -179,7 +186,7 @@ async def extract_pdf_images(
                 image_bytes,
                 attributes={"Content-Type": media_type},
             )
-            for image_key, image_bytes, media_type, _ in images
+            for image_key, image_bytes, media_type, _, _ in images
         )
     )
 
@@ -192,7 +199,7 @@ async def extract_pdf_images(
             return await describe_image(data, label, media_type)
 
     descriptions = await asyncio.gather(
-        *(_bounded(data, label, media_type) for _, data, media_type, label in images)
+        *(_bounded(data, label, media_type) for _, data, media_type, label, _ in images)
     )
     image_docs = [
         build_image_chunk_document(
@@ -201,8 +208,9 @@ async def extract_pdf_images(
             source=document.s3_key,
             s3_key=image_key,
             media_type=media_type,
+            page_number=page_number,
         )
-        for (image_key, _, media_type, _), description in zip(
+        for (image_key, _, media_type, _, page_number), description in zip(
             images, descriptions, strict=True
         )
     ]

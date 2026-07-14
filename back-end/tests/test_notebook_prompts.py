@@ -43,6 +43,39 @@ def test_image_part_label_carries_source_identifiers() -> None:
     assert "chunk_type=image" in label
 
 
+def test_image_part_label_includes_page_when_present() -> None:
+    document_id = uuid4()
+    label = image_part_label(
+        RetrievedChunk(
+            document_id=document_id,
+            filename="figure.pdf",
+            chunk_index=7,
+            content="A bar chart of quarterly revenue.",
+            metadata={"chunk_type": "image", "page_number": 4},
+            chunk_type="image",
+        ),
+        number=4,
+    )
+
+    assert "page=4" in label
+
+
+def test_image_part_label_omits_page_when_absent() -> None:
+    document_id = uuid4()
+    label = image_part_label(
+        RetrievedChunk(
+            document_id=document_id,
+            filename="figure.png",
+            chunk_index=0,
+            content="A standalone uploaded image.",
+            metadata={"chunk_type": "image"},
+            chunk_type="image",
+        ),
+    )
+
+    assert "page=" not in label
+
+
 def test_context_block_labels_sources_for_citation() -> None:
     document_id = uuid4()
     context = build_context_block(
@@ -79,6 +112,27 @@ def test_context_block_labels_sources_for_citation() -> None:
         in context
     )
     assert "Notebook content from the source." in context
+
+
+def test_context_block_includes_page_number_for_image_chunks() -> None:
+    document_id = uuid4()
+    context = build_context_block(
+        [
+            RetrievedChunk(
+                document_id=document_id,
+                filename="figure.pdf",
+                chunk_index=7,
+                content="A bar chart of quarterly revenue.",
+                metadata={"chunk_type": "image", "page_number": 4},
+                chunk_type="image",
+            ),
+        ]
+    )
+
+    assert (
+        f"SOURCE S1 [filename=figure.pdf doc_id={document_id} chunk=7 "
+        "chunk_type=image page=4]" in context
+    )
 
 
 def test_empty_context_block_tells_agent_not_to_guess() -> None:

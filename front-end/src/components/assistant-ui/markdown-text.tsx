@@ -146,6 +146,7 @@ interface ChunkMetadata {
   s3_key?: string
   s3_bucket?: string
   media_type?: string
+  page_number?: number
   [key: string]: unknown
 }
 
@@ -173,7 +174,7 @@ interface ReferenceType {
 // recover sources from the search tool's result text during live streaming,
 // when the structured metadata.custom.sources is not populated yet.
 const SOURCE_BLOCK_REGEX =
-  /SOURCE (?:S(\d+) )?\[filename=(.*?) doc_id=([a-f0-9-]+) chunk=(\d+)(?: chunk_type=(\w+))?\]\n([\s\S]*?)(?=\n+SOURCE (?:S\d+ )?\[filename=|$)/g
+  /SOURCE (?:S(\d+) )?\[filename=(.*?) doc_id=([a-f0-9-]+) chunk=(\d+)(?: chunk_type=(\w+))?(?: page=(\d+))?\]\n([\s\S]*?)(?=\n+SOURCE (?:S\d+ )?\[filename=|$)/g
 
 function parseSourcesFromToolResults(
   content: readonly { type: string; [key: string]: unknown }[] | undefined
@@ -197,8 +198,11 @@ function parseSourcesFromToolResults(
           filename: match[2],
           document_id: match[3],
           chunk_index: Number.parseInt(match[4], 10),
-          content: match[6].trim(),
-          metadata: { chunk_type: match[5] ?? "text" },
+          content: match[7].trim(),
+          metadata: {
+            chunk_type: match[5] ?? "text",
+            ...(match[6] ? { page_number: Number.parseInt(match[6], 10) } : {}),
+          },
         })
       }
     }
@@ -367,6 +371,11 @@ function DocumentChunksViewer({
             >
               {isImage ? (
                 <div className="space-y-3">
+                  {chunk.metadata?.page_number != null && (
+                    <span className="inline-block rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                      Page {chunk.metadata.page_number}
+                    </span>
+                  )}
                   <ImageChunkDisplay
                     notebookId={notebookId}
                     documentId={chunk.document_id}
@@ -540,6 +549,8 @@ function CitationPopover({
   const contentText = activeSource?.content ?? ""
   const isImageChunk =
     (activeSource as ChunkType | null)?.metadata?.chunk_type === "image"
+  const activePageNumber = (activeSource as ChunkType | null)?.metadata
+    ?.page_number
   const activeDocId =
     (activeSource as ChunkType | null)?.document_id || finalDocumentId
 
@@ -587,6 +598,11 @@ function CitationPopover({
             >
               {finalFilename}
             </span>
+            {activePageNumber != null && (
+              <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                Page {activePageNumber}
+              </span>
+            )}
           </div>
 
           <div className="max-h-56 [scrollbar-width:none] overflow-y-auto p-3.5 text-xs leading-relaxed text-muted-foreground [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">

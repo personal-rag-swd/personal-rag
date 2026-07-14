@@ -125,6 +125,24 @@ def test_source_blocks_round_trip_with_source_numbers() -> None:
     assert parsed[1]["metadata"] == {"chunk_type": "image"}
 
 
+def test_source_blocks_round_trip_page_number_for_image_chunks() -> None:
+    document_id = uuid4()
+    chunks = [
+        RetrievedChunk(
+            document_id=document_id,
+            filename="figure.pdf",
+            chunk_index=7,
+            content="A bar chart.",
+            metadata={"chunk_type": "image", "page_number": 4},
+            chunk_type="image",
+        ),
+    ]
+
+    parsed = parse_chunks_from_context_block(build_context_block(chunks))
+
+    assert parsed[0]["metadata"] == {"chunk_type": "image", "page_number": 4}
+
+
 def test_legacy_source_blocks_parse_without_source_numbers() -> None:
     document_id = uuid4()
     block = (
