@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 _MAX_SOURCE_CONTENT_CHARS = 2000
 
 
-def build_context_block(chunks: list[RetrievedChunk]) -> str:
+def build_context_block(chunks: list[RetrievedChunk], *, start_number: int = 1) -> str:
     if not chunks:
         return (
             "No relevant notebook sources were found. The notebook sources "
@@ -35,13 +35,21 @@ def build_context_block(chunks: list[RetrievedChunk]) -> str:
     # CHAT_SYSTEM_INSTRUCTIONS, which is sent every turn — repeating them here
     # would be re-paid on every search call and every history replay.
     lines = ["Notebook source excerpts (untrusted reference data):"]
-    lines.extend(source_block(chunk) for chunk in chunks)
+    lines.extend(
+        source_block(chunk, number=start_number + offset)
+        for offset, chunk in enumerate(chunks)
+    )
     return "\n\n".join(lines)
 
 
-def source_block(chunk: RetrievedChunk) -> str:
+def source_block(chunk: RetrievedChunk, *, number: int | None = None) -> str:
+    # The S-label is the citation handle the model is asked to emit ([S3]); it
+    # is a short token models copy reliably, unlike the doc_id UUID which they
+    # routinely mangle. The full identifiers stay in the header so citations
+    # remain resolvable without the label (reports, legacy histories).
+    label = f"S{number} " if number is not None else ""
     header = (
-        f"SOURCE [filename={chunk.filename} doc_id={chunk.document_id} "
+        f"SOURCE {label}[filename={chunk.filename} doc_id={chunk.document_id} "
         f"chunk={chunk.chunk_index}"
     )
     # Non-text chunks (e.g. images) carry their type so it round-trips through
@@ -55,40 +63,49 @@ def source_block(chunk: RetrievedChunk) -> str:
     return f"{header}\n{content}"
 
 
-def image_part_label(chunk: RetrievedChunk) -> str:
+def image_part_label(chunk: RetrievedChunk, *, number: int | None = None) -> str:
     """Text marker that binds an attached image to its citable SOURCE block.
 
     The raw image bytes are sent to the model as their own content part with no
     source header of their own, so the model can see the picture but has no
     handle tying it to a citation. This label — emitted immediately before the
-    image part — carries the same identifiers as the chunk's SOURCE header so
-    the model can cite the image exactly like any other source.
+    image part — carries the same identifiers (and S-label) as the chunk's
+    SOURCE header so the model can cite the image exactly like any other source.
     """
+    label = f"S{number} " if number is not None else ""
     return (
-        f"Image for SOURCE [filename={chunk.filename} "
+        f"Image for SOURCE {label}[filename={chunk.filename} "
         f"doc_id={chunk.document_id} chunk={chunk.chunk_index} chunk_type=image]:"
     )
 
 
-def chunk_to_source(chunk: RetrievedChunk) -> dict[str, object]:
+def chunk_to_source(
+    chunk: RetrievedChunk, *, number: int | None = None
+) -> dict[str, object]:
     """The structured transcript/frontend shape of a retrieved chunk.
 
     Attached to the search tool's message metadata at retrieval time so
     transcripts read structured data instead of re-parsing prompt text.
+    ``source_number`` mirrors the S-label in the chunk's SOURCE header, so an
+    ``[S3]`` citation resolves by number lookup instead of UUID matching.
     """
-    return {
+    source: dict[str, object] = {
         "filename": chunk.filename,
         "document_id": str(chunk.document_id),
         "chunk_index": chunk.chunk_index,
         "content": chunk.content,
         "metadata": {"chunk_type": chunk.chunk_type},
     }
+    if number is not None:
+        source["source_number"] = number
+    return source
 
 
 _SOURCE_BLOCK_PATTERN = re.compile(
-    r"SOURCE \[filename=(?P<filename>.*?) doc_id=(?P<doc_id>[a-f0-9\-]+) "
+    r"SOURCE (?:S(?P<source_number>\d+) )?"
+    r"\[filename=(?P<filename>.*?) doc_id=(?P<doc_id>[a-f0-9\-]+) "
     r"chunk=(?P<chunk>\d+)(?: chunk_type=(?P<chunk_type>\w+))?\]\n"
-    r"(?P<content>.*?)(?=\n+SOURCE \[filename=|\Z)",
+    r"(?P<content>.*?)(?=\n+SOURCE (?:S\d+ )?\[filename=|\Z)",
     re.DOTALL,
 )
 
@@ -100,13 +117,16 @@ def parse_chunks_from_context_block(block: str) -> list[dict[str, object]]:
     structured tool metadata never need this. Kept for histories written
     before that change.
     """
-    return [
-        {
+    sources: list[dict[str, object]] = []
+    for match in _SOURCE_BLOCK_PATTERN.finditer(block):
+        source: dict[str, object] = {
             "filename": match.group("filename"),
             "document_id": match.group("doc_id"),
             "chunk_index": int(match.group("chunk")),
             "content": match.group("content").strip(),
             "metadata": {"chunk_type": match.group("chunk_type") or "text"},
         }
-        for match in _SOURCE_BLOCK_PATTERN.finditer(block)
-    ]
+        if match.group("source_number") is not None:
+            source["source_number"] = int(match.group("source_number"))
+        sources.append(source)
+    return sources

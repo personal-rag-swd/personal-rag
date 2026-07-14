@@ -11,6 +11,9 @@ def test_notebook_core_instructions_require_source_grounding() -> None:
         "If the retrieved sources do not contain enough evidence"
         in CHAT_SYSTEM_INSTRUCTIONS
     )
+    # Citations use the short S-label as the primary handle (models copy short
+    # tokens reliably; UUIDs get mangled), with the legacy format as fallback.
+    assert "[S3]" in CHAT_SYSTEM_INSTRUCTIONS
     assert "[filename, chunk N]" in CHAT_SYSTEM_INSTRUCTIONS
     assert "Do not fabricate filenames" in CHAT_SYSTEM_INSTRUCTIONS
     # Images must be citable, otherwise they never appear in the references.
@@ -27,11 +30,13 @@ def test_image_part_label_carries_source_identifiers() -> None:
             content="A bar chart of quarterly revenue.",
             metadata={"chunk_type": "image"},
             chunk_type="image",
-        )
+        ),
+        number=4,
     )
 
     # The label prefixes the raw image bytes so the model can bind the picture it
     # sees to the same identifiers the SOURCE header carries, and cite it.
+    assert "SOURCE S4 [" in label
     assert "filename=figure.pdf" in label
     assert f"doc_id={document_id}" in label
     assert "chunk=7" in label
@@ -48,15 +53,30 @@ def test_context_block_labels_sources_for_citation() -> None:
                 chunk_index=3,
                 content="Notebook content from the source.",
                 metadata={},
-            )
-        ]
+            ),
+            RetrievedChunk(
+                document_id=document_id,
+                filename="research-notes.pdf",
+                chunk_index=5,
+                content="More notebook content.",
+                metadata={},
+            ),
+        ],
+        start_number=2,
     )
 
     # Citation/handling rules live once in CHAT_SYSTEM_INSTRUCTIONS; the
-    # context block itself only labels the excerpts.
+    # context block itself only labels the excerpts. Each excerpt carries an
+    # S-label the model cites, numbered sequentially from start_number so a
+    # second search call in the same run keeps numbering unique.
     assert context.startswith("Notebook source excerpts (untrusted reference data):")
     assert (
-        f"SOURCE [filename=research-notes.pdf doc_id={document_id} chunk=3]" in context
+        f"SOURCE S2 [filename=research-notes.pdf doc_id={document_id} chunk=3]"
+        in context
+    )
+    assert (
+        f"SOURCE S3 [filename=research-notes.pdf doc_id={document_id} chunk=5]"
+        in context
     )
     assert "Notebook content from the source." in context
 

@@ -97,9 +97,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     logger.info("  Chat Model:         %s", settings.chat_model)
     logger.info("============================================================")
 
-    # Wire domain-event listeners (SSE projection, audit, OTP email) before any
-    # producer runs so recovery and the ingestion consumer have somewhere to
-    # dispatch to.
     register_default_event_listeners()
 
     consumer_task: asyncio.Task[None] | None = None

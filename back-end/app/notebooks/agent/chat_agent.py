@@ -29,6 +29,9 @@ class NotebookChatDeps:
     current_user: User
     settings: Settings
     document_ids: list[UUID] | None = None
+    # Next S-label to assign; shared across all search calls in one run so a
+    # second search continues numbering (S6, S7, …) instead of reusing S1.
+    next_source_number: int = 1
 
 
 notebook_chat_agent = Agent(
@@ -65,11 +68,19 @@ async def search_notebook_context(
                 "conversation so far and tell the user that source retrieval failed."
             )
         )
-    context_block = build_context_block(chunks)
+    start_number = ctx.deps.next_source_number
+    ctx.deps.next_source_number += len(chunks)
+    numbers = {id(chunk): start_number + i for i, chunk in enumerate(chunks)}
+
+    context_block = build_context_block(chunks, start_number=start_number)
     # Structured sources ride on the tool message's metadata (persisted with
     # history, never sent to the LLM) so transcripts don't have to re-parse
     # the prompt text.
-    metadata = {"sources": [chunk_to_source(chunk) for chunk in chunks]}
+    metadata = {
+        "sources": [
+            chunk_to_source(chunk, number=numbers[id(chunk)]) for chunk in chunks
+        ]
+    }
 
     image_chunks = [chunk for chunk in chunks if chunk.chunk_type == "image"]
     if not image_chunks:
@@ -86,7 +97,7 @@ async def search_notebook_context(
     for chunk, content in zip(image_chunks, fetched, strict=True):
         if content is None:
             continue
-        parts.append(image_part_label(chunk))
+        parts.append(image_part_label(chunk, number=numbers[id(chunk)]))
         parts.append(content)
     return ToolReturn(return_value=parts, metadata=metadata)
 

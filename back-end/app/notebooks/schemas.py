@@ -121,6 +121,10 @@ class NotebookChatSource(BaseModel):
     document_id: UUID
     chunk_index: int
     content: str
+    # Mirrors the S-label in the SOURCE header ([S3] citations resolve to this).
+    # None for sources persisted before S-labels existed.
+    source_number: int | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class NotebookChatReference(BaseModel):
@@ -130,6 +134,7 @@ class NotebookChatReference(BaseModel):
     document_id: UUID
     chunk_index: int
     content: str
+    metadata: dict[str, Any] | None = None
 
 
 class NotebookChatHistoryMessage(BaseModel):

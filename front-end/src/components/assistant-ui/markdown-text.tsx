@@ -15,6 +15,7 @@ import {
   memo,
   useState,
   useEffect,
+  useMemo,
   useRef,
 } from "react"
 import {
@@ -46,69 +47,85 @@ import { apiFetch } from "@/lib/api-client"
 const preprocessCitations = (text: string) => {
   const citationMap = new Map<string, number>()
   let currentNum = 1
-
-  // Match any bracket enclosing 'chunk' followed by a number
-  const regex = /\[([^\]]*\bchunk\b(?:=|\s+)(\d+)[^\]]*)\]/gi
-
-  return text.replace(regex, (match, innerContent, chunkIndexStr) => {
-    const chunkIndex = Number.parseInt(chunkIndexStr, 10)
-    if (Number.isNaN(chunkIndex)) return match
-
-    let docId = ""
-    let filename = ""
-
-    // 1. Try to extract doc_id=...
-    const docIdMatch = innerContent.match(/doc_id\s*=\s*([^,\s\]]+)/i)
-    if (docIdMatch) {
-      docId = docIdMatch[1].trim()
-    }
-
-    // 2. Try to extract file=... or filename=... (allow spaces in the filename,
-    // but stop before the next " key=value" token, a comma, or the closing ]).
-    const fileMatch = innerContent.match(
-      /(?:file|filename)\s*=\s*([^,\]]+?)(?=\s+[\w-]+\s*=|\s*,|\s*\]|$)/i
-    )
-    if (fileMatch) {
-      filename = fileMatch[1].trim()
-    } else {
-      // E.g. [filename, chunk 15] -> everything before the comma is filename
-      const commaParts = innerContent.split(",")
-      if (
-        commaParts.length > 1 &&
-        !commaParts[0].includes("chunk") &&
-        !commaParts[0].includes("doc_id")
-      ) {
-        filename = commaParts[0].trim()
-      }
-    }
-
-    // 3. Fallback: extract any potential filename token
-    if (!filename && !docId) {
-      const tokens = innerContent.split(/[\s,]+/)
-      for (const token of tokens) {
-        const cleaned = token.trim()
-        if (
-          cleaned &&
-          !cleaned.toLowerCase().includes("chunk") &&
-          !cleaned.toLowerCase().includes("doc_id") &&
-          !cleaned.includes("=")
-        ) {
-          filename = cleaned
-          break
-        }
-      }
-    }
-
-    const key = docId ? `${docId}:${chunkIndex}` : `${filename}:${chunkIndex}`
+  const assignNumber = (key: string) => {
     let num = citationMap.get(key)
     if (num === undefined) {
       num = currentNum++
       citationMap.set(key, num)
     }
-    const docIdPart = docId ? `/${encodeURIComponent(docId)}` : ""
-    const filenamePart = filename ? encodeURIComponent(filename) : ""
-    return `[${num}](#cite/${num}/${filenamePart}/${chunkIndex}${docIdPart})`
-  })
+    return num
+  }
+
+  // Match the short S-label form [S3] (preferred, resolved against the
+  // source_number carried by the retrieved sources) or any bracket enclosing
+  // 'chunk' followed by a number (legacy verbose form). One combined pass so
+  // display numbering follows order of appearance across both forms.
+  const regex = /\[S(\d+)\]|\[([^\]]*\bchunk\b(?:=|\s+)(\d+)[^\]]*)\]/gi
+
+  return text.replace(
+    regex,
+    (match, sourceNumberStr, innerContent, chunkIndexStr) => {
+      if (sourceNumberStr !== undefined) {
+        const sourceNumber = Number.parseInt(sourceNumberStr, 10)
+        const num = assignNumber(`S${sourceNumber}`)
+        return `[${num}](#citeS/${num}/${sourceNumber})`
+      }
+
+      const chunkIndex = Number.parseInt(chunkIndexStr, 10)
+      if (Number.isNaN(chunkIndex)) return match
+
+      let docId = ""
+      let filename = ""
+
+      // 1. Try to extract doc_id=...
+      const docIdMatch = innerContent.match(/doc_id\s*=\s*([^,\s\]]+)/i)
+      if (docIdMatch) {
+        docId = docIdMatch[1].trim()
+      }
+
+      // 2. Try to extract file=... or filename=... (allow spaces in the filename,
+      // but stop before the next " key=value" token, a comma, or the closing ]).
+      const fileMatch = innerContent.match(
+        /(?:file|filename)\s*=\s*([^,\]]+?)(?=\s+[\w-]+\s*=|\s*,|\s*\]|$)/i
+      )
+      if (fileMatch) {
+        filename = fileMatch[1].trim()
+      } else {
+        // E.g. [filename, chunk 15] -> everything before the comma is filename
+        const commaParts = innerContent.split(",")
+        if (
+          commaParts.length > 1 &&
+          !commaParts[0].includes("chunk") &&
+          !commaParts[0].includes("doc_id")
+        ) {
+          filename = commaParts[0].trim()
+        }
+      }
+
+      // 3. Fallback: extract any potential filename token
+      if (!filename && !docId) {
+        const tokens = innerContent.split(/[\s,]+/)
+        for (const token of tokens) {
+          const cleaned = token.trim()
+          if (
+            cleaned &&
+            !cleaned.toLowerCase().includes("chunk") &&
+            !cleaned.toLowerCase().includes("doc_id") &&
+            !cleaned.includes("=")
+          ) {
+            filename = cleaned
+            break
+          }
+        }
+      }
+
+      const key = docId ? `${docId}:${chunkIndex}` : `${filename}:${chunkIndex}`
+      const num = assignNumber(key)
+      const docIdPart = docId ? `/${encodeURIComponent(docId)}` : ""
+      const filenamePart = filename ? encodeURIComponent(filename) : ""
+      return `[${num}](#cite/${num}/${filenamePart}/${chunkIndex}${docIdPart})`
+    }
+  )
 }
 
 const MarkdownTextImpl = () => {
@@ -138,6 +155,7 @@ interface ChunkType {
   document_id: string
   chunk_index: number
   content: string
+  source_number?: number
   metadata?: ChunkMetadata
 }
 
@@ -149,6 +167,43 @@ interface ReferenceType {
   chunk_index: number
   content: string
   metadata?: ChunkMetadata
+}
+
+// Mirrors the backend SOURCE header grammar (context_prompts.py). Used to
+// recover sources from the search tool's result text during live streaming,
+// when the structured metadata.custom.sources is not populated yet.
+const SOURCE_BLOCK_REGEX =
+  /SOURCE (?:S(\d+) )?\[filename=(.*?) doc_id=([a-f0-9-]+) chunk=(\d+)(?: chunk_type=(\w+))?\]\n([\s\S]*?)(?=\n+SOURCE (?:S\d+ )?\[filename=|$)/g
+
+function parseSourcesFromToolResults(
+  content: readonly { type: string; [key: string]: unknown }[] | undefined
+): ChunkType[] {
+  const sources: ChunkType[] = []
+  for (const part of content ?? []) {
+    if (part.type !== "tool-call") continue
+    if ((part as { toolName?: string }).toolName !== "search_notebook_context")
+      continue
+    const result = (part as { result?: unknown }).result
+    const texts =
+      typeof result === "string"
+        ? [result]
+        : Array.isArray(result)
+          ? result.filter((item): item is string => typeof item === "string")
+          : []
+    for (const text of texts) {
+      for (const match of text.matchAll(SOURCE_BLOCK_REGEX)) {
+        sources.push({
+          source_number: match[1] ? Number.parseInt(match[1], 10) : undefined,
+          filename: match[2],
+          document_id: match[3],
+          chunk_index: Number.parseInt(match[4], 10),
+          content: match[6].trim(),
+          metadata: { chunk_type: match[5] ?? "text" },
+        })
+      }
+    }
+  }
+  return sources
 }
 
 // Fetch a presigned URL for an image chunk. Resets on dependency change and
@@ -340,11 +395,13 @@ function CitationPopover({
   filename,
   chunkIndex,
   documentId,
+  sourceNumber,
 }: {
   citationNumber: string
   filename?: string
   chunkIndex?: number
   documentId?: string
+  sourceNumber?: number
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [isViewerOpen, setIsViewerOpen] = useState(false)
@@ -368,33 +425,70 @@ function CitationPopover({
       )?.references as ReferenceType[] | undefined
   )
   const references = referencesRaw ?? []
+  // Live streaming has no metadata.custom yet — recover sources from the
+  // search tool results embedded in the message content.
+  const messageContent = useAuiState(
+    (s) =>
+      s.message.content as unknown as readonly {
+        type: string
+        [key: string]: unknown
+      }[]
+  )
+  const liveSources = useMemo(
+    () => parseSourcesFromToolResults(messageContent),
+    [messageContent]
+  )
+  const allSources = sources.length > 0 ? sources : liveSources
+
   const citationNumberInt = Number.parseInt(citationNumber, 10)
   const localReference = references.find(
     (ref) => ref.citation_number === citationNumberInt
   )
-  const resolvedFilename = localReference?.filename ?? filename ?? ""
-  const resolvedDocumentId = localReference?.document_id ?? documentId ?? ""
-  const resolvedChunkIndex = localReference?.chunk_index ?? chunkIndex ?? -1
+  // An [S3] citation resolves directly by source number — the most reliable
+  // handle, assigned server-side at retrieval time.
+  const sourceByNumber =
+    sourceNumber !== undefined
+      ? allSources.find((src) => src.source_number === sourceNumber)
+      : undefined
 
-  const localSource = sources.find((src) => {
-    if (resolvedDocumentId) {
-      return (
-        src.document_id === resolvedDocumentId &&
-        src.chunk_index === resolvedChunkIndex
-      )
-    }
-    if (resolvedFilename) {
-      return (
-        src.filename === resolvedFilename &&
-        src.chunk_index === resolvedChunkIndex
-      )
-    }
-    // Fallback: match by chunk index if filename/document_id is not specified in the citation
-    return resolvedChunkIndex >= 0 && src.chunk_index === resolvedChunkIndex
-  })
+  const resolvedFilename =
+    sourceByNumber?.filename ?? localReference?.filename ?? filename ?? ""
+  const resolvedDocumentId =
+    sourceByNumber?.document_id ??
+    localReference?.document_id ??
+    documentId ??
+    ""
+  const resolvedChunkIndex =
+    sourceByNumber?.chunk_index ??
+    localReference?.chunk_index ??
+    chunkIndex ??
+    -1
 
-  const finalDocumentId = resolvedDocumentId || localSource?.document_id || ""
-  const finalFilename = resolvedFilename || localSource?.filename || ""
+  // Cascade instead of trusting the citation's doc_id outright: a model that
+  // mangled the doc_id (but got filename+chunk right) still resolves to the
+  // real source, whose document_id then repairs "View source".
+  const localSource =
+    sourceByNumber ??
+    (resolvedDocumentId
+      ? allSources.find(
+          (src) =>
+            src.document_id === resolvedDocumentId &&
+            src.chunk_index === resolvedChunkIndex
+        )
+      : undefined) ??
+    (resolvedFilename
+      ? allSources.find(
+          (src) =>
+            src.filename === resolvedFilename &&
+            src.chunk_index === resolvedChunkIndex
+        )
+      : undefined) ??
+    (resolvedChunkIndex >= 0
+      ? allSources.find((src) => src.chunk_index === resolvedChunkIndex)
+      : undefined)
+
+  const finalDocumentId = localSource?.document_id || resolvedDocumentId || ""
+  const finalFilename = localSource?.filename || resolvedFilename || ""
 
   const [fetchedSource, setFetchedSource] = useState<ChunkType | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -594,7 +688,9 @@ const CodeBlock: FC<CodeBlockProps> = ({ language, code }) => {
   return (
     <div className="mt-2.5 overflow-hidden rounded-lg border border-border/50">
       <div className="flex items-center justify-between border-b border-border/50 bg-muted/50 px-3 py-1.5 text-xs">
-        <span className="font-medium text-muted-foreground lowercase">{language}</span>
+        <span className="font-medium text-muted-foreground lowercase">
+          {language}
+        </span>
         <TooltipIconButton
           tooltip="Copy"
           onClick={() => {
@@ -710,6 +806,19 @@ const defaultComponents = {
     />
   ),
   a: ({ href, children, className, ...props }: MarkdownLinkProps) => {
+    if (typeof href === "string" && href.startsWith("#citeS/")) {
+      const parts = href.split("/")
+      const numericCitation = Number.parseInt(parts[1], 10)
+      const sourceNumber = Number.parseInt(parts[2], 10)
+      if (!Number.isNaN(numericCitation) && !Number.isNaN(sourceNumber)) {
+        return (
+          <CitationPopover
+            citationNumber={String(numericCitation)}
+            sourceNumber={sourceNumber}
+          />
+        )
+      }
+    }
     if (typeof href === "string" && href.startsWith("#cite/")) {
       const parts = href.split("/")
       const numericCitation = Number.parseInt(parts[1], 10)

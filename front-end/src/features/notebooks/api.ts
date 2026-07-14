@@ -560,6 +560,8 @@ type NotebookChatHistoryMessage = {
     document_id: string
     chunk_index: number
     content: string
+    source_number?: number | null
+    metadata?: Record<string, unknown> | null
   }[]
   references?: {
     ref_id: string
@@ -568,6 +570,7 @@ type NotebookChatHistoryMessage = {
     document_id: string
     chunk_index: number
     content: string
+    metadata?: Record<string, unknown> | null
   }[]
 }
 

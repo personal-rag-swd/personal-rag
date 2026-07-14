@@ -24,7 +24,10 @@ from app.notebooks.models import Notebook
 from app.notebooks.prompt.context_prompts import parse_chunks_from_context_block
 
 CITATION_PATTERN = re.compile(
-    r"\[(?:file=(?P<filename_kv>[^,\]]+)|(?P<filename_legacy>[^,\]]+)),\s*"
+    # Preferred short form: [S3], matching the S-label in the SOURCE header.
+    r"\[S(?P<source_number>\d+)\]"
+    # Legacy verbose forms: [file=..., doc_id=..., chunk=N] / [filename, chunk N].
+    r"|\[(?:file=(?P<filename_kv>[^,\]]+)|(?P<filename_legacy>[^,\]]+)),\s*"
     r"(?:doc_id=(?P<doc_id>[^,\]]+),\s*)?"
     r"chunk(?:=|\s+)(?P<chunk>\d+)"
     r"(?:,\s*doc_id=(?P<doc_id_end>[^,\]]+))?\]"
@@ -109,6 +112,9 @@ async def extract_notebook_chat_transcript(
     # Sources retrieved since the last assistant response; they ground the
     # next assistant turn's citations.
     pending_sources: list[dict[str, object]] = []
+    # The last non-empty retrieval: a follow-up turn answered without a fresh
+    # search cites the previous search's S-labels, so keep them resolvable.
+    last_sources: list[dict[str, object]] = []
 
     for message in messages:
         if isinstance(message, ModelRequest):
@@ -127,6 +133,8 @@ async def extract_notebook_chat_transcript(
             assistant_message_seq += 1
             sources = pending_sources
             pending_sources = []
+            if sources:
+                last_sources = sources
 
             parts = _assistant_parts(
                 message, tool_results, include_reasoning=include_reasoning
@@ -139,8 +147,10 @@ async def extract_notebook_chat_transcript(
                     "role": "assistant",
                     "parts": parts,
                     "sources": sources,
+                    # Resolve against this turn's retrieval, or the previous
+                    # one when the model answered without searching again.
                     "references": _build_references(
-                        parts, sources, assistant_message_seq
+                        parts, sources or last_sources, assistant_message_seq
                     ),
                 }
             )
@@ -254,6 +264,11 @@ def _build_references(
 ) -> list[dict[str, object]]:
     """Resolve inline citations in the assistant text against its sources."""
     source_lookup = _index_sources(sources)
+    number_lookup = {
+        int(source["source_number"]): source  # type: ignore[call-overload]
+        for source in sources
+        if isinstance(source.get("source_number"), int)
+    }
 
     references: list[dict[str, object]] = []
     seen_citations: set[SourceKey] = set()
@@ -263,15 +278,24 @@ def _build_references(
     )
 
     for match in CITATION_PATTERN.finditer(assistant_text):
-        filename = (
-            match.group("filename_kv") or match.group("filename_legacy") or ""
-        ).strip()
-        chunk_index = int(match.group("chunk"))
-        doc_id = (match.group("doc_id") or match.group("doc_id_end") or "").strip()
+        source_number = match.group("source_number")
+        if source_number is not None:
+            source = number_lookup.get(int(source_number))
+            if source is None:
+                continue
+            filename = str(source["filename"])
+            doc_id = str(source["document_id"])
+            chunk_index = int(source["chunk_index"])  # type: ignore[call-overload]
+        else:
+            filename = (
+                match.group("filename_kv") or match.group("filename_legacy") or ""
+            ).strip()
+            chunk_index = int(match.group("chunk"))
+            doc_id = (match.group("doc_id") or match.group("doc_id_end") or "").strip()
 
-        source, doc_id = _resolve_citation_source(
-            filename, doc_id, chunk_index, source_lookup
-        )
+            source, doc_id = _resolve_citation_source(
+                filename, doc_id, chunk_index, source_lookup
+            )
         if source is None:
             continue
 
