@@ -402,18 +402,19 @@ class TestAdminDocumentPreview:
         assert data["preview_type"] == "text"
         assert data["content"] == "secret document body"
 
-    async def test_s3_text_file_rendered_as_text(
+    async def test_s3_text_file_rendered_as_url(
         self, client: AsyncClient, settings: Any, monkeypatch: Any
     ) -> None:
-        # Markdown/plain-text uploads live in S3 (no inline `content`) and the
-        # udoc-viewer cannot render them, so they must come back as text.
         from app.admin import service as admin_service
 
-        async def fake_load_document_bytes(_document: Any, _settings: Any) -> bytes:
-            return b"# Heading\n\nbody"
+        async def fake_head_async(_store: Any, _key: str) -> dict[str, Any]:
+            return {"size": 15}
 
+        monkeypatch.setattr(admin_service.obstore, "head_async", fake_head_async)
         monkeypatch.setattr(
-            admin_service, "load_document_bytes", fake_load_document_bytes
+            admin_service,
+            "generate_presigned_get_url",
+            lambda _settings, *, key, expires_in: "http://minio/presigned.md",
         )
         admin = await create_user(role="admin")
         user = await create_user(role="user")
@@ -436,14 +437,14 @@ class TestAdminDocumentPreview:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["preview_type"] == "text"
-        assert data["content"] == "# Heading\n\nbody"
-        assert data["url"] is None
+        assert data["preview_type"] == "url"
+        assert data["content"] is None
+        assert data["url"] == "http://minio/presigned.md"
 
     async def test_binary_file_rendered_as_url(
         self, client: AsyncClient, settings: Any, monkeypatch: Any
     ) -> None:
-        # PDFs/docx/images go to the udoc-viewer via a presigned URL.
+        # S3-backed documents go to the React document viewer via a presigned URL.
         from app.admin import service as admin_service
 
         async def fake_head_async(_store: Any, _key: str) -> dict[str, Any]:

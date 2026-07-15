@@ -38,7 +38,6 @@ from app.notebooks.models import (
     NotebookDocumentChunk,
     NotebookReport,
 )
-from app.notebooks.service.documents import load_document_bytes
 from app.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -261,31 +260,13 @@ async def delete_document(document_id: UUID) -> None:
     await document.delete()
 
 
-# Content types the ingestion pipeline accepts that the udoc-viewer cannot
-# render (it has no plain-text/markdown engine). These are previewed as text
-# instead; every other accepted type (pdf, docx, images) goes to the viewer.
-_TEXT_PREVIEW_CONTENT_TYPES = {
-    "text/plain",
-    "text/markdown",
-    "text/x-markdown",
-}
-
-
-def _is_text_preview(content_type: str | None) -> bool:
-    if content_type is None:
-        return False
-    normalized = content_type.split(";", maxsplit=1)[0].strip().lower()
-    return normalized in _TEXT_PREVIEW_CONTENT_TYPES
-
-
 async def get_document_preview(
     document_id: UUID, settings: Settings
 ) -> AdminDocumentPreview:
     document = await get_document_or_404(document_id)
 
-    # In-app notes and text/markdown uploads render as text: the udoc-viewer
-    # only handles binary document formats (pdf, docx, images), so text-based
-    # sources must be inlined rather than pointed at via a presigned URL.
+    # In-app notes have no object-storage URL. The client turns this content
+    # into a short-lived Blob URL so every supported format uses one viewer.
     if document.content is not None:
         return AdminDocumentPreview(
             filename=document.filename,
@@ -296,15 +277,6 @@ async def get_document_preview(
         )
     if not document.s3_key:
         raise DocumentContentUnavailableError()
-    if _is_text_preview(document.content_type):
-        raw = await load_document_bytes(document, settings)
-        return AdminDocumentPreview(
-            filename=document.filename,
-            content_type=document.content_type,
-            size=document.size,
-            content=raw.decode("utf-8", errors="replace"),
-            preview_type="text",
-        )
     # Confirm the object still exists before handing back a presigned URL: the
     # DB row can outlive its S3 object (upload never completed, object removed
     # out-of-band), and a URL to a missing object 404s inside the viewer rather

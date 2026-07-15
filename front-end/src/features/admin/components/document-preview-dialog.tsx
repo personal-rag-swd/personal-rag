@@ -1,6 +1,7 @@
+import * as React from "react"
 import { ExternalLink } from "lucide-react"
 
-import { UDocViewer } from "@/components/document-preview/udoc-viewer"
+import { ReactDocViewer } from "@/components/document-preview/react-doc-viewer"
 import { buttonVariants } from "@/components/ui/button"
 import {
   Dialog,
@@ -58,19 +59,21 @@ export function DocumentPreviewDialog({
           </div>
         </DialogHeader>
         <div className="min-h-0 flex-1">
-          {isLoading || !preview ? (
+          {isLoading ? (
             <Skeleton className="h-full w-full" />
           ) : isError ? (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               Failed to load document preview.
             </div>
-          ) : preview.previewType === "text" ? (
-            <pre className="h-full overflow-auto rounded-md border bg-muted/30 p-4 text-sm whitespace-pre-wrap">
-              {preview.content}
-            </pre>
+          ) : !preview ? (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              No preview available.
+            </div>
           ) : preview.url ? (
-            <UDocViewer
+            <ReactDocViewer
               src={preview.url}
+              filename={preview.filename}
+              contentType={preview.contentType}
               fallback={
                 <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
                   <p>Unable to render this document in the viewer.</p>
@@ -85,6 +88,13 @@ export function DocumentPreviewDialog({
                 </div>
               }
             />
+          ) : preview.content !== null ? (
+            <InlineDocumentViewer
+              key={document.id}
+              content={preview.content}
+              filename={preview.filename}
+              contentType={preview.contentType}
+            />
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               No preview available.
@@ -93,5 +103,38 @@ export function DocumentPreviewDialog({
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function InlineDocumentViewer({
+  content,
+  filename,
+  contentType,
+}: {
+  content: string
+  filename: string
+  contentType: string | null
+}) {
+  const [sourceUrl] = React.useState(() =>
+    URL.createObjectURL(
+      new Blob([content], { type: contentType ?? "text/plain" })
+    )
+  )
+
+  React.useEffect(() => {
+    return () => URL.revokeObjectURL(sourceUrl)
+  }, [sourceUrl])
+
+  return (
+    <ReactDocViewer
+      src={sourceUrl}
+      filename={filename}
+      contentType={contentType}
+      fallback={
+        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+          Unable to render this document in the viewer.
+        </div>
+      }
+    />
   )
 }

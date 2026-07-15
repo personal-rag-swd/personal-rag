@@ -17,7 +17,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
-import { UDocViewer } from "@/components/document-preview/udoc-viewer"
+import { ReactDocViewer } from "@/components/document-preview/react-doc-viewer"
 import {
   InputGroup,
   InputGroupAddon,
@@ -705,8 +705,10 @@ function SourcePreviewDialog({
               className="block max-h-full max-w-full object-contain"
             />
           ) : sourceUrl && canRenderInline ? (
-            <UDocViewer
+            <ReactDocViewer
               src={sourceUrl}
+              filename={preview?.filename ?? document.filename}
+              contentType={preview?.contentType ?? document.contentType}
               fallback={
                 <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
                   <AlertCircleIcon className="size-5 text-destructive" />
