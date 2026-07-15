@@ -1,6 +1,6 @@
 import { ExternalLink } from "lucide-react"
 
-import { UDocViewer } from "@/components/document-preview/udoc-viewer"
+import { ReactDocViewer } from "@/components/document-preview/react-doc-viewer"
 import { buttonVariants } from "@/components/ui/button"
 import {
   Dialog,
@@ -69,8 +69,10 @@ export function DocumentPreviewDialog({
               {preview.content}
             </pre>
           ) : preview.url ? (
-            <UDocViewer
+            <ReactDocViewer
               src={preview.url}
+              filename={preview.filename}
+              contentType={preview.contentType}
               fallback={
                 <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
                   <p>Unable to render this document in the viewer.</p>
