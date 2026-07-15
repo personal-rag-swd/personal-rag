@@ -29,6 +29,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Transient chunk-metadata key carrying image bytes through to embed time.
+# Popped before persistence — must never reach Mongo.
+EMBED_IMAGE_BYTES_KEY = "_embed_image_bytes"
+
 # Embedded images smaller than this (in either dimension, px) are almost always
 # logos, icons, bullets, or spacers — not worth a vision call or an index entry.
 _MIN_EMBEDDED_IMAGE_DIMENSION = 64
@@ -54,6 +58,7 @@ def build_image_chunk_document(
     source: str,
     s3_key: str | None,
     media_type: str,
+    image_bytes: bytes,
     page_number: int | None = None,
 ) -> Document:
     """Build the ``image`` chunk Document shared by the direct-image upload and
@@ -61,6 +66,9 @@ def build_image_chunk_document(
 
     ``page_number`` is the 1-based PDF page the image was embedded on; it stays
     ``None`` for standalone image uploads, which have no page concept.
+
+    ``image_bytes`` rides along under ``EMBED_IMAGE_BYTES_KEY`` so the embed
+    step can embed the image directly; it is popped before persistence.
     """
     metadata: dict[str, object] = {
         "source": source,
@@ -69,6 +77,7 @@ def build_image_chunk_document(
         "s3_key": s3_key,
         "s3_bucket": document.s3_bucket,
         "media_type": media_type,
+        EMBED_IMAGE_BYTES_KEY: image_bytes,
     }
     if page_number is not None:
         metadata["page_number"] = page_number
@@ -208,9 +217,10 @@ async def extract_pdf_images(
             source=document.s3_key,
             s3_key=image_key,
             media_type=media_type,
+            image_bytes=data,
             page_number=page_number,
         )
-        for (image_key, _, media_type, _, page_number), description in zip(
+        for (image_key, data, media_type, _, page_number), description in zip(
             images, descriptions, strict=True
         )
     ]

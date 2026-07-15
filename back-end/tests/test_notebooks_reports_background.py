@@ -18,6 +18,35 @@ from tests.conftest import auth_headers, create_notebook, create_user
 pytestmark = pytest.mark.anyio
 
 
+def test_quiz_schema_unwraps_single_key_array_wrappers():
+    """Some OpenRouter models emit arrays as {"item": [...]} in tool arguments.
+
+    Regression test for a quiz generation failure where ``options`` arrived
+    wrapped in a single-key object and ``correct_index`` as a string, which
+    aborted the report with UnexpectedModelBehavior.
+    """
+    from app.notebooks.schemas import QuizReport
+
+    payload = {
+        "questions": [
+            {
+                "question": "What does the acronym stand for?",
+                "options": {"item": ["a", "b", "c", "d"]},
+                "correct_index": "2",
+                "explanation": "Because.",
+            }
+        ]
+    }
+    report = QuizReport.model_validate(payload)
+    assert report.questions[0].options == ["a", "b", "c", "d"]
+    assert report.questions[0].correct_index == 2
+
+    wrapped_questions = QuizReport.model_validate(
+        {"questions": {"item": payload["questions"]}}
+    )
+    assert len(wrapped_questions.questions) == 1
+
+
 @pytest.fixture(autouse=True)
 def _stub_report_model():
     """Return synthetic report output instantly instead of calling the provider.

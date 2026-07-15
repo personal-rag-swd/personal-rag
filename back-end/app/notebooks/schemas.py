@@ -1,8 +1,25 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
+
+
+def _unwrap_list_wrapper(value: object) -> object:
+    """Unwrap `{"item": [...]}`-style single-key dicts around arrays.
+
+    Some OpenRouter-hosted models serialize array arguments in structured
+    output as a single-key object instead of a bare JSON array, which would
+    otherwise fail `list[...]` validation and abort report generation.
+    """
+    if isinstance(value, dict) and len(value) == 1:
+        (inner,) = value.values()
+        if isinstance(inner, list):
+            return inner
+    return value
+
+
+type LenientList[T] = Annotated[list[T], BeforeValidator(_unwrap_list_wrapper)]
 
 
 def normalize_tags(tags: list[str]) -> list[str]:
@@ -156,20 +173,20 @@ class GlossaryEntry(BaseModel):
 
 class QuizItem(BaseModel):
     question: str
-    options: list[str]
+    options: LenientList[str]
     answer: str
     explanation: str
 
 
 class BriefingDocReport(BaseModel):
     executive_summary: str
-    key_takeaways: list[str]
-    strategic_implications: list[str]
+    key_takeaways: LenientList[str]
+    strategic_implications: LenientList[str]
 
 
 class StudyGuideReport(BaseModel):
-    glossary: list[GlossaryEntry]
-    quiz: list[QuizItem]
+    glossary: LenientList[GlossaryEntry]
+    quiz: LenientList[QuizItem]
 
 
 class BlogPostReport(BaseModel):
@@ -204,15 +221,15 @@ class MindMapRelationship(BaseModel):
 
 class MindMapReport(BaseModel):
     central_topic: str = Field(description="Central theme of the documents")
-    nodes: list[MindMapNode] = Field(description="Tree structure nodes")
-    relationships: list[MindMapRelationship] = Field(
+    nodes: LenientList[MindMapNode] = Field(description="Tree structure nodes")
+    relationships: LenientList[MindMapRelationship] = Field(
         default_factory=list, description="Cross-connections"
     )
 
 
 class QuizQuestion(BaseModel):
     question: str = Field(description="The quiz question text")
-    options: list[str] = Field(
+    options: LenientList[str] = Field(
         description="Answer choices for the question; provide exactly 4 options"
     )
     correct_index: int = Field(
@@ -224,7 +241,7 @@ class QuizQuestion(BaseModel):
 
 
 class QuizReport(BaseModel):
-    questions: list[QuizQuestion] = Field(
+    questions: LenientList[QuizQuestion] = Field(
         description="The generated multiple-choice questions"
     )
 
@@ -239,7 +256,9 @@ class FlashcardItem(BaseModel):
 
 
 class FlashcardReport(BaseModel):
-    cards: list[FlashcardItem] = Field(description="The generated study flashcards")
+    cards: LenientList[FlashcardItem] = Field(
+        description="The generated study flashcards"
+    )
 
 
 # ---------------------------------------------------------------------------

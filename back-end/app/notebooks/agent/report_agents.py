@@ -41,40 +41,53 @@ if TYPE_CHECKING:
     # functions below.
     from app.notebooks.service.reports import ReportContext
 
+# Validation-error retries per agent run: some OpenRouter models emit slightly
+# malformed structured output (e.g. arrays wrapped in single-key objects), so
+# give them a few chances to self-correct from the validation error before
+# the report is marked failed.
+_OUTPUT_RETRIES = 3
+
 # Statically defined report agents
 briefing_agent = Agent(
     output_type=BriefingDocReport,
     instructions=BRIEFING_SYSTEM,
+    retries=_OUTPUT_RETRIES,
 )
 
 study_guide_agent = Agent(
     output_type=StudyGuideReport,
     instructions=STUDY_GUIDE_SYSTEM,
+    retries=_OUTPUT_RETRIES,
 )
 
 blog_agent = Agent(
     output_type=BlogPostReport,
     instructions=BLOG_SYSTEM,
+    retries=_OUTPUT_RETRIES,
 )
 
 custom_agent = Agent(
     output_type=CustomReport,
     instructions=CUSTOM_SYSTEM_BASE,
+    retries=_OUTPUT_RETRIES,
 )
 
 mindmap_agent = Agent(
     output_type=MindMapReport,
     instructions=MINDMAP_SYSTEM,
+    retries=_OUTPUT_RETRIES,
 )
 
 quiz_agent = Agent(
     output_type=QuizReport,
     instructions=QUIZ_SYSTEM,
+    retries=_OUTPUT_RETRIES,
 )
 
 flashcards_agent = Agent(
     output_type=FlashcardReport,
     instructions=FLASHCARDS_SYSTEM,
+    retries=_OUTPUT_RETRIES,
 )
 
 

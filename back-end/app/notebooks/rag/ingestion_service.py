@@ -21,7 +21,7 @@ from beanie import SortDirection
 from langchain_core.documents import Document
 
 from app.core.config import Settings
-from app.core.embedding_provider import embed_texts
+from app.core.embedding_provider import embed_image, embed_texts
 from app.core.exceptions import TransientProviderError
 from app.core.s3 import get_object_bytes, get_s3_store
 from app.notebooks.domain_events import (
@@ -48,6 +48,7 @@ from app.notebooks.rag.document_repository import (
     transition_document,
 )
 from app.notebooks.rag.image_ingestion import (
+    EMBED_IMAGE_BYTES_KEY,
     build_image_chunk_document,
     describe_image,
     extract_pdf_images,
@@ -158,6 +159,7 @@ async def _build_split_documents(
                 source=source_key,
                 s3_key=document.s3_key,
                 media_type=media_type,
+                image_bytes=body,
             )
         ]
     else:
@@ -194,11 +196,58 @@ async def _build_split_documents(
     return split_docs
 
 
+async def _embed_image_or_fallback(
+    doc: Document, image_bytes: bytes, expected_dim: int
+) -> tuple[list[float], str]:
+    """Embed an image chunk directly, falling back to text embedding of its
+    description on any non-transient failure.
+
+    ``TransientProviderError`` propagates so the whole document re-queues
+    (same behavior as text embedding today). Any other failure — a rejected
+    payload, or a vector whose dimension doesn't match the index (which would
+    silently break ``$vectorSearch``) — degrades to today's behavior: embed
+    the caption text.
+    """
+    label = doc.metadata.get("s3_key") or doc.metadata.get("source")
+    media_type = doc.metadata.get("media_type", "image/jpeg")
+    try:
+        vector = await embed_image(image_bytes, media_type)
+    except TransientProviderError:
+        raise
+    except Exception:
+        logger.warning(
+            "Direct image embedding failed for %s; falling back to text embedding",
+            label,
+        )
+        return (await embed_texts([doc.page_content]))[0], "text"
+
+    # A vector whose dimension doesn't match the index would silently break
+    # $vectorSearch, so treat it like any other bad payload and fall back.
+    if len(vector) != expected_dim:
+        logger.warning(
+            "Direct image embedding for %s returned %d dims (expected %d); "
+            "falling back to text embedding",
+            label,
+            len(vector),
+            expected_dim,
+        )
+        return (await embed_texts([doc.page_content]))[0], "text"
+
+    return vector, "image"
+
+
 async def _embed_and_persist_chunks(
     document: NotebookDocument,
     split_docs: list[Document],
+    settings: Settings,
 ) -> None:
-    """Embed the chunk texts and replace the document's stored chunks."""
+    """Embed the chunk texts/images and replace the document's stored chunks."""
+    image_bytes_by_index: dict[int, bytes] = {}
+    for idx, split_doc in enumerate(split_docs):
+        image_bytes = split_doc.metadata.pop(EMBED_IMAGE_BYTES_KEY, None)
+        if image_bytes is not None:
+            image_bytes_by_index[idx] = image_bytes
+
     chunk_texts = [doc.page_content for doc in split_docs]
 
     logger.info(
@@ -214,12 +263,38 @@ async def _embed_and_persist_chunks(
         len(split_docs),
         document.filename,
     )
-    embeddings = await embed_texts(chunk_texts)
-    if len(embeddings) != len(chunk_texts):
+
+    text_indices = [
+        idx for idx in range(len(split_docs)) if idx not in image_bytes_by_index
+    ]
+    # Text and image embedding are independent network calls; run them
+    # concurrently so a document with both doesn't pay the sum of both latencies.
+    text_embeddings, image_results = await asyncio.gather(
+        embed_texts([chunk_texts[idx] for idx in text_indices]),
+        asyncio.gather(
+            *(
+                _embed_image_or_fallback(
+                    split_docs[idx], image_bytes, settings.embedding_dimension
+                )
+                for idx, image_bytes in image_bytes_by_index.items()
+            )
+        ),
+    )
+    if len(text_embeddings) != len(text_indices):
         raise ValueError(
-            f"Embedding provider returned {len(embeddings)} embeddings for "
-            f"{len(chunk_texts)} chunks in document {document.filename!r}"
+            f"Embedding provider returned {len(text_embeddings)} embeddings for "
+            f"{len(text_indices)} text chunks in document {document.filename!r}"
         )
+
+    embeddings_by_index: dict[int, list[float]] = dict(
+        zip(text_indices, text_embeddings, strict=True)
+    )
+    sources_by_index: dict[int, str] = dict.fromkeys(text_indices, "text")
+    for idx, (embedding, source) in zip(
+        image_bytes_by_index.keys(), image_results, strict=True
+    ):
+        embeddings_by_index[idx] = embedding
+        sources_by_index[idx] = source
 
     logger.info(
         "Indexing %d chunks in database for %s...", len(split_docs), document.filename
@@ -234,8 +309,11 @@ async def _embed_and_persist_chunks(
                 user_id=document.user_id,
                 chunk_index=idx,
                 content=split_doc.page_content,
-                embedding=embeddings[idx],
-                chunk_metadata=split_doc.metadata,
+                embedding=embeddings_by_index[idx],
+                chunk_metadata={
+                    **split_doc.metadata,
+                    "embedding_source": sources_by_index[idx],
+                },
                 created_at=now,
                 updated_at=now,
             )
@@ -253,7 +331,7 @@ async def _run_document_ingestion(
     split_docs = await _build_split_documents(
         document, body, source_key, settings, store
     )
-    await _embed_and_persist_chunks(document, split_docs)
+    await _embed_and_persist_chunks(document, split_docs, settings)
     await transition_document(document, "indexed", event_cls=DocumentIndexed)
     logger.info(
         "Successfully ingested and indexed document %s (%d chunks).",
