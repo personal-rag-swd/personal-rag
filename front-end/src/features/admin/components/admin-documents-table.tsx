@@ -52,7 +52,7 @@ import {
 } from "../api"
 import type { AdminDocument } from "../types"
 
-// Lazy-loaded so the udoc-viewer WASM wrapper is only fetched when an admin
+// Lazy-loaded so the document viewer bundle is only fetched when an admin
 // actually opens a document preview.
 const DocumentPreviewDialog = React.lazy(() =>
   import("./document-preview-dialog").then((module) => ({
